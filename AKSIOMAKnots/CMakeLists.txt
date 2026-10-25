@@ -58,6 +58,8 @@ qt_add_executable(AKSIOMAKnots
 
 # Icon of the .exe in Windows Explorer (the window icon is set in main.cpp).
 if(WIN32)
+    # a window program: no console window next to it
+    set_target_properties(AKSIOMAKnots PROPERTIES WIN32_EXECUTABLE TRUE)
     target_sources(AKSIOMAKnots PRIVATE app.rc)
     # SHChangeNotify: Explorer shows the icon of .aknot files (appsettings.cpp)
     target_link_libraries(AKSIOMAKnots PRIVATE shell32)

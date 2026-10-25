@@ -54,19 +54,19 @@ HelpTextNote=
 ; *** Startup error messages
 LastErrorMessage=%1.%n%nGabim %2: %3
 SetupFileMissing=Mungon skedari %1 në direktorinë e instalimit. Lutemi të korrigjoni problemin ose të siguroni një kopje tjetër të programit.
-SetupFileCorrupt=Janë dëmtuar skedarët e Instaluesit. Lutemi të përdoret një kopje e re e programit.
-SetupFileCorruptOrWrongVer=Janë dëmtuar skedarët e instaluesit ose nuk përshtaten me këtë version të Instalimit. Lutemi të korrigjoni problemin ose të siguroni një kopje tjetër të programit.
+SetupFileCorrupt=Janë dëmtuar skedarët e instaluesit. Lutemi të përdoret një kopje e re e programit.
+SetupFileCorruptOrWrongVer=Janë dëmtuar skedarët e instaluesit ose nuk përshtaten me këtë version të instalimit. Lutemi të korrigjoni problemin ose të siguroni një kopje tjetër të programit.
 InvalidParameter=Në vijën e komandës u vendos një parametër i pasaktë:%n%n%1
-SetupAlreadyRunning=Është duke vepruar Instaluesi.
+SetupAlreadyRunning=Është duke vepruar instaluesi.
 WindowsVersionNotSupported=Programi nuk përshtatet me këtë version të Windows-it.
-WindowsServicePackRequired=Programi ka nevojë për %1 me Paketë Sigurie %2 ose më të re.
+WindowsServicePackRequired=Programi ka nevojë për %1 me paketën e shërbimit (Service Pack) %2 ose më të re.
 NotOnThisPlatform=Programi nuk do të veprojë në %1.
 OnlyOnThisPlatform=Programi duhet të veprojë në %1.
 OnlyOnTheseArchitectures=Programi mund të instalohet vetëm në versionet e Windows-it me procesorë për këto modele arkitekturore:%n%n%1
 WinVersionTooLowError=Programi ka nevojë për %1 në versionin %2 a më të ri.
 WinVersionTooHighError=Programi nuk mund të instalohet në %1 në versionin %2 a më të ri.
 AdminPrivilegesRequired=Instalimi i programit duhet kryer nga administratori.
-PowerUserPrivilegesRequired=Instalimi i programi duhet kryer nga administratori ose nga një Përdorues me privilegje.
+PowerUserPrivilegesRequired=Instalimi i programit duhet kryer nga administratori ose nga një përdorues me privilegje.
 SetupAppRunningError=Instaluesi vëren se aktualisht po vepron %1.%n%nLutemi ta mbyllni dhe të vijoni duke klikuar OK, ose Anuloj për t'u larguar.
 UninstallAppRunningError=Çinstaluesi vëren se aktualisht po vepron %1.%n%nLutemi ta mbyllni dhe të vijoni duke klikuar OK, ose Anuloj për t'u larguar.
 
@@ -86,9 +86,9 @@ ErrorTooManyFilesInDir=Nuk mund të krijohen skedarë në direktorinë "%1", sep
 
 ; *** Setup common messages
 ExitSetupTitle=Mbyllet instaluesi
-ExitSetupMessage=Instalimi nuk ka përfunduar. Programi nuk do të instalohet nëse e mbyllni.%n%nQë instalimi të përfundojë, mund ta hapni Instaluesin një herë tjetër.%n%nDo e mbyllni Instaluesin?
-AboutSetupMenuItem=&Për Instalimin...
-AboutSetupTitle=Për Instalimin
+ExitSetupMessage=Instalimi nuk ka përfunduar. Programi nuk do të instalohet nëse e mbyllni.%n%nQë instalimi të përfundojë, mund ta hapni instaluesin një herë tjetër.%n%nDo e mbyllni instaluesin?
+AboutSetupMenuItem=&Për instalimin...
+AboutSetupTitle=Për instalimin
 AboutSetupMessage=%1 versioni %2%n%3%n%n%1 faqja zyrtare:%n%4
 AboutSetupNote=
 TranslatorNote=
@@ -113,14 +113,14 @@ SelectLanguageTitle=Zgjidhet gjuha e instaluesit
 SelectLanguageLabel=Zgjidhni gjuhën e përdorur gjatë instalimit.
 
 ; *** Common wizard text
-ClickNext=Vijoni duke klikuar Tjetër ose Anuloj për ta mbyllur Instaluesin.
+ClickNext=Vijoni duke klikuar Tjetër ose Anuloj për ta mbyllur instaluesin.
 BeveledLabel=
 BrowseDialogTitle=Shfletohet dosja
 BrowseDialogLabel=Zgjidhni dosjen nga kjo listë, pastaj klikoni OK.
 NewFolderName=Dosje të re
 
 ; *** "Welcome" wizard page
-WelcomeLabel1=Mirësevini te Udhërrëfyesi për Instalimin e [name]
+WelcomeLabel1=Mirësevini te udhërrëfyesi për instalimin e [name]
 WelcomeLabel2=[name/ver] do të instalohet në kompjuter.%n%nRekomandohet të mbyllen aplikacionet e tjera para se të vijoni.
 
 ; *** "Password" wizard page
@@ -133,17 +133,17 @@ IncorrectPassword=Fjalëkalimi nuk është i saktë. Lutemi ta provoni prapë.
 ; *** "License Agreement" wizard page
 WizardLicense=Marrëveshja e licensimit
 LicenseLabel=Lutemi ta lexoni këtë informacion të rëndësishëm para se të vijoni.
-LicenseLabel3=Lutemi ta lexoni Marrëveshjen e licensimit. Duhet të pranoni detyrimet e marrëveshjes para se të vijoni me instalimin.
+LicenseLabel3=Lutemi ta lexoni marrëveshjen e licensimit. Duhet të pranoni detyrimet e marrëveshjes para se të vijoni me instalimin.
 LicenseAccepted=&Pranoj marrëveshjen
 LicenseNotAccepted=&Nuk e pranoj marrëveshjen
 
 ; *** "Information" wizard pages
 WizardInfoBefore=Informacion
 InfoBeforeLabel=Lutemi të lexohet ky informacion i rëndësishëm para se të vijoni.
-InfoBeforeClickLabel=Kur të jeni gati për të vijuar me Instalimin, klikoni Tjetër.
+InfoBeforeClickLabel=Kur të jeni gati për të vijuar me instalimin, klikoni Tjetër.
 WizardInfoAfter=Informacion
 InfoAfterLabel=Lutemi të lexohet ky informacion i rëndësishëm para se të vijoni.
-InfoAfterClickLabel=Kur të jeni gati për të vijuar me Instalimin, klikoni Tjetër.
+InfoAfterClickLabel=Kur të jeni gati për të vijuar me instalimin, klikoni Tjetër.
 
 ; *** "User Information" wizard page
 WizardUserInfo=Informacion mbi përdoruesin
@@ -192,18 +192,18 @@ ComponentsDiskSpaceMBLabel=Kjo zgjedhje kërkon jo më pak se [mb] MB hapësirë
 ; *** "Select Additional Tasks" wizard page
 WizardSelectTasks=Zgjidhen detyrat shtesë
 SelectTasksDesc=Çfarë detyrash të tjera do të kryhen?
-SelectTasksLabel2=Zgjidhni detyrat shtesë që duhet të kryejë Instaluesi kur të instalojë [name], pastaj klikoni Tjetër.
+SelectTasksLabel2=Zgjidhni detyrat shtesë që duhet të kryejë instaluesi kur të instalojë [name], pastaj klikoni Tjetër.
 
 ; *** "Select Start Menu Folder" wizard page
-WizardSelectProgramGroup=Zgjidhet dosja në Menynë Nis
+WizardSelectProgramGroup=Zgjidhet dosja në menynë Start
 SelectStartMenuFolderDesc=Ku do të vendosen shkurtoret e programit?
-SelectStartMenuFolderLabel3=Shkurtoret e programit do të krijohen në këtë dosje të Menysë Nis.
+SelectStartMenuFolderLabel3=Shkurtoret e programit do të krijohen në këtë dosje të menysë Start.
 SelectStartMenuFolderBrowseLabel=Për të vijuar, klikoni Tjetër. Për të zgjedhur një dosje të ndryshme, klikoni Shfletoj.
 MustEnterGroupName=Duhet vendosur emri i dosjes.
 GroupNameTooLong=Është tepër i gjatë emri ose shtegu i dosjes.
 InvalidGroupName=Emri i dosjes nuk është i saktë.
 BadGroupName=Emri i dosjes nuk duhet të përmbajë asnjë nga këto shkronja:%n%n%1
-NoProgramGroupCheck2=&Nuk krijoj dosje në Menynë Nis
+NoProgramGroupCheck2=&Nuk krijoj dosje në menynë Start
 
 ; *** "Ready to Install" wizard page
 WizardReady=Gati për instalim
@@ -214,7 +214,7 @@ ReadyMemoUserInfo=Informacion mbi përdoruesin:
 ReadyMemoDir=Destinacioni:
 ReadyMemoType=Lloji i instalimit:
 ReadyMemoComponents=Komponentët e zgjedhur:
-ReadyMemoGroup=Dosja në Menynë Nis:
+ReadyMemoGroup=Dosja në menynë Start:
 ReadyMemoTasks=Detyrat shtesë:
 
 ; *** TDownloadWizardPage wizard page and DownloadTemporaryFile
@@ -240,26 +240,26 @@ ArchiveUnsupportedFormat=Formati i arkivit nuk mbështetet
 ; *** "Preparing to Install" wizard page
 WizardPreparing=Gati për instalim
 PreparingDesc=Instaluesi është gati për instalimin e [name] në kompjuter.
-PreviousInstallNotCompleted=Nuk ka përfunduar instalimi/heqja e programit të mëparshëm. Instalimi do të përfundojë kur kompjuteri të rinisë.%n%nPas rinisjes, hapeni sërish Instaluesin që të përfundojë instalimin e [name].
+PreviousInstallNotCompleted=Nuk ka përfunduar instalimi/heqja e programit të mëparshëm. Instalimi do të përfundojë kur kompjuteri të rinisë.%n%nPas rinisjes, hapeni sërish instaluesin që të përfundojë instalimin e [name].
 CannotContinue=Instalimi nuk mund të vijojë. Lutemi të mbyllet duke klikuar Anuloj.
-ApplicationsFound=Këto aplikacione përdorin skedarë që do të përditësohen. Rekomandohet që Instaluesi t'i mbyllë ata automatikisht me lejen tuaj.
-ApplicationsFound2=Këto aplikacione përdorin skedarë që do të përditësohen. Rekomandohet që Instaluesi t'i mbyllë ata automatikisht me lejen tuaj. Pasi instalimi të përfundojë, Instaluesi do të tentojë t'i hapë sërish.
+ApplicationsFound=Këto aplikacione përdorin skedarë që do të përditësohen. Rekomandohet që instaluesi t'i mbyllë ata automatikisht me lejen tuaj.
+ApplicationsFound2=Këto aplikacione përdorin skedarë që do të përditësohen. Rekomandohet që instaluesi t'i mbyllë ata automatikisht me lejen tuaj. Pasi instalimi të përfundojë, instaluesi do të tentojë t'i hapë sërish.
 CloseApplications=&Mbyll automatikisht aplikacionet
 DontCloseApplications=&Mos i mbyll aplikacionet
 ErrorCloseApplications=Jo të gjitha aplikacionet u mbyllën automatikisht. Rekomandohet të mbyllen të gjithë skedarët para se të vijojë përditësimi.
-PrepareToInstallNeedsRestart=Duhet rinisur kompjuteri për arsye të instalimit. Pas rinisjes së kompjuterit, hapeni sërish Instaluesin që të përfundojë instalimin e [name].%n%nDoni ta rinisni tani kompjuterin?
+PrepareToInstallNeedsRestart=Duhet rinisur kompjuteri për arsye të instalimit. Pas rinisjes së kompjuterit, hapeni sërish instaluesin që të përfundojë instalimin e [name].%n%nDoni ta rinisni tani kompjuterin?
 
 ; *** "Installing" wizard page
 WizardInstalling=Instalim
-InstallingLabel=Kini durim që Instaluesi të instalojë [name] në kompjuter.
+InstallingLabel=Kini durim që instaluesi të instalojë [name] në kompjuter.
 
 ; *** "Setup Completed" wizard page
-FinishedHeadingLabel=Përfundon udhërrëfimi për Instalimin e [name]
+FinishedHeadingLabel=Përfundon udhërrëfimi për instalimin e [name]
 FinishedLabelNoIcons=Instaluesi përfundoi instalimin në kompjuter të [name].
 FinishedLabel=Instaluesi përfundoi instalimin në kompjuter të [name]. Aplikacioni mund të hapet me anë të ikonës së instaluar.
-ClickFinish=Klikoni Përfundoj për ta mbyllur Instaluesin.
-FinishedRestartLabel=Duhet të riniset kompjuteri që Instaluesi të përfundojë instalimin e [name]. Doni ta rinisni tani kompjuterin?
-FinishedRestartMessage=Duhet të riniset kompjuteri që Instaluesi të përfundojë instalimin e [name].%n%nDoni ta rinisni tani kompjuterin?
+ClickFinish=Klikoni Përfundoj për ta mbyllur instaluesin.
+FinishedRestartLabel=Duhet të riniset kompjuteri që instaluesi të përfundojë instalimin e [name]. Doni ta rinisni tani kompjuterin?
+FinishedRestartMessage=Duhet të riniset kompjuteri që instaluesi të përfundojë instalimin e [name].%n%nDoni ta rinisni tani kompjuterin?
 ShowReadmeCheck=Po, dua të shoh skedarin README
 YesRadio=&Po, rinis kompjuterin tani
 NoRadio=&Jo, do e rinis kompjuterin më vonë
@@ -270,7 +270,7 @@ RunEntryShellExec=Shoh %1
 
 ; *** "Setup Needs the Next Disk" stuff
 ChangeDiskTitle=Instaluesi kërkon diskun tjetër
-SelectDiskLabel2=Lutemi të vendoset Disku %1 dhe klikoni OK.%n%nNëse skedarët në disk ndodhen në një dosje të ndryshme, përcaktoni shtegun e saktë ose klikoni Shfletoj.
+SelectDiskLabel2=Lutemi të vendoset disku %1 dhe klikoni OK.%n%nNëse skedarët në disk ndodhen në një dosje të ndryshme, përcaktoni shtegun e saktë ose klikoni Shfletoj.
 PathLabel=&Shtegu:
 FileNotInDir2=Skedari "%1" nuk ndodhet në "%2". Lutemi të vendoset disku i saktë ose të zgjidhet një dosje e ndryshme.
 SelectDirectoryLabel=Lutemi të përcaktohet vendi i diskut tjetër.
@@ -337,7 +337,7 @@ FileExistsOverwriteExisting=&Mbishkruaj skedarin ekzistues
 FileExistsKeepExisting=&Mbaj skedarin ekzistues
 FileExistsOverwriteOrKeepAll=&Veproj njësoj për rastet e tjera
 ExistingFileNewerSelectAction=Zgjidhni veprimin
-ExistingFileNewer2=Skedari ekzistues është më i ri sesa ai që Instaluesi po provon të instalojë.
+ExistingFileNewer2=Skedari ekzistues është më i ri sesa ai që instaluesi po provon të instalojë.
 ExistingFileNewerOverwriteExisting=&Mbishkruaj skedarin ekzistues
 ExistingFileNewerKeepExisting=&Mbaj skedarin ekzistues (rekomandohet)
 ExistingFileNewerOverwriteOrKeepAll=&Veproj njësoj për rastet e tjera
@@ -383,8 +383,8 @@ UninstalledAndNeedsRestart=Duhet rinisur kompjuteri që të përfundojë çinsta
 UninstallDataCorrupted=Skedari "%1" është dëmtuar. Nuk mund të çinstalohet
 
 ; *** Uninstallation phase messages
-ConfirmDeleteSharedFileTitle=Do e fshini skedarin e ndarë?
-ConfirmDeleteSharedFile2=Ky skedar i ndarë nuk përdoret më nga programet, sipas sistemit. Doni që Çinstalimi ta fshijë skedarin?%n%nNëse skedari është duke u përdorur nga ndonjë program tjetër, ai mund të mos punojë siç duhet. Nëse nuk jeni të sigurt, zgjidhni Jo. Nuk ka dëm nga mbajtja e skedarit në sistem.
+ConfirmDeleteSharedFileTitle=Do ta fshini skedarin e ndarë?
+ConfirmDeleteSharedFile2=Ky skedar i ndarë nuk përdoret më nga programet, sipas sistemit. Doni që çinstalimi ta fshijë skedarin?%n%nNëse skedari është duke u përdorur nga ndonjë program tjetër, ai mund të mos punojë siç duhet. Nëse nuk jeni të sigurt, zgjidhni Jo. Nuk ka dëm nga mbajtja e skedarit në sistem.
 SharedFileNameLabel=Emri i skedarit:
 SharedFileLocationLabel=Vendi:
 WizardUninstalling=Statusi i çinstalimit
