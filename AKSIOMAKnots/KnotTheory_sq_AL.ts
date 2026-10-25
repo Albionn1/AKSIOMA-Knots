@@ -547,14 +547,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>e majtë</translation>
     </message>
     <message>
-        <source>Built-in exact class; numerical geometry diagnostics shown below.</source>
-        <translation>Klasë e saktë e integruar; diagnostikimi numerik i gjeometrisë tregohet më poshtë.</translation>
-    </message>
-    <message>
-        <source>Built-in exact class; numerical writhe and projection crossing count are supplementary.</source>
-        <translation>Klasë e saktë e integruar; përdredhja numerike dhe numri i kryqëzimeve të projeksionit janë plotësuese.</translation>
-    </message>
-    <message>
         <source>Trefoil Knot (3_1)</source>
         <translation>Nyja trefletëshe (3_1)</translation>
     </message>
@@ -563,28 +555,8 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Nyja pesëfletëshe (5_1)</translation>
     </message>
     <message>
-        <source>Custom torus geometry</source>
-        <translation>Gjeometri torike e personalizuar</translation>
-    </message>
-    <message>
-        <source>Numerical crossing count and writhe; symbolic torus metadata supplied separately.</source>
-        <translation>Numri i kryqëzimeve dhe përdredhja janë numerike; të dhënat simbolike torike jepen veçmas.</translation>
-    </message>
-    <message>
         <source>From the knot table; writhe and projection crossings are computed from the 3D curve.</source>
         <translation>Nga tabela e nyjeve; përdredhja dhe kryqëzimet e projeksionit llogariten nga kurba 3D.</translation>
-    </message>
-    <message>
-        <source>Custom closed geometry</source>
-        <translation>Gjeometri e mbyllur e personalizuar</translation>
-    </message>
-    <message>
-        <source>Custom open curve</source>
-        <translation>Kurbë e hapur e personalizuar</translation>
-    </message>
-    <message>
-        <source>No knot type is inferred rigorously from geometry alone; diagnostics are numerical.</source>
-        <translation>Asnjë lloj nyjeje nuk nxirret me rigorozitet vetëm nga gjeometria; diagnostikimi është numerik.</translation>
     </message>
     <message>
         <source>Alexander polynomial computed exactly (Fox calculus) from a projection with %1 crossings and confirmed on a second projection.</source>
@@ -626,6 +598,30 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Writhe and crossing count are numerical.</source>
         <translation>Përdredhja dhe numri i kryqëzimeve janë numerike.</translation>
+    </message>
+    <message>
+        <source>Exact values for this knot type. The writhe and the crossings are measured on the 3D curve on screen.</source>
+        <translation>Vlera të sakta për këtë lloj nyje. Përdredhja dhe kryqëzimet maten në kurbën 3D në ekran.</translation>
+    </message>
+    <message>
+        <source>Torus knot T(%1, %2)</source>
+        <translation>Nyjë torike T(%1, %2)</translation>
+    </message>
+    <message>
+        <source>The writhe and the crossings are measured on the 3D curve on screen.</source>
+        <translation>Përdredhja dhe kryqëzimet maten në kurbën 3D në ekran.</translation>
+    </message>
+    <message>
+        <source>Custom knot</source>
+        <translation>Nyjë e personalizuar</translation>
+    </message>
+    <message>
+        <source>Open curve</source>
+        <translation>Kurbë e hapur</translation>
+    </message>
+    <message>
+        <source>The knot type cannot be read off the shape alone. The values are measured on the 3D curve on screen.</source>
+        <translation>Lloji i nyjës nuk mund të njihet vetëm nga forma. Vlerat maten në kurbën 3D në ekran.</translation>
     </message>
     <message>
         <source>Alexander polynomial: %1</source>
@@ -855,6 +851,14 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>The Seifert matrix failed its check (det(V - V^T) = 1).</source>
         <translation>Matrica e Seifertit nuk e kaloi kontrollin (det(V - V^T) = 1).</translation>
+    </message>
+    <message>
+        <source>Both knots must be closed curves.</source>
+        <translation>Të dyja nyjet duhet të jenë kurba të mbyllura.</translation>
+    </message>
+    <message>
+        <source>No way was found to place the two knots side by side with an arc of each facing the other. Try a thinner tube.</source>
+        <translation>Nuk u gjet mënyrë për t’i vendosur dy nyjet krah njëra-tjetrës me nga një hark përballë tjetrës. Provoni një tub më të hollë.</translation>
     </message>
 </context>
 <context>
@@ -1230,6 +1234,14 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Ushtrime mbi diagramin e nyjës: trengjyrësimi, shenjat e kryqëzimeve</translation>
     </message>
     <message>
+        <source>GENERAL</source>
+        <translation>TË PËRGJITHSHME</translation>
+    </message>
+    <message>
+        <source>LIGHTING</source>
+        <translation>NDRIÇIMI</translation>
+    </message>
+    <message>
         <source>RELAX</source>
         <translation>RELAKSIMI</translation>
     </message>
@@ -1260,6 +1272,38 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Step by step (pause at every stage)</source>
         <translation>Hap pas hapi (ndalo në çdo fazë)</translation>
+    </message>
+    <message>
+        <source>JOIN TWO KNOTS</source>
+        <translation>BASHKO DY NYJE</translation>
+    </message>
+    <message>
+        <source>Cut a small arc out of the current knot and out of a second knot, and join the four loose ends with a band: the two become one knot, their connected sum K₁ # K₂.</source>
+        <translation>Prisni një hark të vogël nga nyja e tanishme dhe nga një nyjë e dytë, dhe bashkoni katër skajet e lira me një shirit: të dyja bëhen një nyjë, shuma e tyre e lidhur K₁ # K₂.</translation>
+    </message>
+    <message>
+        <source>Second knot</source>
+        <translation>Nyja e dytë</translation>
+    </message>
+    <message>
+        <source>Same as the current knot</source>
+        <translation>E njëjtë me nyjën e tanishme</translation>
+    </message>
+    <message>
+        <source>From the knot table...</source>
+        <translation>Nga tabela e nyjeve...</translation>
+    </message>
+    <message>
+        <source>Mirror image of the second knot</source>
+        <translation>Pasqyrimi i nyjës së dytë</translation>
+    </message>
+    <message>
+        <source>Two trefoils of the same handedness give the granny knot; with the mirror image they give the square knot.</source>
+        <translation>Dy nyje trefletëshe me të njëjtin drejtim japin nyjën “granny”; me pasqyrimin japin nyjën katrore.</translation>
+    </message>
+    <message>
+        <source>▶  JOIN</source>
+        <translation>▶  BASHKO</translation>
     </message>
     <message>
         <source>SEIFERT SURFACE</source>
@@ -1370,6 +1414,194 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Të rikthehen të gjitha cilësimet në vlerat e parazgjedhura?</translation>
     </message>
     <message>
+        <source>PRESET</source>
+        <translation>PARACAKTIMI</translation>
+    </message>
+    <message>
+        <source>Studio</source>
+        <translation>Studio</translation>
+    </message>
+    <message>
+        <source>Soft</source>
+        <translation>E butë</translation>
+    </message>
+    <message>
+        <source>Dramatic</source>
+        <translation>Dramatike</translation>
+    </message>
+    <message>
+        <source>Flat</source>
+        <translation>E njëtrajtshme</translation>
+    </message>
+    <message>
+        <source>Custom</source>
+        <translation>E personalizuar</translation>
+    </message>
+    <message>
+        <source>LIGHTS</source>
+        <translation>DRITAT</translation>
+    </message>
+    <message>
+        <source>Key light</source>
+        <translation>Drita kryesore</translation>
+    </message>
+    <message>
+        <source>The main light, high on the left. Without it nothing casts a shadow.</source>
+        <translation>Drita kryesore, lart majtas. Pa të asgjë nuk hedh hije.</translation>
+    </message>
+    <message>
+        <source>Fill light</source>
+        <translation>Drita mbushëse</translation>
+    </message>
+    <message>
+        <source>A weak light low on the right that brightens the shaded side.</source>
+        <translation>Një dritë e dobët poshtë djathtas që ndriçon anën në hije.</translation>
+    </message>
+    <message>
+        <source>Rim light</source>
+        <translation>Drita e konturit</translation>
+    </message>
+    <message>
+        <source>A light behind the knot that outlines its edges.</source>
+        <translation>Një dritë pas nyjës që ia nxjerr në pah skajet.</translation>
+    </message>
+    <message>
+        <source>Reflections</source>
+        <translation>Pasqyrimet</translation>
+    </message>
+    <message>
+        <source>The studio lights seen in shiny surfaces.</source>
+        <translation>Dritat e studios që shihen në sipërfaqet e shndritshme.</translation>
+    </message>
+    <message>
+        <source>Lights turn with the camera</source>
+        <translation>Dritat rrotullohen me kamerën</translation>
+    </message>
+    <message>
+        <source>The knot is always lit from the side. Off: the lights stay in place while you turn the view.</source>
+        <translation>Nyja ndriçohet gjithmonë nga anash. E fikur: dritat qëndrojnë në vend ndërsa rrotulloni pamjen.</translation>
+    </message>
+    <message>
+        <source>Brightness</source>
+        <translation>Shkëlqimi</translation>
+    </message>
+    <message>
+        <source>SHADOWS</source>
+        <translation>HIJET</translation>
+    </message>
+    <message>
+        <source>Shadows on the knot</source>
+        <translation>Hijet mbi nyjë</translation>
+    </message>
+    <message>
+        <source>Strands cast shadows on each other and on the Seifert surface.</source>
+        <translation>Fijet hedhin hije mbi njëra-tjetrën dhe mbi sipërfaqen e Seifertit.</translation>
+    </message>
+    <message>
+        <source>Shadow on the floor</source>
+        <translation>Hija në dysheme</translation>
+    </message>
+    <message>
+        <source>The shadow the key light casts on the floor.</source>
+        <translation>Hija që drita kryesore hedh në dysheme.</translation>
+    </message>
+    <message>
+        <source>Contact shadow</source>
+        <translation>Hija e kontaktit</translation>
+    </message>
+    <message>
+        <source>The soft dark patch right under the knot.</source>
+        <translation>Njolla e butë e errët menjëherë poshtë nyjës.</translation>
+    </message>
+    <message>
+        <source>Ambient occlusion</source>
+        <translation>Errësimi i mjedisit</translation>
+    </message>
+    <message>
+        <source>Darker where strands come close to each other.</source>
+        <translation>Më e errët aty ku fijet afrohen me njëra-tjetrën.</translation>
+    </message>
+    <message>
+        <source>Shadow softness</source>
+        <translation>Butësia e hijeve</translation>
+    </message>
+    <message>
+        <source>Shadow quality</source>
+        <translation>Cilësia e hijeve</translation>
+    </message>
+    <message>
+        <source>Sharper shadow edges need a larger shadow map in video memory.</source>
+        <translation>Skajet më të mprehta të hijeve kërkojnë një hartë hijesh më të madhe në memorien e videos.</translation>
+    </message>
+    <message>
+        <source>Low (4 MB)</source>
+        <translation>E ulët (4 MB)</translation>
+    </message>
+    <message>
+        <source>Medium (16 MB)</source>
+        <translation>Mesatare (16 MB)</translation>
+    </message>
+    <message>
+        <source>High (64 MB)</source>
+        <translation>E lartë (64 MB)</translation>
+    </message>
+    <message>
+        <source>SCENE</source>
+        <translation>SKENA</translation>
+    </message>
+    <message>
+        <source>Floor grid</source>
+        <translation>Rrjeta e dyshemesë</translation>
+    </message>
+    <message>
+        <source>The lines on the floor under the knot.</source>
+        <translation>Vijat në dysheme poshtë nyjës.</translation>
+    </message>
+    <message>
+        <source>GRAPHICS MEMORY</source>
+        <translation>MEMORIA GRAFIKE</translation>
+    </message>
+    <message>
+        <source>Three lights and soft boxes around the camera, with shadows: the full look.</source>
+        <translation>Tri drita dhe kuti drite rreth kamerës, me hije: pamja e plotë.</translation>
+    </message>
+    <message>
+        <source>Gentle light and wide, soft shadows, without the rim light.</source>
+        <translation>Dritë e butë dhe hije të gjera e të buta, pa dritën e konturit.</translation>
+    </message>
+    <message>
+        <source>No fill light: deep, crisp shadows and strong contrast.</source>
+        <translation>Pa dritë mbushëse: hije të thella e të mprehta dhe kontrast i fortë.</translation>
+    </message>
+    <message>
+        <source>Even light without shadows or reflections: clear on paper and on projectors.</source>
+        <translation>Dritë e njëtrajtshme pa hije e pa pasqyrime: e qartë në letër dhe në projektor.</translation>
+    </message>
+    <message>
+        <source>Your own combination of the settings below.</source>
+        <translation>Kombinimi juaj i cilësimeve më poshtë.</translation>
+    </message>
+    <message>
+        <source>This program: %1 of %2 (graphics memory shared with the main memory)</source>
+        <translation>Ky program: %1 nga %2 (memoria grafike ndahet me memorien kryesore)</translation>
+    </message>
+    <message>
+        <source>This program: %1 of %2 video memory</source>
+        <translation>Ky program: %1 nga %2 memorie videoje</translation>
+    </message>
+    <message>
+        <source>The video memory cannot be read on this system.</source>
+        <translation>Memoria e videos nuk mund të lexohet në këtë sistem.</translation>
+    </message>
+    <message>
+        <source>3D view in total (estimate): %1</source>
+        <translation>Pamja 3D gjithsej (vlerësim): %1</translation>
+    </message>
+    <message>
+        <source>3D view (estimate): knot %1, shadow map %2, picture buffers %3, floor %4. The rest is the window and its panels.</source>
+        <translation>Pamja 3D (vlerësim): nyja %1, harta e hijeve %2, buferat e figurës %3, dyshemeja %4. Pjesa tjetër është dritarja dhe panelet e saj.</translation>
+    </message>
+    <message>
         <source>Leave full screen  (F11)</source>
         <translation>Dil nga ekrani i plotë  (F11)</translation>
     </message>
@@ -1458,8 +1690,8 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Krijimi i rrjetës së tubit dështoi.</translation>
     </message>
     <message>
-        <source>%1 (minimum %2)</source>
-        <translation>%1 (minimumi %2)</translation>
+        <source>in this view; at least %1</source>
+        <translation>në këtë pamje; të paktën %1</translation>
     </message>
     <message>
         <source>Choose Tube Color</source>
@@ -1836,6 +2068,90 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>No strand passed through another, so this is still the same knot. Scramble it again, or press Reset to go back to the original.</source>
         <translation>Asnjë fije nuk kaloi nëpër një tjetër, kështu që kjo është ende e njëjta nyjë. Ngatërrojeni përsëri, ose shtypni Rikthe për t&apos;u kthyer te origjinali.</translation>
+    </message>
+    <message>
+        <source>Stopped.</source>
+        <translation>U ndal.</translation>
+    </message>
+    <message>
+        <source>Joining needs a single closed knot. Choose a knot preset, a table knot or a custom closed curve.</source>
+        <translation>Bashkimi kërkon një nyjë të vetme të mbyllur. Zgjidhni një nyjë të gatshme, një nyjë nga tabela ose një kurbë të mbyllur të personalizuar.</translation>
+    </message>
+    <message>
+        <source>the granny knot</source>
+        <translation>nyja “granny”</translation>
+    </message>
+    <message>
+        <source>the square knot</source>
+        <translation>nyja katrore</translation>
+    </message>
+    <message>
+        <source>the same knot as the second one: joining the unknot changes nothing</source>
+        <translation>e njëjta nyjë si e dyta: bashkimi me nyjën triviale nuk ndryshon asgjë</translation>
+    </message>
+    <message>
+        <source>■  STOP</source>
+        <translation>■  NDALO</translation>
+    </message>
+    <message>
+        <source>1 / 4  Two knots</source>
+        <translation>1 / 4  Dy nyje</translation>
+    </message>
+    <message>
+        <source>The two knots are placed side by side, each turned so that one of its arcs faces the other knot.</source>
+        <translation>Dy nyjet vendosen krah njëra-tjetrës, secila e kthyer që një nga harqet e saj të jetë përballë nyjës tjetër.</translation>
+    </message>
+    <message>
+        <source>2 / 4  Cut</source>
+        <translation>2 / 4  Prerja</translation>
+    </message>
+    <message>
+        <source>A small arc is cut out of each knot. Beyond the cut there is nothing else of either knot.</source>
+        <translation>Nga secila nyjë pritet një hark i vogël. Përtej prerjes nuk ka asgjë tjetër nga asnjëra nyjë.</translation>
+    </message>
+    <message>
+        <source>3 / 4  The band</source>
+        <translation>3 / 4  Shiriti</translation>
+    </message>
+    <message>
+        <source>Two strands join the four loose ends. They run straight across the gap, so the band adds no knotting of its own.</source>
+        <translation>Dy fije bashkojnë katër skajet e lira. Ato e kalojnë hapësirën drejt, ndaj shiriti nuk shton asnjë nyjëzim të vetin.</translation>
+    </message>
+    <message>
+        <source>4 / 4  One knot</source>
+        <translation>4 / 4  Një nyjë</translation>
+    </message>
+    <message>
+        <source>The two knots are one now: %1. A plane between the two halves meets it in just two points.</source>
+        <translation>Dy nyjet tani janë një: %1. Një plan midis dy gjysmave e pret atë vetëm në dy pika.</translation>
+    </message>
+    <message>
+        <source>Connected sum %1</source>
+        <translation>Shuma e lidhur %1</translation>
+    </message>
+    <message>
+        <source>Its Alexander and Jones polynomials are the products of those of the two knots (see Analysis), its genus is the sum of theirs. So a sum of two knotted knots can never be undone. Press Relax above to watch it settle into its own shape.</source>
+        <translation>Polinomet e Aleksandrit dhe të Jonesit të saj janë prodhimet e atyre të dy nyjeve (shihni Analizën), gjinia e saj është shuma e gjinive të tyre. Prandaj shuma e dy nyjeve jotriviale nuk mund të zgjidhet kurrë. Shtypni Relakso më lart për ta parë të marrë formën e vet.</translation>
+    </message>
+    <message>
+        <source>Two trefoils of the same handedness give the granny knot, of opposite handedness the square knot: the same Alexander polynomial, but different Jones polynomials.</source>
+        <translation>Dy nyje trefletëshe me të njëjtin drejtim japin nyjën “granny”, me drejtime të kundërta nyjën katrore: i njëjti polinom i Aleksandrit, por polinome të Jonesit të ndryshme.</translation>
+    </message>
+    <message>
+        <source>The Alexander polynomial of the joined curve is the product of those of the two knots, as it must be.</source>
+        <translation>Polinomi i Aleksandrit i kurbës së bashkuar është prodhimi i atyre të dy nyjeve, siç duhet të jetë.</translation>
+    </message>
+    <message>
+        <source>Alexander polynomial: the product of those of the two knots.</source>
+        <translation>Polinomi i Aleksandrit: prodhimi i atyre të dy nyjeve.</translation>
+    </message>
+    <message>
+        <source>So is its Jones polynomial.</source>
+        <translation>Po ashtu edhe polinomi i saj i Jonesit.</translation>
+    </message>
+    <message>
+        <source>Jones polynomial: the product of those of the two knots (this diagram is too large to compute it directly).</source>
+        <translation>Polinomi i Jonesit: prodhimi i atyre të dy nyjeve (ky diagram është shumë i madh për ta llogaritur drejtpërdrejt).</translation>
     </message>
 </context>
 <context>

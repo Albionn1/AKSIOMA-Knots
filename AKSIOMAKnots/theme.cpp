@@ -515,6 +515,19 @@ const char *const StyleSheet = R"(
         background: #53514C;
     }
 
+    /* ---------- progress bar (video memory) ---------- */
+
+    QProgressBar {
+        border: none;
+        border-radius: 3px;
+        background: #1A1A1A;
+    }
+
+    QProgressBar::chunk {
+        border-radius: 3px;
+        background: #D99B42;
+    }
+
     /* ---------- checkbox ---------- */
 
     QCheckBox {
@@ -581,6 +594,8 @@ const char *const StyleSheet = R"(
         color: #BAB9B4;
         border: none;
         padding: 4px 8px;
+        font-family: "Segoe UI", "Inter", "Arial";
+        font-size: 9pt;
     }
 
     QScrollBar:vertical {

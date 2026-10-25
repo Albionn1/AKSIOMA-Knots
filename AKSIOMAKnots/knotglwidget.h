@@ -2,6 +2,7 @@
 #define KNOTGLWIDGET_H
 
 #include "knotmath.h"
+#include "lighting.h"
 
 #include <QColor>
 #include <QElapsedTimer>
@@ -106,6 +107,32 @@ public:
 
     void setMaterialProperties(float metallic);
 
+    // Lights and shadows (Settings, Lighting).
+    void setLighting(const Lighting::Options &options);
+
+    const Lighting::Options &lighting() const;
+
+    // Video memory this view has asked for, in bytes (an estimate: the
+    // driver may round sizes up or keep extra copies).
+    struct MemoryUse
+    {
+        qint64 mesh = 0;
+        qint64 shadowMap = 0;
+
+        // the framebuffer the view is drawn into
+        qint64 view = 0;
+
+        // floor and particles
+        qint64 other = 0;
+
+        qint64 total() const
+        {
+            return mesh + shadowMap + view + other;
+        }
+    };
+
+    MemoryUse memoryUse() const;
+
     // Surface look: 0 glossy, 1 satin, 2 metal, 3 rope (fibre pattern),
     // roughness 0 (mirror) .. 1 (matte).
     void setSurface(int material, float roughness);
@@ -118,7 +145,21 @@ public:
     // the window, with a short camera flight. The view is never steeper
     // than `highestPitch` degrees above the floor.
     void resetCamera(
+        float highestPitch = 75.0f,
+        bool animate = true);
+
+    // A new knot: the same framing as resetCamera. Before the view is on
+    // screen (no size yet) it is done at the first paint, without a flight.
+    void fitNewKnot(
         float highestPitch = 75.0f);
+
+    // For animations that place things themselves: a camera flight to
+    // (yaw, pitch) degrees that shows the ball (`centre`, `radius`) whole.
+    void flyToSphere(
+        const QVector3D &centre,
+        float radius,
+        float yaw,
+        float pitch);
 
     QSize minimumSizeHint() const override;
     QSize sizeHint() const override;
@@ -167,6 +208,9 @@ private:
 
         // ambient occlusion (1 = open)
         float ao;
+
+        // 1 = Seifert surface sheet (Mesh::sheet)
+        float sheet;
     };
 
     // position, colour (rgba), size (points)
@@ -206,6 +250,10 @@ private:
     };
 
     void initializeShaders();
+    void initializeShadowMap();
+
+    // (re)allocates the shadow map texture at shadowMapSize_
+    void allocateShadowMap();
     void initializeFlatBuffers();
 
     void uploadMesh();
@@ -225,13 +273,26 @@ private:
 
     void stopCameraFlight();
 
+    // camera distance at which a ball of `radius` fills most of the view
+    float sphereDistance(
+        float radius) const;
+
     QMatrix4x4 projectionMatrix() const;
     QMatrix4x4 viewMatrix() const;
     QMatrix4x4 modelMatrix() const;
 
+    // The studio lights turn with the camera about the vertical: this
+    // rotation takes their directions for a camera on +z to the world.
+    QMatrix4x4 lightRig() const;
+
     QVector3D computeCameraPosition() const;
 
     QPointF projectPointToScreen(const KnotMath::Vec3 &point) const;
+
+    // depth of the scene seen from the key light (self-shadowing)
+    void drawShadowMap();
+    // `wanted`: this kind of shadow is turned on
+    void setShadowUniforms(QOpenGLShaderProgram &program, bool wanted);
 
     void drawBackground();
     void drawGround(const QMatrix4x4 &viewProjection);
@@ -263,6 +324,27 @@ private:
 
     // soft ground shadow computed from the centre line of the tubes
     std::unique_ptr<QOpenGLShaderProgram> shadowProgram_;
+
+    // shadow map of the key light: depth program, texture and framebuffer
+    std::unique_ptr<QOpenGLShaderProgram> depthProgram_;
+    GLuint shadowTexture_ = 0;
+    GLuint shadowFramebuffer_ = 0;
+    bool shadowsReady_ = false;
+    int shadowMapSize_ = Lighting::shadowMapSize(1);
+
+    Lighting::Options lighting_;
+
+    // bytes in the mesh and floor buffers (memoryUse)
+    qint64 meshBytes_ = 0;
+    qint64 groundBytes_ = 0;
+
+    // world -> shadow map coordinates (0..1), the size of one texel in
+    // world units, the softness of the shadow edge (map units) and the
+    // matching depth bias
+    QMatrix4x4 lightMatrix_;
+    float shadowTexel_ = 0.0f;
+    float shadowSoftness_ = 0.0f;
+    float shadowDepthBias_ = 0.0f;
 
     QOpenGLVertexArrayObject meshVao_;
     QOpenGLBuffer vertexBuffer_;
@@ -331,6 +413,10 @@ private:
     int material_ = 0;
 
     bool autoRotation_ = false;
+
+    // highest pitch of a framing still to be done at the next paint
+    // (fitNewKnot); negative: none
+    float pendingFitPitch_ = -1.0f;
 
     // view-projection used by the last paint (needed to place the labels)
     QMatrix4x4 lastViewProjection_;

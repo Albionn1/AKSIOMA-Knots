@@ -386,7 +386,8 @@ void KnotBrowserDialog::showKnot(int tableIndex)
     if (r.genus >= 0)
         html += row(tr("Genus"), QString::number(r.genus));
 
-    html += row(tr("Signature"), QString::number(r.signature));
+    html += row(tr("Signature"),
+                QString::number(r.signature).replace(QLatin1Char('-'), QChar(0x2212)));
     html += row(tr("Determinant"), QString::number(r.determinant));
     html += row(tr("Fibered"), r.fibered ? tr("yes") : tr("no"));
 

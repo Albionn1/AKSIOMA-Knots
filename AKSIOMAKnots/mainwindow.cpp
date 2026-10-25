@@ -3,6 +3,7 @@
 #include "aboutdialog.h"
 #include "appsettings.h"
 #include "diagrameditor.h"
+#include "gpumemory.h"
 #include "knotbrowser.h"
 #include "knotdiagram.h"
 #include "knotexport.h"
@@ -27,10 +28,12 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QLabel>
+#include <QLocale>
 #include <QMenu>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QMessageBox>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
@@ -215,6 +218,8 @@ MainWindow::MainWindow(
 
     glWidget_ = new KnotGLWidget(viewport);
 
+    glWidget_->setLighting(AppSettings::lighting());
+
     viewportLayout->addWidget(glWidget_, 1);
 
     QWidget *viewBar = new QWidget(viewport);
@@ -265,12 +270,19 @@ MainWindow::MainWindow(
     settingsDialog_ = new QDialog(this);
 
     settingsDialog_->setWindowTitle(tr("Settings"));
-    settingsDialog_->resize(380, 560);
+    settingsDialog_->resize(420, 640);
 
     QVBoxLayout *settingsLayout = new QVBoxLayout(settingsDialog_);
 
     settingsLayout->setContentsMargins(0, 0, 0, 0);
-    settingsLayout->addWidget(createSettingsPanel());
+
+    QTabWidget *settingsTabs = new QTabWidget(settingsDialog_);
+
+    settingsTabs->setDocumentMode(true);
+    settingsTabs->addTab(createSettingsPanel(), tr("GENERAL"));
+    settingsTabs->addTab(createLightingPanel(), tr("LIGHTING"));
+
+    settingsLayout->addWidget(settingsTabs);
 
     QShortcut *settingsShortcut =
         new QShortcut(
@@ -1113,11 +1125,11 @@ QWidget *MainWindow::createLeftPanel()
     unknotSpeedCombo_ = new QComboBox(unknotGroup_);
 
     unknotSpeedCombo_->setMinimumHeight(34);
-    unknotSpeedCombo_->addItem(QStringLiteral("0.25x"), 0.25);
-    unknotSpeedCombo_->addItem(QStringLiteral("0.5x"), 0.5);
-    unknotSpeedCombo_->addItem(QStringLiteral("1x"), 1.0);
-    unknotSpeedCombo_->addItem(QStringLiteral("2x"), 2.0);
-    unknotSpeedCombo_->addItem(QStringLiteral("4x"), 4.0);
+    unknotSpeedCombo_->addItem(QStringLiteral("0.25×"), 0.25);
+    unknotSpeedCombo_->addItem(QStringLiteral("0.5×"), 0.5);
+    unknotSpeedCombo_->addItem(QStringLiteral("1×"), 1.0);
+    unknotSpeedCombo_->addItem(QStringLiteral("2×"), 2.0);
+    unknotSpeedCombo_->addItem(QStringLiteral("4×"), 4.0);
     unknotSpeedCombo_->setCurrentIndex(2);
 
     speedLayout->addWidget(makeFieldLabel(tr("Speed"), unknotGroup_));
@@ -1141,6 +1153,67 @@ QWidget *MainWindow::createLeftPanel()
     unknotLayout->addWidget(unknotStatusLabel_);
 
     layout->addWidget(unknotGroup_);
+
+    layout->addSpacing(14);
+
+    addSectionHeader(layout, panel, QStringLiteral("03"), tr("JOIN TWO KNOTS"));
+
+    QLabel *joinIntro =
+        new QLabel(
+            tr("Cut a small arc out of the current knot and out of a second "
+               "knot, and join the four loose ends with a band: the two "
+               "become one knot, their connected sum K₁ # K₂."),
+            panel);
+
+    joinIntro->setObjectName(QStringLiteral("Subtitle"));
+    joinIntro->setWordWrap(true);
+
+    layout->addWidget(joinIntro);
+
+    layout->addWidget(makeFieldLabel(tr("Second knot"), panel));
+
+    joinSecondCombo_ = new QComboBox(panel);
+
+    joinSecondCombo_->setMinimumHeight(34);
+    joinSecondCombo_->addItem(tr("Trefoil Knot (3₁)"), QStringLiteral("trefoil"));
+    joinSecondCombo_->addItem(tr("Figure-Eight Knot (4₁)"), QStringLiteral("figure8"));
+    joinSecondCombo_->addItem(tr("Cinquefoil (5₁)"), QStringLiteral("cinquefoil"));
+    joinSecondCombo_->addItem(tr("Stevedore Knot (6₁)"), QStringLiteral("stevedore"));
+    joinSecondCombo_->addItem(tr("Same as the current knot"), QStringLiteral("same"));
+    joinSecondCombo_->addItem(tr("From the knot table..."), QStringLiteral("table"));
+
+    layout->addWidget(joinSecondCombo_);
+
+    joinMirrorCheck_ = new QCheckBox(tr("Mirror image of the second knot"), panel);
+
+    joinMirrorCheck_->setToolTip(
+        tr("Two trefoils of the same handedness give the granny knot; with "
+           "the mirror image they give the square knot."));
+
+    layout->addWidget(joinMirrorCheck_);
+
+    joinButton_ = new QPushButton(tr("▶  JOIN"), panel);
+
+    joinButton_->setObjectName(QStringLiteral("GenerateButton"));
+    joinButton_->setMinimumHeight(40);
+
+    layout->addWidget(joinButton_);
+
+    joinStatusLabel_ = new QLabel(QString(), panel);
+
+    joinStatusLabel_->setObjectName(QStringLiteral("Status"));
+    joinStatusLabel_->setWordWrap(true);
+    joinStatusLabel_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+
+    layout->addWidget(joinStatusLabel_);
+
+    joinTimer_ = new QTimer(this);
+
+    joinTimer_->setTimerType(Qt::PreciseTimer);
+    joinTimer_->setInterval(16);
+
+    connect(joinButton_, &QPushButton::clicked, this, &MainWindow::joinPlayStop);
+    connect(joinTimer_, &QTimer::timeout, this, &MainWindow::joinTick);
 
     layout->addStretch(1);
 
@@ -1309,7 +1382,7 @@ QWidget *MainWindow::createRightPanel()
 
     tiles->setSpacing(12);
 
-    auto makeTile = [&](const QString &caption, QLabel *&valueLabel)
+    auto makeTile = [&](const QString &caption, QLabel *&valueLabel, QLabel **note)
     {
         QFrame *tile = new QFrame(analysis);
 
@@ -1332,11 +1405,24 @@ QWidget *MainWindow::createRightPanel()
         tileLayout->addWidget(captionLabel);
         tileLayout->addWidget(valueLabel);
 
+        if (note != nullptr)
+        {
+            *note = new QLabel(tile);
+
+            (*note)->setObjectName(QStringLiteral("Subtitle"));
+            (*note)->setWordWrap(true);
+            (*note)->hide();
+
+            tileLayout->addWidget(*note);
+        }
+
+        tileLayout->addStretch(1);
+
         tiles->addWidget(tile, 1);
     };
 
-    makeTile(tr("WRITHE"), writheValueLabel_);
-    makeTile(tr("CROSSINGS"), crossingValueLabel_);
+    makeTile(tr("WRITHE"), writheValueLabel_, nullptr);
+    makeTile(tr("CROSSINGS"), crossingValueLabel_, &crossingNoteLabel_);
 
     layout->addLayout(tiles);
 
@@ -1617,6 +1703,10 @@ QWidget *MainWindow::createSettingsPanel()
 
             AppSettings::restoreDefaults();
 
+            glWidget_->setLighting(AppSettings::lighting());
+
+            updateLightingControls();
+
             if (AppSettings::language() != previousLanguage)
             {
                 AppSettings::installLanguage(AppSettings::language());
@@ -1632,6 +1722,448 @@ QWidget *MainWindow::createSettingsPanel()
         });
 
     return scroll;
+}
+
+QWidget *MainWindow::createLightingPanel()
+{
+    QScrollArea *scroll = new QScrollArea(this);
+
+    scroll->setObjectName(QStringLiteral("PanelScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    QWidget *panel = new QWidget(scroll);
+
+    panel->setObjectName(QStringLiteral("Panel"));
+    panel->setAttribute(Qt::WA_StyledBackground, true);
+
+    QVBoxLayout *layout = new QVBoxLayout(panel);
+
+    layout->setContentsMargins(24, 24, 24, 24);
+    layout->setSpacing(12);
+
+    auto addCaption = [&](const QString &text)
+    {
+        QLabel *caption = new QLabel(text, panel);
+
+        caption->setObjectName(QStringLiteral("Caption"));
+
+        layout->addWidget(caption);
+    };
+
+    // a check box that switches one option on and off
+    auto addCheck = [&](const QString &text,
+                        bool Lighting::Options::*option,
+                        const QString &toolTip)
+    {
+        QCheckBox *check = new QCheckBox(text, panel);
+
+        check->setToolTip(toolTip);
+
+        layout->addWidget(check);
+
+        lightingChecks_.push_back(qMakePair(check, option));
+
+        connect(
+            check,
+            &QCheckBox::toggled,
+            this,
+            [this, option](bool enabled)
+            {
+                Lighting::Options options = glWidget_->lighting();
+
+                options.*option = enabled;
+
+                applyLighting(options);
+            });
+    };
+
+    /*
+     * PRESET
+     */
+
+    addCaption(tr("PRESET"));
+
+    lightingPresetCombo_ = new QComboBox(panel);
+
+    lightingPresetCombo_->setMinimumHeight(36);
+    lightingPresetCombo_->addItem(tr("Studio"), static_cast<int>(Lighting::Preset::Studio));
+    lightingPresetCombo_->addItem(tr("Soft"), static_cast<int>(Lighting::Preset::Soft));
+    lightingPresetCombo_->addItem(tr("Dramatic"), static_cast<int>(Lighting::Preset::Dramatic));
+    lightingPresetCombo_->addItem(tr("Flat"), static_cast<int>(Lighting::Preset::Flat));
+    lightingPresetCombo_->addItem(tr("Custom"), static_cast<int>(Lighting::Preset::Custom));
+
+    layout->addWidget(lightingPresetCombo_);
+
+    lightingPresetText_ = new QLabel(panel);
+
+    lightingPresetText_->setObjectName(QStringLiteral("Subtitle"));
+    lightingPresetText_->setWordWrap(true);
+
+    layout->addWidget(lightingPresetText_);
+
+    layout->addSpacing(12);
+
+    /*
+     * LIGHTS
+     */
+
+    addCaption(tr("LIGHTS"));
+
+    addCheck(tr("Key light"),
+             &Lighting::Options::keyLight,
+             tr("The main light, high on the left. Without it nothing casts a shadow."));
+
+    addCheck(tr("Fill light"),
+             &Lighting::Options::fillLight,
+             tr("A weak light low on the right that brightens the shaded side."));
+
+    addCheck(tr("Rim light"),
+             &Lighting::Options::rimLight,
+             tr("A light behind the knot that outlines its edges."));
+
+    addCheck(tr("Reflections"),
+             &Lighting::Options::reflections,
+             tr("The studio lights seen in shiny surfaces."));
+
+    addCheck(tr("Lights turn with the camera"),
+             &Lighting::Options::followCamera,
+             tr("The knot is always lit from the side. Off: the lights stay in "
+                "place while you turn the view."));
+
+    addSliderRow(layout, panel, tr("Brightness"),
+                 brightnessSlider_, brightnessValue_,
+                 50, 150, 100, QStringLiteral("100%"));
+
+    brightnessSlider_->setSingleStep(5);
+    brightnessSlider_->setPageStep(10);
+
+    layout->addSpacing(12);
+
+    /*
+     * SHADOWS
+     */
+
+    addCaption(tr("SHADOWS"));
+
+    addCheck(tr("Shadows on the knot"),
+             &Lighting::Options::knotShadows,
+             tr("Strands cast shadows on each other and on the Seifert surface."));
+
+    addCheck(tr("Shadow on the floor"),
+             &Lighting::Options::floorShadow,
+             tr("The shadow the key light casts on the floor."));
+
+    addCheck(tr("Contact shadow"),
+             &Lighting::Options::contactShadow,
+             tr("The soft dark patch right under the knot."));
+
+    addCheck(tr("Ambient occlusion"),
+             &Lighting::Options::occlusion,
+             tr("Darker where strands come close to each other."));
+
+    addSliderRow(layout, panel, tr("Shadow softness"),
+                 shadowSoftnessSlider_, shadowSoftnessValue_,
+                 25, 400, 100, QStringLiteral("100%"));
+
+    shadowSoftnessSlider_->setSingleStep(5);
+    shadowSoftnessSlider_->setPageStep(25);
+
+    layout->addWidget(makeFieldLabel(tr("Shadow quality"), panel));
+
+    shadowQualityCombo_ = new QComboBox(panel);
+
+    shadowQualityCombo_->setMinimumHeight(36);
+    shadowQualityCombo_->setToolTip(
+        tr("Sharper shadow edges need a larger shadow map in video memory."));
+
+    // memory of the shadow map: 4 bytes per texel (Lighting::shadowMapSize)
+    shadowQualityCombo_->addItem(tr("Low (4 MB)"), 0);
+    shadowQualityCombo_->addItem(tr("Medium (16 MB)"), 1);
+    shadowQualityCombo_->addItem(tr("High (64 MB)"), 2);
+
+    layout->addWidget(shadowQualityCombo_);
+
+    layout->addSpacing(12);
+
+    /*
+     * SCENE
+     */
+
+    addCaption(tr("SCENE"));
+
+    addCheck(tr("Floor grid"),
+             &Lighting::Options::floorGrid,
+             tr("The lines on the floor under the knot."));
+
+    layout->addSpacing(12);
+
+    /*
+     * GRAPHICS MEMORY
+     */
+
+    addCaption(tr("GRAPHICS MEMORY"));
+
+    memoryAdapterLabel_ = new QLabel(panel);
+
+    memoryAdapterLabel_->setObjectName(QStringLiteral("Field"));
+    memoryAdapterLabel_->setWordWrap(true);
+
+    layout->addWidget(memoryAdapterLabel_);
+
+    memoryBar_ = new QProgressBar(panel);
+
+    memoryBar_->setRange(0, 1000);
+    memoryBar_->setTextVisible(false);
+    memoryBar_->setFixedHeight(6);
+
+    layout->addWidget(memoryBar_);
+
+    memoryUsedLabel_ = new QLabel(panel);
+
+    memoryUsedLabel_->setObjectName(QStringLiteral("Field"));
+    memoryUsedLabel_->setWordWrap(true);
+
+    layout->addWidget(memoryUsedLabel_);
+
+    memoryViewLabel_ = new QLabel(panel);
+
+    memoryViewLabel_->setObjectName(QStringLiteral("Subtitle"));
+    memoryViewLabel_->setWordWrap(true);
+
+    layout->addWidget(memoryViewLabel_);
+
+    layout->addStretch(1);
+
+    scroll->setWidget(panel);
+
+    updateLightingControls();
+
+    connect(
+        lightingPresetCombo_,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this](int)
+        {
+            const Lighting::Preset preset =
+                static_cast<Lighting::Preset>(lightingPresetCombo_->currentData().toInt());
+
+            // Custom is only shown, not chosen
+            if (preset == Lighting::Preset::Custom)
+            {
+                updateLightingControls();
+                return;
+            }
+
+            applyLighting(
+                Lighting::preset(preset, glWidget_->lighting().shadowQuality));
+        });
+
+    connect(
+        brightnessSlider_,
+        &QSlider::valueChanged,
+        this,
+        [this](int value)
+        {
+            Lighting::Options options = glWidget_->lighting();
+
+            options.brightness = value;
+
+            applyLighting(options);
+        });
+
+    connect(
+        shadowSoftnessSlider_,
+        &QSlider::valueChanged,
+        this,
+        [this](int value)
+        {
+            Lighting::Options options = glWidget_->lighting();
+
+            options.shadowSoftness = value;
+
+            applyLighting(options);
+        });
+
+    connect(
+        shadowQualityCombo_,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this](int)
+        {
+            Lighting::Options options = glWidget_->lighting();
+
+            options.shadowQuality = shadowQualityCombo_->currentData().toInt();
+
+            applyLighting(options);
+        });
+
+    memoryTimer_ = new QTimer(this);
+
+    memoryTimer_->setInterval(1000);
+
+    connect(
+        memoryTimer_,
+        &QTimer::timeout,
+        this,
+        [this]()
+        {
+            if (settingsDialog_ != nullptr && settingsDialog_->isVisible())
+                updateMemoryMeter();
+        });
+
+    memoryTimer_->start();
+
+    return scroll;
+}
+
+void MainWindow::applyLighting(
+    const Lighting::Options &options)
+{
+    glWidget_->setLighting(options);
+
+    AppSettings::setLighting(options);
+
+    updateLightingControls();
+    updateMemoryMeter();
+}
+
+void MainWindow::updateLightingControls()
+{
+    if (lightingPresetCombo_ == nullptr || glWidget_ == nullptr)
+        return;
+
+    const Lighting::Options &options = glWidget_->lighting();
+    const Lighting::Preset preset = Lighting::presetOf(options);
+
+    {
+        const QSignalBlocker blocker(lightingPresetCombo_);
+
+        lightingPresetCombo_->setCurrentIndex(
+            std::max(0, lightingPresetCombo_->findData(static_cast<int>(preset))));
+    }
+
+    switch (preset)
+    {
+    case Lighting::Preset::Studio:
+        lightingPresetText_->setText(
+            tr("Three lights and soft boxes around the camera, with shadows: "
+               "the full look."));
+        break;
+
+    case Lighting::Preset::Soft:
+        lightingPresetText_->setText(
+            tr("Gentle light and wide, soft shadows, without the rim light."));
+        break;
+
+    case Lighting::Preset::Dramatic:
+        lightingPresetText_->setText(
+            tr("No fill light: deep, crisp shadows and strong contrast."));
+        break;
+
+    case Lighting::Preset::Flat:
+        lightingPresetText_->setText(
+            tr("Even light without shadows or reflections: clear on paper "
+               "and on projectors."));
+        break;
+
+    case Lighting::Preset::Custom:
+        lightingPresetText_->setText(
+            tr("Your own combination of the settings below."));
+        break;
+    }
+
+    for (const QPair<QCheckBox *, bool Lighting::Options::*> &entry : lightingChecks_)
+    {
+        const QSignalBlocker blocker(entry.first);
+
+        entry.first->setChecked(options.*(entry.second));
+    }
+
+    // the shadows need the key light
+    for (const QPair<QCheckBox *, bool Lighting::Options::*> &entry : lightingChecks_)
+    {
+        if (entry.second == &Lighting::Options::knotShadows ||
+            entry.second == &Lighting::Options::floorShadow)
+        {
+            entry.first->setEnabled(options.keyLight);
+        }
+    }
+
+    {
+        const QSignalBlocker blocker(brightnessSlider_);
+
+        brightnessSlider_->setValue(options.brightness);
+    }
+
+    brightnessValue_->setText(QStringLiteral("%1%").arg(options.brightness));
+
+    {
+        const QSignalBlocker blocker(shadowSoftnessSlider_);
+
+        shadowSoftnessSlider_->setValue(options.shadowSoftness);
+    }
+
+    shadowSoftnessValue_->setText(QStringLiteral("%1%").arg(options.shadowSoftness));
+
+    {
+        const QSignalBlocker blocker(shadowQualityCombo_);
+
+        shadowQualityCombo_->setCurrentIndex(
+            std::max(0, shadowQualityCombo_->findData(options.shadowQuality)));
+    }
+}
+
+void MainWindow::updateMemoryMeter()
+{
+    if (memoryBar_ == nullptr || glWidget_ == nullptr)
+        return;
+
+    auto size = [](qint64 bytes)
+    {
+        const double megabytes = static_cast<double>(bytes) / (1024.0 * 1024.0);
+
+        if (megabytes >= 1024.0)
+            return QStringLiteral("%1 GB").arg(QLocale().toString(megabytes / 1024.0, 'f', 1));
+
+        return QStringLiteral("%1 MB").arg(
+            QLocale().toString(megabytes, 'f', megabytes < 10.0 ? 1 : 0));
+    };
+
+    const GpuMemory::Info info = GpuMemory::query();
+    const KnotGLWidget::MemoryUse view = glWidget_->memoryUse();
+
+    if (info.valid)
+    {
+        memoryAdapterLabel_->setText(info.adapter);
+
+        memoryBar_->setVisible(true);
+        memoryBar_->setValue(
+            info.budget > 0
+                ? static_cast<int>(std::min<qint64>(1000, 1000 * info.used / info.budget))
+                : 0);
+
+        memoryUsedLabel_->setText(
+            (info.shared
+                 ? tr("This program: %1 of %2 (graphics memory shared with the main memory)")
+                 : tr("This program: %1 of %2 video memory"))
+                .arg(size(info.used), size(info.budget)));
+    }
+    else
+    {
+        memoryAdapterLabel_->setText(tr("The video memory cannot be read on this system."));
+
+        memoryBar_->setVisible(false);
+
+        memoryUsedLabel_->setText(
+            tr("3D view in total (estimate): %1").arg(size(view.total())));
+    }
+
+    memoryViewLabel_->setText(
+        tr("3D view (estimate): knot %1, shadow map %2, picture buffers %3, "
+           "floor %4. The rest is the window and its panels.")
+            .arg(size(view.mesh), size(view.shadowMap), size(view.view), size(view.other)));
 }
 
 void MainWindow::updateSettingsControls()
@@ -2214,6 +2746,9 @@ void MainWindow::generateMesh()
 {
     stopRelaxation();
 
+    // the knot is rebuilt below
+    stopJoin(false);
+
     if (unknotActive_ || unknotPreparing_)
         stopUnknotting(false);
 
@@ -2288,7 +2823,7 @@ void MainWindow::generateMesh()
         }
         else
         {
-            updateInvariantPanel(
+            KnotMath::Invariants invariants =
                 KnotMath::computeInvariantsWithCrossings(
                     preset,
                     currentData_.points,
@@ -2296,13 +2831,35 @@ void MainWindow::generateMesh()
                     currentData_.closed,
                     torusPSpin_->value(),
                     torusQSpin_->value(),
-                    currentData_.tableIndex));
+                    currentData_.tableIndex);
+
+            applyConnectedSumInvariants(
+                invariants);
+
+            updateInvariantPanel(
+                invariants);
         }
 
         hasData_ =
             true;
 
         rebuildMesh();
+
+        // a different knot: fitted into the view with room around it
+        const QString knot =
+            QStringLiteral("%1|%2|%3|%4|%5")
+                .arg(static_cast<int>(preset))
+                .arg(tableKnotName_)
+                .arg(torusPSpin_->value())
+                .arg(torusQSpin_->value())
+                .arg(customInputEdit_->toPlainText());
+
+        if (knot != framedKnot_)
+        {
+            framedKnot_ = knot;
+
+            glWidget_->fitNewKnot(seifertActive_ ? 45.0f : 75.0f);
+        }
 
         updateLearnSection();
     }
@@ -2357,7 +2914,7 @@ void MainWindow::rebuildMesh()
     }
 
     // the moving curve is drawn every frame (with the current thickness)
-    if (relaxRunning_)
+    if (relaxRunning_ || joinActive_)
         return;
 
     if (unknotActive_)
@@ -2548,7 +3105,18 @@ void MainWindow::updateInvariantPanel(
 
     if (writheValueLabel_ != nullptr)
     {
+        // no "-0.00" for a writhe that rounds to zero
+        const double writhe =
+            std::abs(invariants.writhe) < 0.005 ? 0.0 : invariants.writhe;
+
         writheValueLabel_->setText(
+            QString::number(
+                writhe,
+                'f',
+                2)
+                .replace(QLatin1Char('-'), QChar(0x2212)));
+
+        writheValueLabel_->setToolTip(
             QString::number(
                 invariants.writhe,
                 'f',
@@ -2557,26 +3125,30 @@ void MainWindow::updateInvariantPanel(
 
     if (crossingValueLabel_ != nullptr)
     {
+        crossingNoteLabel_->hide();
+
         if (invariants.crossingNumber < 0)
         {
             crossingValueLabel_->setText(
                 QStringLiteral("—"));
-        }
-        else if (invariants.knownCrossingNumber >= 0 &&
-                 invariants.knownCrossingNumber !=
-                     invariants.crossingNumber)
-        {
-            // The XY diagram is not always a minimal diagram.
-            crossingValueLabel_->setText(
-                tr("%1 (minimum %2)")
-                    .arg(invariants.crossingNumber)
-                    .arg(invariants.knownCrossingNumber));
         }
         else
         {
             crossingValueLabel_->setText(
                 QString::number(
                     invariants.crossingNumber));
+
+            // The diagram on screen is not always a minimal diagram.
+            if (invariants.knownCrossingNumber >= 0 &&
+                invariants.knownCrossingNumber !=
+                    invariants.crossingNumber)
+            {
+                crossingNoteLabel_->setText(
+                    tr("in this view; at least %1")
+                        .arg(invariants.knownCrossingNumber));
+
+                crossingNoteLabel_->show();
+            }
         }
     }
 
@@ -2711,6 +3283,8 @@ void MainWindow::startUnknotting()
 {
     if (!hasData_ || unknotPreparing_)
         return;
+
+    stopJoin();
 
     if (seifertActive_)
         stopSeifert();
@@ -4163,6 +4737,8 @@ void MainWindow::toggleSeifert()
     if (!hasData_)
         return;
 
+    stopJoin();
+
     if (currentData_.multiStrand || !currentData_.closed)
     {
         seifertInfoLabel_->setText(
@@ -4602,6 +5178,8 @@ bool MainWindow::prepareRelaxation()
     if (!hasData_)
         return false;
 
+    stopJoin();
+
     if (seifertActive_)
         stopSeifert();
 
@@ -5022,7 +5600,12 @@ void MainWindow::requestRelaxAnalysis()
                 false;
 
             if (session == relaxSession_)
+            {
+                // a joined knot keeps its name: moving it changes nothing
+                applyConnectedSumInvariants(*result);
+
                 updateInvariantPanel(*result);
+            }
 
             if (relaxAnalysisWanted_)
                 requestRelaxAnalysis();
@@ -5043,4 +5626,786 @@ void MainWindow::updateRelaxControls()
 
     relaxResetButton_->setEnabled(
         relaxRunning_ || relaxChanged_);
+}
+
+/*
+ * =============================================================
+ * JOINING TWO KNOTS (connected sum)
+ * =============================================================
+ */
+
+namespace
+{
+
+// Stages of the animation (seconds): the knots take their places, the
+// cuts open, the band grows, and the parts fuse into one knot, which is
+// shown a moment before it becomes the current knot.
+constexpr double JoinIntroEnd = 1.8;
+constexpr double JoinCutEnd = 2.8;
+constexpr double JoinBridgeEnd = 4.4;
+constexpr double JoinFuseEnd = 5.4;
+constexpr double JoinEnd = 6.2;
+
+const QColor JoinFirstColor(91, 155, 255);
+const QColor JoinSecondColor(217, 155, 66);
+const QColor JoinBandColor(255, 244, 214);
+
+double joinEase(double t)
+{
+    t = std::clamp(t, 0.0, 1.0);
+
+    return t * t * (3.0 - 2.0 * t);
+}
+
+QColor mixColors(const QColor &a, const QColor &b, double f)
+{
+    const float g = static_cast<float>(std::clamp(f, 0.0, 1.0));
+
+    return QColor::fromRgbF(
+        a.redF() + (b.redF() - a.redF()) * g,
+        a.greenF() + (b.greenF() - a.greenF()) * g,
+        a.blueF() + (b.blueF() - a.blueF()) * g);
+}
+
+std::map<int, long long> polynomialMap(
+    const QVector<long long> &coefficients,
+    int lowestPower)
+{
+    std::map<int, long long> result;
+
+    for (int i = 0; i < coefficients.size(); ++i)
+    {
+        if (coefficients[i] != 0)
+            result[lowestPower + i] = coefficients[i];
+    }
+
+    return result;
+}
+
+// bounding box of some curves
+void curveBounds(
+    std::initializer_list<const QVector<KnotMath::Vec3> *> curves,
+    QVector3D &minimum,
+    QVector3D &maximum)
+{
+    minimum = QVector3D(1e30f, 1e30f, 1e30f);
+    maximum = QVector3D(-1e30f, -1e30f, -1e30f);
+
+    for (const QVector<KnotMath::Vec3> *curve : curves)
+    {
+        for (const KnotMath::Vec3 &p : *curve)
+        {
+            const QVector3D q(
+                static_cast<float>(p.x),
+                static_cast<float>(p.y),
+                static_cast<float>(p.z));
+
+            minimum.setX(std::min(minimum.x(), q.x()));
+            minimum.setY(std::min(minimum.y(), q.y()));
+            minimum.setZ(std::min(minimum.z(), q.z()));
+
+            maximum.setX(std::max(maximum.x(), q.x()));
+            maximum.setY(std::max(maximum.y(), q.y()));
+            maximum.setZ(std::max(maximum.z(), q.z()));
+        }
+    }
+}
+
+} // namespace
+
+QString MainWindow::currentKnotSymbol() const
+{
+    if (!joined_.text.isEmpty() &&
+        currentPreset() == KnotMath::Preset::CustomCoordinates &&
+        customInputEdit_->toPlainText() == joined_.text)
+    {
+        return joined_.name;
+    }
+
+    switch (currentPreset())
+    {
+    case KnotMath::Preset::Unknot:
+        return QStringLiteral("0₁");
+
+    case KnotMath::Preset::Trefoil:
+        return QStringLiteral("3₁");
+
+    case KnotMath::Preset::FigureEight:
+        return QStringLiteral("4₁");
+
+    case KnotMath::Preset::Cinquefoil:
+        return QStringLiteral("5₁");
+
+    case KnotMath::Preset::Stevedore:
+        return QStringLiteral("6₁");
+
+    case KnotMath::Preset::CustomTorus:
+        return QStringLiteral("T(%1,%2)")
+            .arg(torusPSpin_->value())
+            .arg(torusQSpin_->value());
+
+    case KnotMath::Preset::KnotTable:
+        return KnotMath::KnotTable::displayName(tableKnotName_);
+
+    default:
+        return QStringLiteral("K");
+    }
+}
+
+void MainWindow::joinPlayStop()
+{
+    if (joinActive_)
+    {
+        stopJoin();
+
+        joinStatusLabel_->setText(tr("Stopped."));
+
+        return;
+    }
+
+    startJoin();
+}
+
+void MainWindow::startJoin()
+{
+    if (!hasData_ ||
+        currentData_.multiStrand ||
+        !currentData_.closed ||
+        currentData_.points.size() < 4)
+    {
+        joinStatusLabel_->setText(
+            tr("Joining needs a single closed knot. Choose a knot preset, "
+               "a table knot or a custom closed curve."));
+
+        return;
+    }
+
+    /*
+     * The second knot
+     */
+
+    const QString choice =
+        joinSecondCombo_->currentData().toString();
+
+    QVector<KnotMath::Vec3> second;
+    QString secondSymbol;
+
+    if (choice == QStringLiteral("same"))
+    {
+        second = currentData_.points;
+        secondSymbol = currentKnotSymbol();
+
+        if (secondSymbol.contains(QLatin1Char('#')))
+            secondSymbol = QStringLiteral("(%1)").arg(secondSymbol);
+    }
+    else if (choice == QStringLiteral("table"))
+    {
+        KnotBrowserDialog dialog(
+            joinTableName_,
+            this);
+
+        if (dialog.exec() != QDialog::Accepted ||
+            dialog.selectedKnot().isEmpty())
+        {
+            return;
+        }
+
+        joinTableName_ =
+            dialog.selectedKnot();
+
+        second =
+            KnotMath::buildPreset(
+                KnotMath::Preset::KnotTable,
+                meshDensitySlider_->value(),
+                2,
+                3,
+                joinTableName_)
+                .points;
+
+        secondSymbol =
+            KnotMath::KnotTable::displayName(joinTableName_);
+    }
+    else
+    {
+        struct Choice
+        {
+            const char *key;
+            KnotMath::Preset preset;
+            const char *symbol;
+        };
+
+        static const Choice choices[] = {
+            {"trefoil", KnotMath::Preset::Trefoil, "3₁"},
+            {"figure8", KnotMath::Preset::FigureEight, "4₁"},
+            {"cinquefoil", KnotMath::Preset::Cinquefoil, "5₁"},
+            {"stevedore", KnotMath::Preset::Stevedore, "6₁"},
+        };
+
+        for (const Choice &c : choices)
+        {
+            if (choice != QLatin1String(c.key))
+                continue;
+
+            second =
+                KnotMath::buildPreset(
+                    c.preset,
+                    meshDensitySlider_->value(),
+                    2,
+                    3,
+                    QString())
+                    .points;
+
+            secondSymbol = QString::fromUtf8(c.symbol);
+        }
+    }
+
+    if (second.size() < 4)
+        return;
+
+    const bool mirror =
+        joinMirrorCheck_->isChecked();
+
+    // mirror image: K*
+    if (mirror)
+        secondSymbol += QStringLiteral("*");
+
+    // the curve as it is shown now is the first knot
+    stopRelaxation();
+
+    if (unknotActive_ || unknotPreparing_)
+        stopUnknotting(false);
+
+    if (seifertActive_)
+        stopSeifert();
+
+    /*
+     * Placing the two knots and the band; a thick tube may leave no room
+     * for the band, then its strands are drawn thinner.
+     */
+
+    const double requested =
+        static_cast<double>(thicknessSlider_->value()) / 100.0;
+
+    KnotMath::ConnectedSum sum;
+    double radius = requested;
+
+    for (const double factor : {1.0, 0.6, 0.35})
+    {
+        radius = requested * factor;
+
+        sum = KnotMath::buildConnectedSum(
+            currentData_.points,
+            second,
+            radius,
+            mirror);
+
+        if (sum.valid)
+            break;
+    }
+
+    if (!sum.valid)
+    {
+        joinStatusLabel_->setText(sum.error);
+        return;
+    }
+
+    /*
+     * The invariants that follow from the two parts (of the curves as they
+     * are shown, so mirror images count): the Alexander and Jones
+     * polynomials of a connected sum are the products.
+     */
+
+    JoinedKnot joined;
+
+    joined.name =
+        currentKnotSymbol() + QStringLiteral(" # ") + secondSymbol;
+
+    const KnotMath::AlexanderPolynomial alexanderA =
+        KnotMath::computeAlexanderPolynomial(sum.firstBase);
+
+    const KnotMath::AlexanderPolynomial alexanderB =
+        KnotMath::computeAlexanderPolynomial(sum.secondBase);
+
+    if (alexanderA.valid && alexanderB.valid)
+    {
+        joined.alexanderValid = true;
+        joined.alexander =
+            KnotMath::multiplyPolynomials(
+                alexanderA.coefficients, alexanderA.lowestPower,
+                alexanderB.coefficients, alexanderB.lowestPower);
+    }
+
+    const KnotMath::JonesPolynomial jonesA =
+        KnotMath::computeJonesPolynomial(sum.firstBase);
+
+    const KnotMath::JonesPolynomial jonesB =
+        KnotMath::computeJonesPolynomial(sum.secondBase);
+
+    if (jonesA.valid && jonesB.valid)
+    {
+        joined.jonesValid = true;
+        joined.jones =
+            KnotMath::multiplyPolynomials(
+                jonesA.coefficients, jonesA.lowestPower,
+                jonesB.coefficients, jonesB.lowestPower);
+    }
+
+    // two trefoils: the granny knot or the square knot
+    const std::map<int, long long> trefoil = {{-1, 1}, {0, -1}, {1, 1}};
+
+    if (alexanderA.valid && alexanderB.valid &&
+        polynomialMap(alexanderA.coefficients, alexanderA.lowestPower) == trefoil &&
+        polynomialMap(alexanderB.coefficients, alexanderB.lowestPower) == trefoil &&
+        jonesA.valid && jonesB.valid)
+    {
+        if (jonesA == jonesB)
+            joined.remark = tr("the granny knot");
+        else if (jonesA == jonesB.mirrored())
+            joined.remark = tr("the square knot");
+    }
+
+    if (currentPreset() == KnotMath::Preset::Unknot)
+        joined.remark = tr("the same knot as the second one: joining the unknot changes nothing");
+
+    pendingJoined_ = joined;
+
+    /*
+     * The animation
+     */
+
+    join_ = sum;
+    joinTubeRadius_ = radius;
+    joinTime_ = 0.0;
+    joinStage_ = -1;
+    joinActive_ = true;
+
+    glWidget_->setShowCrossingNumbers(false);
+    glWidget_->clearFlashes();
+
+    // the floor under everything that will be shown, and a view from the
+    // front: the first knot on the left, the second on the right
+    QVector3D minimum;
+    QVector3D maximum;
+
+    curveBounds({&sum.firstBase, &sum.first, &sum.second, &sum.joined}, minimum, maximum);
+
+    const QVector3D pad(
+        static_cast<float>(radius),
+        static_cast<float>(radius),
+        static_cast<float>(radius));
+
+    glWidget_->setFixedBounds(minimum - pad, maximum + pad);
+
+    // The pair is wide and low: the ball the camera fits is as large as
+    // needed for the width across the wider angle of view, or the height.
+    curveBounds({&sum.first, &sum.second, &sum.joined}, minimum, maximum);
+
+    const QVector3D size = maximum - minimum + 2.0f * pad;
+
+    const float aspect =
+        glWidget_->height() > 0
+            ? static_cast<float>(glWidget_->width()) / static_cast<float>(glWidget_->height())
+            : 1.0f;
+
+    glWidget_->flyToSphere(
+        0.5f * (minimum + maximum),
+        0.5f * std::max({size.x() / std::max(1.0f, aspect), size.y(), size.z()}),
+        0.0f,
+        14.0f);
+
+    joinButton_->setText(tr("■  STOP"));
+
+    joinClock_.restart();
+    joinTimer_->start();
+
+    renderJoinFrame();
+    updateJoinStatus();
+}
+
+void MainWindow::stopJoin(
+    bool restoreKnot)
+{
+    if (!joinActive_)
+        return;
+
+    joinActive_ = false;
+
+    joinTimer_->stop();
+
+    glWidget_->clearFlashes();
+    glWidget_->clearFixedBounds();
+
+    joinButton_->setText(tr("▶  JOIN"));
+
+    if (restoreKnot)
+    {
+        rebuildMesh();
+        resetCamera();
+    }
+}
+
+void MainWindow::joinTick()
+{
+    if (!joinActive_)
+        return;
+
+    joinTime_ +=
+        std::min(
+            0.05,
+            static_cast<double>(joinClock_.restart()) / 1000.0);
+
+    const double t = joinTime_;
+
+    // flashes where the cuts open and where the two halves of each strand
+    // of the band meet
+    QVector<KnotMath::Vec3> flashes;
+    QVector<float> progress;
+
+    const double cut = (t - JoinIntroEnd) / 0.9;
+
+    if (cut > 0.0 && cut < 1.0)
+    {
+        flashes << join_.first[join_.firstPeak] << join_.second[join_.secondPeak];
+        progress << static_cast<float>(cut) << static_cast<float>(cut);
+    }
+
+    const double meet = (t - (JoinBridgeEnd - 0.15)) / 0.9;
+
+    if (meet > 0.0 && meet < 1.0)
+    {
+        flashes << join_.bridgeOut[join_.bridgeOut.size() / 2]
+                << join_.bridgeBack[join_.bridgeBack.size() / 2];
+        progress << static_cast<float>(meet) << static_cast<float>(meet);
+    }
+
+    if (flashes.isEmpty())
+        glWidget_->clearFlashes();
+    else
+        glWidget_->setFlashes(flashes, progress, QVector<int>(flashes.size(), 0));
+
+    if (t >= JoinEnd)
+    {
+        finishJoin();
+        return;
+    }
+
+    renderJoinFrame();
+    updateJoinStatus();
+}
+
+void MainWindow::renderJoinFrame()
+{
+    using KnotMath::Vec3;
+
+    const KnotMath::ConnectedSum &s = join_;
+    const double t = joinTime_;
+
+    auto tube = [](const QVector<Vec3> &curve, double radius, bool closed, const QColor &color)
+    {
+        KnotMath::Mesh part;
+
+        if (curve.size() < 2)
+            return part;
+
+        part = KnotMath::buildTubeMesh(
+            curve,
+            radius,
+            24,
+            closed,
+            KnotMath::ColorMode::SingleColor,
+            2);
+
+        if (part.isValid())
+            part.fillColor(color);
+
+        return part;
+    };
+
+    // the knot with a gap opened around its peak (0..1 of the cut)
+    auto opened = [](const QVector<Vec3> &curve, int start, int peak, int end, double p)
+    {
+        const int n = curve.size();
+        const int back = ((peak - start) % n + n) % n;
+        const int ahead = ((end - peak) % n + n) % n;
+
+        const int from = peak - std::max(1, static_cast<int>(std::lround(p * back)));
+        const int to = peak + std::max(1, static_cast<int>(std::lround(p * ahead)));
+
+        return KnotMath::curveWithout(curve, (from % n + n) % n, to % n);
+    };
+
+    const double r = joinTubeRadius_;
+
+    KnotMath::Mesh mesh;
+
+    if (t < JoinIntroEnd)
+    {
+        // the current knot moves to the left and turns its arc to face
+        // the other one
+        const double e = joinEase(t / JoinIntroEnd);
+        const KnotMath::ConnectedSum::Pose &a = s.firstPose;
+
+        mesh.append(tube(
+            KnotMath::placeCurve(s.firstBase, a.yaw * e, a.tilt * e, a.shift * e),
+            r,
+            true,
+            mixColors(meshColor_, JoinFirstColor, e)));
+
+        // the second knot flies in from the right, spinning and growing
+        const double f = joinEase((t - 0.35) / (JoinIntroEnd - 0.35));
+
+        if (f > 0.0)
+        {
+            const KnotMath::ConnectedSum::Pose &b = s.secondPose;
+
+            const double spin = (1.0 - f) * 1.5 * 3.14159265358979;
+            const Vec3 shift = b.shift + Vec3(7.0 * (1.0 - f), 1.2 * (1.0 - f), 0.0);
+            const double scale = std::max(0.05, f);
+
+            mesh.append(tube(
+                KnotMath::placeCurve(s.secondBase, b.yaw + spin, b.tilt, shift, scale),
+                r * std::max(0.3, f),
+                true,
+                JoinSecondColor));
+        }
+    }
+    else if (t < JoinCutEnd)
+    {
+        const double p = joinEase((t - JoinIntroEnd) / (JoinCutEnd - JoinIntroEnd));
+
+        mesh.append(tube(
+            opened(s.first, s.firstCutStart, s.firstPeak, s.firstCutEnd, p),
+            r, false, JoinFirstColor));
+
+        mesh.append(tube(
+            opened(s.second, s.secondCutStart, s.secondPeak, s.secondCutEnd, p),
+            r, false, JoinSecondColor));
+    }
+    else if (t < JoinBridgeEnd)
+    {
+        const double p = joinEase((t - JoinCutEnd) / (JoinBridgeEnd - JoinCutEnd));
+
+        mesh.append(tube(
+            KnotMath::curveWithout(s.first, s.firstCutStart, s.firstCutEnd),
+            r, false, JoinFirstColor));
+
+        mesh.append(tube(
+            KnotMath::curveWithout(s.second, s.secondCutStart, s.secondCutEnd),
+            r, false, JoinSecondColor));
+
+        // every strand of the band grows from both of its ends and the two
+        // halves meet in the middle
+        for (const QVector<Vec3> *strand : {&s.bridgeOut, &s.bridgeBack})
+        {
+            const int count = strand->size();
+            const int grown =
+                std::min(count, 2 + static_cast<int>(std::lround(p * 0.5 * (count - 1))));
+
+            mesh.append(tube(strand->mid(0, grown), r, false, JoinBandColor));
+            mesh.append(tube(strand->mid(count - grown), r, false, JoinBandColor));
+        }
+    }
+    else
+    {
+        // one closed knot; the colours of its parts fade into the colour
+        // of the knot
+        const double f = joinEase((t - JoinBridgeEnd) / (JoinFuseEnd - JoinBridgeEnd));
+
+        mesh = tube(s.joined, r, true, meshColor_);
+
+        const int samples = mesh.centerline.size() / 4;
+        const int vertices = mesh.positions.size() / 3;
+        const int points = s.joined.size();
+
+        if (samples > 0 && mesh.vertexSample.size() == vertices)
+        {
+            for (int v = 0; v < vertices; ++v)
+            {
+                const int point =
+                    std::clamp(mesh.vertexSample[v] * points / samples, 0, points - 1);
+
+                const int part = s.joinedPart[point];
+
+                const QColor from =
+                    part == 0 ? JoinFirstColor : part == 1 ? JoinSecondColor : JoinBandColor;
+
+                const QColor color = mixColors(from, meshColor_, f);
+
+                mesh.colors[3 * v] = static_cast<float>(color.redF());
+                mesh.colors[3 * v + 1] = static_cast<float>(color.greenF());
+                mesh.colors[3 * v + 2] = static_cast<float>(color.blueF());
+            }
+        }
+    }
+    if (!mesh.isValid())
+        return;
+
+    glWidget_->setMesh(mesh);
+    glWidget_->setMeshColor(meshColor_);
+
+    applySurface();
+}
+
+void MainWindow::updateJoinStatus()
+{
+    const double t = joinTime_;
+
+    const int stage =
+        t < JoinIntroEnd    ? 0
+        : t < JoinCutEnd    ? 1
+        : t < JoinBridgeEnd ? 2
+                            : 3;
+
+    if (stage == joinStage_)
+        return;
+
+    joinStage_ = stage;
+
+    auto explain = [](const QString &title, const QString &body)
+    {
+        return QStringLiteral("<b>%1</b><br>%2").arg(title, body);
+    };
+
+    switch (stage)
+    {
+    case 0:
+        joinStatusLabel_->setText(explain(
+            tr("1 / 4  Two knots"),
+            tr("The two knots are placed side by side, each turned so that "
+               "one of its arcs faces the other knot.")));
+        break;
+
+    case 1:
+        joinStatusLabel_->setText(explain(
+            tr("2 / 4  Cut"),
+            tr("A small arc is cut out of each knot. Beyond the cut there "
+               "is nothing else of either knot.")));
+        break;
+
+    case 2:
+        joinStatusLabel_->setText(explain(
+            tr("3 / 4  The band"),
+            tr("Two strands join the four loose ends. They run straight "
+               "across the gap, so the band adds no knotting of its own.")));
+        break;
+
+    default:
+        joinStatusLabel_->setText(explain(
+            tr("4 / 4  One knot"),
+            tr("The two knots are one now: %1. A plane between the two "
+               "halves meets it in just two points.")
+                .arg(pendingJoined_.name)));
+        break;
+    }
+}
+
+void MainWindow::finishJoin()
+{
+    using KnotMath::Vec3;
+
+    const QVector<Vec3> &curve = join_.joined;
+
+    joinActive_ = false;
+
+    joinTimer_->stop();
+
+    glWidget_->clearFlashes();
+    glWidget_->clearFixedBounds();
+
+    joinButton_->setText(tr("▶  JOIN"));
+
+    // The joined knot becomes the current knot, as a Custom Curve (like a
+    // drawn knot): every analysis and animation works on it, and it can be
+    // saved.
+    joined_ = pendingJoined_;
+    joined_.text = KnotMath::diagramToCoordinateText(curve);
+
+    const int customIndex =
+        presetCombo_->findData(
+            static_cast<int>(
+                KnotMath::Preset::CustomCoordinates));
+
+    if (customIndex >= 0)
+        presetCombo_->setCurrentIndex(customIndex);
+
+    customInputEdit_->setPlainText(joined_.text);
+
+    generateMesh();
+
+    QString text =
+        QStringLiteral("<b>%1</b><br>%2")
+            .arg(tr("Connected sum %1").arg(joined_.name),
+                 tr("Its Alexander and Jones polynomials are the products of "
+                    "those of the two knots (see Analysis), its genus is the "
+                    "sum of theirs. So a sum of two knotted knots can never "
+                    "be undone. Press Relax above to watch it settle into "
+                    "its own shape."));
+
+    if (joined_.remark == tr("the granny knot") ||
+        joined_.remark == tr("the square knot"))
+    {
+        text += QStringLiteral("<br><br>") +
+                tr("Two trefoils of the same handedness give the granny knot, "
+                   "of opposite handedness the square knot: the same Alexander "
+                   "polynomial, but different Jones polynomials.");
+    }
+
+    joinStatusLabel_->setText(text);
+}
+
+void MainWindow::applyConnectedSumInvariants(
+    KnotMath::Invariants &invariants) const
+{
+    if (joined_.text.isEmpty() ||
+        currentPreset() != KnotMath::Preset::CustomCoordinates ||
+        customInputEdit_->toPlainText() != joined_.text)
+    {
+        return;
+    }
+
+    invariants.classification =
+        tr("Connected sum %1").arg(joined_.name);
+
+    if (!joined_.remark.isEmpty())
+        invariants.classification += QStringLiteral(", ") + joined_.remark;
+
+    QStringList notes;
+
+    if (joined_.alexanderValid)
+    {
+        const QString product = KnotMath::formatPolynomial(joined_.alexander);
+
+        if (invariants.alexanderPolynomial == product)
+        {
+            notes << tr("The Alexander polynomial of the joined curve is the "
+                        "product of those of the two knots, as it must be.");
+        }
+        else
+        {
+            invariants.alexanderPolynomial = product;
+
+            notes << tr("Alexander polynomial: the product of those of the "
+                        "two knots.");
+        }
+    }
+
+    if (joined_.jonesValid)
+    {
+        const QString product = KnotMath::formatPolynomial(joined_.jones);
+
+        if (invariants.jonesPolynomial == product)
+        {
+            notes << tr("So is its Jones polynomial.");
+        }
+        else
+        {
+            invariants.jonesPolynomial = product;
+
+            notes << tr("Jones polynomial: the product of those of the two "
+                        "knots (this diagram is too large to compute it "
+                        "directly).");
+        }
+    }
+
+    invariants.methodology = notes.join(QLatin1Char(' '));
 }

@@ -1,6 +1,8 @@
 #ifndef APPSETTINGS_H
 #define APPSETTINGS_H
 
+#include "lighting.h"
+
 #include <QByteArray>
 #include <QString>
 
@@ -42,6 +44,11 @@ void setWindowGeometry(
 QString lastFolder();
 void setLastFolder(
     const QString &folder);
+
+// Lights and shadows of the 3D view (Settings, Lighting).
+Lighting::Options lighting();
+void setLighting(
+    const Lighting::Options &options);
 
 // Removes every stored setting.
 void restoreDefaults();

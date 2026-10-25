@@ -39,6 +39,8 @@ qt_add_executable(AKSIOMAKnots
     knotexport.cpp
     knotseifert.h
     knotseifert.cpp
+    knotjoin.h
+    knotjoin.cpp
     timelineslider.h
     timelineslider.cpp
     knottable.h
@@ -51,6 +53,10 @@ qt_add_executable(AKSIOMAKnots
     unknotsummarydialog.cpp
     appsettings.h
     appsettings.cpp
+    lighting.h
+    lighting.cpp
+    gpumemory.h
+    gpumemory.cpp
     theme.h
     theme.cpp
     resources.qrc
@@ -63,6 +69,8 @@ if(WIN32)
     target_sources(AKSIOMAKnots PRIVATE app.rc)
     # SHChangeNotify: Explorer shows the icon of .aknot files (appsettings.cpp)
     target_link_libraries(AKSIOMAKnots PRIVATE shell32)
+    # video memory of the program (gpumemory.cpp)
+    target_link_libraries(AKSIOMAKnots PRIVATE dxgi)
 endif()
 
 # Knot table (KnotInfo, built by tools/make_knot_table.cpp). About 9 MB, so it
@@ -99,5 +107,5 @@ endif()
 qt_add_translations(AKSIOMAKnots
     TS_FILES KnotTheory_sq_AL.ts
     RESOURCE_PREFIX /i18n
-    LUPDATE_OPTIONS -no-obsolete -locations none -tr-function-alias tr+=knotTr,tr+=exportTr,tr+=seifertTr
+    LUPDATE_OPTIONS -no-obsolete -locations none -tr-function-alias tr+=knotTr,tr+=exportTr,tr+=seifertTr,tr+=joinTr
 )

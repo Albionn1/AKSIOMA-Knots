@@ -5,6 +5,8 @@
 #include <QFontMetrics>
 #include <QHideEvent>
 #include <QMouseEvent>
+#include <QOpenGLContext>
+#include <QOpenGLExtraFunctions>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPolygonF>
@@ -27,6 +29,22 @@
 #define GL_MULTISAMPLE 0x809D
 #endif
 
+#ifndef GL_DEPTH_COMPONENT24
+#define GL_DEPTH_COMPONENT24 0x81A6
+#endif
+
+#ifndef GL_TEXTURE_COMPARE_MODE
+#define GL_TEXTURE_COMPARE_MODE 0x884C
+#endif
+
+#ifndef GL_TEXTURE_COMPARE_FUNC
+#define GL_TEXTURE_COMPARE_FUNC 0x884D
+#endif
+
+#ifndef GL_COMPARE_REF_TO_TEXTURE
+#define GL_COMPARE_REF_TO_TEXTURE 0x884E
+#endif
+
 namespace
 {
 
@@ -42,6 +60,71 @@ constexpr int GridHalfLines = 10;
 float groundLevel(float meshMinY)
 {
     return meshMinY - 0.3f;
+}
+
+// Direction towards the key light for a camera on +z (KeyRig in the
+// shaders); the lights turn with the camera (KnotGLWidget::lightRig).
+const QVector3D KeyLightRig(-0.54f, 0.71f, 0.45f);
+
+// where the lights stay when they do not turn with the camera (the
+// camera's first direction)
+constexpr float FixedLightYaw = 35.0f;
+
+// Shadow of the key light, shared by the knot and the floor shaders.
+// The map holds the depth of the scene seen from the light; 16 filtered
+// lookups spread over a small disk give the shadow a soft edge.
+const char *ShadowGlsl = R"(
+uniform vec3 uKeyDir;           // towards the key light (world)
+
+uniform sampler2DShadow uShadowMap;
+uniform mat4 uLightMatrix;      // world -> shadow map (0..1)
+uniform int uShadows;
+uniform float uShadowTexel;     // one texel of the map, in world units
+uniform float uShadowSoftness;  // radius of the soft edge, in map units
+uniform float uShadowDepthBias; // depth change across it on a 45 degree slope
+
+const vec2 Disk[16] = vec2[16](
+    vec2(-0.942, -0.399), vec2(0.946, -0.769), vec2(-0.094, -0.929), vec2(0.345, 0.294),
+    vec2(-0.916, 0.458), vec2(-0.815, -0.879), vec2(-0.383, 0.277), vec2(0.975, 0.756),
+    vec2(0.443, -0.975), vec2(0.537, -0.474), vec2(-0.265, -0.419), vec2(0.792, 0.191),
+    vec2(-0.242, 0.997), vec2(-0.814, 0.914), vec2(0.200, 0.786), vec2(0.144, -0.141));
+
+// 1 = lit by the key light, 0 = in shadow (p on a surface with normal n)
+float keyShadow(vec3 p, vec3 n)
+{
+    if (uShadows == 0)
+        return 1.0;
+
+    // The point is pushed off its surface (more where the light grazes it)
+    // and the comparison allows for the slope of the surface across the
+    // soft edge: no surface shadows itself.
+    float cosine = clamp(abs(dot(n, uKeyDir)), 0.25, 1.0);
+    float slope = sqrt(1.0 - cosine * cosine) / cosine;
+
+    vec3 c = (uLightMatrix * vec4(p + n * uShadowTexel * (1.0 + slope), 1.0)).xyz;
+
+    if (c.x <= 0.0 || c.x >= 1.0 || c.y <= 0.0 || c.y >= 1.0 || c.z >= 1.0)
+        return 1.0;
+
+    float depth = c.z - uShadowDepthBias * slope;
+    float lit = 0.0;
+
+    // the disk turned differently at every pixel: fine grain instead of
+    // stripes along the soft edge
+    float angle = 6.2831853 *
+        fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    mat2 turn = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
+
+    for (int i = 0; i < 16; ++i)
+        lit += texture(uShadowMap, vec3(c.xy + turn * Disk[i] * uShadowSoftness, depth));
+
+    return lit / 16.0;
+}
+)";
+
+QByteArray withShadows(const char *body)
+{
+    return QByteArray("#version 330 core\n") + ShadowGlsl + body;
 }
 
 } // namespace
@@ -110,9 +193,17 @@ KnotGLWidget::~KnotGLWidget()
         if (backgroundVao_.isCreated())
             backgroundVao_.destroy();
 
+        if (shadowFramebuffer_ != 0)
+            glDeleteFramebuffers(1, &shadowFramebuffer_);
+
+        if (shadowTexture_ != 0)
+            glDeleteTextures(1, &shadowTexture_);
+
         meshProgram_.reset();
         backgroundProgram_.reset();
         flatProgram_.reset();
+        shadowProgram_.reset();
+        depthProgram_.reset();
 
         doneCurrent();
     }
@@ -145,6 +236,7 @@ void KnotGLWidget::initializeGL()
     glClearColor(0.0235f, 0.0235f, 0.0235f, 1.0f);
 
     initializeShaders();
+    initializeShadowMap();
     initializeFlatBuffers();
 
     uploadMesh();
@@ -168,6 +260,7 @@ layout(location = 1) in vec3 normal;
 layout(location = 2) in vec3 vertexColor;
 layout(location = 3) in vec4 texcoord;
 layout(location = 4) in float occlusion;
+layout(location = 5) in float sheet;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -179,6 +272,7 @@ out vec3 vWorldNormal;
 out vec3 vVertexColor;
 out vec4 vTexcoord;
 out float vOcclusion;
+out float vSheet;
 
 void main()
 {
@@ -189,19 +283,19 @@ void main()
     vVertexColor = vertexColor;
     vTexcoord = texcoord;
     vOcclusion = occlusion;
+    vSheet = sheet;
 
     gl_Position = uProjection * uView * worldPosition;
 }
 )";
 
     const char *meshFragmentShader = R"(
-#version 330 core
-
 in vec3 vWorldPosition;
 in vec3 vWorldNormal;
 in vec3 vVertexColor;
 in vec4 vTexcoord;
 in float vOcclusion;
+in float vSheet;
 
 uniform vec3 uCameraPosition;
 uniform vec3 uBaseColor;
@@ -209,19 +303,52 @@ uniform int uUseVertexColors;
 uniform float uMetallic;
 uniform float uRoughness;
 uniform int uMaterial;      // 0 glossy, 1 satin, 2 metal, 3 rope
+uniform int uDarkTheme;
+
+// Settings, Lighting: 1 on, 0 off; brightness (1 = normal)
+uniform float uKeyOn;
+uniform float uFillOn;
+uniform float uRimOn;
+uniform float uReflections;
+uniform float uOcclusion;
+uniform float uExposure;
 
 out vec4 fragColor;
 
 const float PI = 3.14159265;
 
-// Studio lights (directions towards the light) and their colours.
-const vec3 KeyDir = vec3(0.37, 0.56, 0.74);
-const vec3 FillDir = vec3(-0.80, 0.35, 0.49);
-const vec3 RimDir = vec3(0.05, 0.55, -0.83);
+// The lights stand around the camera like a photographer's studio, so the
+// knot is always lit from the side whichever way it is turned: directions
+// towards the lights for a camera on +z, turned with the camera by uRig.
+// Key light high on the left, fill low on the right, rim light behind,
+// two tall strip lights at the sides and a soft box overhead.
+uniform mat3 uRig;
+
+const vec3 KeyRig = vec3(-0.54, 0.71, 0.45);
+const vec3 FillRig = vec3(0.78, 0.30, 0.55);
+const vec3 RimRig = vec3(0.35, 0.55, -0.76);
+const vec3 LeftStripRig = vec3(-0.97, 0.10, -0.22);
+const vec3 RightStripRig = vec3(0.92, 0.12, -0.37);
+const vec3 TopRig = vec3(0.0, 0.995, 0.10);
 
 const vec3 KeyColor = vec3(2.1, 2.0, 1.85);
 const vec3 FillColor = vec3(0.32, 0.36, 0.45);
 const vec3 RimColor = vec3(1.1, 1.1, 1.2);
+
+// roughness of the clear lacquer over the glossy material (squared)
+const float CoatAlpha = 0.0225;
+
+struct Surface
+{
+    vec3 albedo;
+    vec3 f0;
+    float a;        // roughness squared
+    float metal;
+    vec3 sheen;     // colour of the velvet sheen at grazing angles
+    float sheenRough;
+    float coat;     // strength of the clear lacquer
+    float coatA;    // its roughness squared
+};
 
 vec3 toLinear(vec3 c)
 {
@@ -250,31 +377,79 @@ vec3 fresnelSchlick(float cosine, vec3 f0)
     return f0 + (1.0 - f0) * pow(1.0 - cosine, 5.0);
 }
 
-// Simple studio surroundings for reflections: dark floor, grey walls, a
-// large soft key box and a rim strip. Rough surfaces see them blurred.
-vec3 environment(vec3 d, float rough)
+// "Charlie" sheen: fibres catch the light at grazing angles (cloth).
+float sheenDistribution(float nh, float r)
 {
-    vec3 floorColor = vec3(0.010);
-    vec3 wallColor = vec3(0.045, 0.045, 0.050);
-    vec3 ceilingColor = vec3(0.09);
+    float inverse = 1.0 / r;
+    float sin2 = max(1.0 - nh * nh, 0.0078125);
 
-    vec3 c = mix(floorColor, wallColor, smoothstep(-0.35, 0.05, d.y));
+    return (2.0 + inverse) * pow(sin2, 0.5 * inverse) / (2.0 * PI);
+}
+
+// A rectangular soft box in direction `axis`, `size` = tangent of its half
+// widths; `blur` softens its edge for rough surfaces.
+float softbox(vec3 d, vec3 axis, vec2 size, float blur)
+{
+    float facing = dot(d, axis);
+
+    if (facing <= 0.0)
+        return 0.0;
+
+    vec3 reference = abs(axis.y) > 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    vec3 right = normalize(cross(reference, axis));
+    vec3 up = cross(axis, right);
+
+    vec2 q = vec2(dot(d, right), dot(d, up)) / facing;
+    vec2 e = abs(q) - size;
+    float outside = length(max(e, 0.0)) + min(max(e.x, e.y), 0.0);
+
+    return (1.0 - smoothstep(-blur, blur, outside)) * smoothstep(0.0, 0.3, facing);
+}
+
+// Studio surroundings for reflections: floor, walls and ceiling (lighter in
+// the light theme, a brighter band of wall just above the horizon) and the
+// lights as soft boxes, much brighter than the walls, so that even plastic
+// (4% reflection) shows them. On a tube the strips become long highlights
+// running along it, as in a product photograph. Rough surfaces see
+// everything blurred; `keyLit` dims the key box where the key light is
+// shadowed. `d` is in world space.
+vec3 environment(vec3 d, float rough, float keyLit)
+{
+    vec3 e = transpose(uRig) * d;
+
+    bool dark = uDarkTheme != 0;
+
+    vec3 floorColor = dark ? vec3(0.010) : vec3(0.16, 0.158, 0.15);
+    vec3 wallColor = dark ? vec3(0.045, 0.045, 0.050) : vec3(0.30, 0.30, 0.31);
+    vec3 ceilingColor = dark ? vec3(0.09) : vec3(0.42);
+
+    float blur = mix(0.02, 0.45, rough);
+
+    // horizon: sharp in a mirror, soft on a rough surface
+    vec3 c = mix(floorColor, wallColor, smoothstep(-0.10 - blur, 0.02 + blur, d.y));
     c = mix(c, ceilingColor, smoothstep(0.25, 0.95, d.y));
+    c *= 1.0 + 0.8 * exp(-pow((d.y - 0.12) / (0.10 + blur), 2.0));
 
-    float spread = mix(0.05, 0.8, rough);
-    float sharp = mix(1.0, 0.25, rough);
+    // a blurred box is larger and dimmer (the same light spread out)
+    float dim = 1.0 / (1.0 + 6.0 * blur);
 
-    c += vec3(1.7, 1.6, 1.5) * sharp *
-         exp((dot(d, KeyDir) - 1.0) / (spread * spread));
+    c += vec3(14.0, 13.3, 12.2) * dim * mix(1.0, keyLit, 0.8) * uKeyOn * uReflections *
+         softbox(e, KeyRig, vec2(0.42, 0.30), blur);
 
-    c += vec3(0.7, 0.75, 0.85) * sharp *
-         exp((dot(d, RimDir) - 1.0) / (1.5 * spread * spread));
+    dim *= uReflections;
+
+    c += vec3(4.0, 4.0, 3.9) * dim * softbox(e, TopRig, vec2(0.70, 0.40), blur);
+    c += vec3(7.0, 6.8, 6.5) * dim * softbox(e, LeftStripRig, vec2(0.05, 1.20), blur);
+    c += vec3(4.6, 5.0, 5.6) * dim * softbox(e, RightStripRig, vec2(0.05, 1.20), blur);
+    c += vec3(3.6, 3.8, 4.2) * dim * uRimOn * softbox(e, RimRig, vec2(0.60, 0.05), blur);
+    c += vec3(1.0, 1.1, 1.3) * dim * uFillOn * softbox(e, FillRig, vec2(0.50, 0.50), blur);
 
     return c;
 }
 
-vec3 directLight(vec3 n, vec3 v, vec3 l, vec3 radiance,
-                 vec3 albedo, vec3 f0, float a, float metal)
+// `size`: the light is not a point; its highlight is as wide as on a
+// surface that much rougher (the energy stays the same).
+vec3 directLight(vec3 n, vec3 v, vec3 l, vec3 radiance, float size, Surface s)
 {
     float nl = dot(n, l);
 
@@ -285,18 +460,32 @@ vec3 directLight(vec3 n, vec3 v, vec3 l, vec3 radiance,
 
     float nv = max(dot(n, v), 1.0e-3);
     float nh = max(dot(n, h), 0.0);
+    float vh = max(dot(v, h), 0.0);
 
-    vec3 f = fresnelSchlick(max(dot(v, h), 0.0), f0);
+    vec3 f = fresnelSchlick(vh, s.f0);
+
+    float a = min(s.a + size, 1.0);
+    float coatA = min(s.coatA + size, 1.0);
 
     vec3 specular = distributionGGX(nh, a) * visibilitySmith(nv, nl, a) * f;
-    vec3 diffuse = (1.0 - f) * (1.0 - metal) * albedo / PI;
+    vec3 diffuse = (1.0 - f) * (1.0 - s.metal) * s.albedo / PI;
+    vec3 sheen = s.sheen * sheenDistribution(nh, s.sheenRough) /
+                 (4.0 * (nl + nv - nl * nv));
 
-    return (diffuse + specular) * radiance * nl;
+    // the lacquer reflects some light before it reaches the colour below
+    float fc = s.coat * (0.04 + 0.96 * pow(1.0 - vh, 5.0));
+    float coat = fc * distributionGGX(nh, coatA) * visibilitySmith(nv, nl, coatA);
+
+    return ((diffuse + specular + sheen) * (1.0 - fc) + coat) * radiance * nl;
 }
 
 void main()
 {
-    vec3 n = normalize(vWorldNormal);
+    // Seifert surface: a thin painted card whatever the tube material
+    bool sheet = vSheet > 0.5;
+
+    vec3 geometric = normalize(vWorldNormal);
+    vec3 n = geometric;
     vec3 v = normalize(uCameraPosition - vWorldPosition);
 
     if (dot(n, v) < 0.0)
@@ -306,9 +495,31 @@ void main()
 
     float rough = clamp(uRoughness, 0.04, 1.0);
     float metal = clamp(uMetallic, 0.0, 1.0);
-    float ao = clamp(vOcclusion, 0.0, 1.0);
+    float ao = mix(1.0, clamp(vOcclusion, 0.0, 1.0), uOcclusion);
 
-    if (uMaterial == 3)
+    Surface s;
+
+    s.sheen = vec3(0.0);
+    s.sheenRough = 0.5;
+    s.coat = 0.0;
+
+    if (sheet)
+    {
+        // half gloss, a faint sheen at the edges
+        rough = 0.55;
+        metal = 0.0;
+        s.sheen = 0.15 * mix(albedo, vec3(1.0), 0.5);
+    }
+    else if (uMaterial == 0)
+    {
+        // glossy plastic under a clear lacquer, as glossy as the shine
+        s.coat = 0.9 * (1.0 - rough);
+    }
+    else if (uMaterial == 1)
+    {
+        s.sheen = 0.35 * mix(albedo, vec3(1.0), 0.3);
+    }
+    else if (uMaterial == 3)
     {
         // Three-strand rope: helical grooves between the strands and fine
         // fibres twisted the other way. Integer multiples of the two
@@ -327,39 +538,76 @@ void main()
 
         albedo *= mix(0.3, 1.0, bulge) * mix(0.82, 1.0, fibres);
         ao *= mix(0.5, 1.0, bulge);
+
+        s.sheen = 0.5 * albedo * mix(0.6, 1.0, fibres);
+        s.sheenRough = 0.7;
     }
 
-    float a = rough * rough;
-    vec3 f0 = mix(vec3(0.04), albedo, metal);
+    // Where the normal turns quickly across a pixel (thin or far tubes) a
+    // sharp highlight would flicker; it is widened to what the pixel sees.
+    vec3 dndx = dFdx(geometric);
+    vec3 dndy = dFdy(geometric);
+    float kernel = min(0.5 * (dot(dndx, dndx) + dot(dndy, dndy)), 0.18);
+
+    float a = sqrt(rough * rough * rough * rough + kernel);
+
+    s.albedo = albedo;
+    s.f0 = mix(vec3(0.04), albedo, metal);
+    s.a = a;
+    s.coatA = sqrt(CoatAlpha * CoatAlpha + kernel);
+    s.metal = metal;
+
+    float keyLit = keyShadow(vWorldPosition, geometric);
 
     // direct light, partly shaded where strands are close (depth cue)
     vec3 color = vec3(0.0);
 
-    color += directLight(n, v, KeyDir, KeyColor, albedo, f0, a, metal);
-    color += directLight(n, v, FillDir, FillColor, albedo, f0, a, metal);
-    color += directLight(n, v, RimDir, RimColor, albedo, f0, a, metal);
+    color += directLight(n, v, uKeyDir, KeyColor * (keyLit * uKeyOn), 0.06, s);
+    color += directLight(n, v, uRig * FillRig, FillColor * uFillOn, 0.08, s);
+    color += directLight(n, v, uRig * RimRig, RimColor * uRimOn, 0.04, s);
 
     color *= mix(1.0, ao, 0.6);
 
-    // ambient: sky above, dark floor below
-    vec3 sky = vec3(0.10, 0.10, 0.115);
-    vec3 ground = vec3(0.02, 0.019, 0.018);
+    // a little of the key light shines through the sheet from behind
+    if (sheet)
+    {
+        float behind = max(dot(-geometric, uKeyDir), 0.0);
+
+        color += albedo * KeyColor * (0.08 * behind * uKeyOn) * keyShadow(vWorldPosition, -geometric);
+    }
+
+    // ambient: sky above, floor below (lighter in the light theme)
+    bool dark = uDarkTheme != 0;
+
+    vec3 sky = dark ? vec3(0.10, 0.10, 0.115) : vec3(0.15, 0.15, 0.16);
+    vec3 ground = dark ? vec3(0.02, 0.019, 0.018) : vec3(0.07, 0.068, 0.064);
     vec3 irradiance = mix(ground, sky, 0.5 + 0.5 * n.y);
 
     color += irradiance * albedo * (1.0 - metal) * ao;
 
-    // reflections of the studio
+    // reflections of the studio; creases and shaded places reflect less
     float nv = max(dot(n, v), 0.0);
-    vec3 fEnv = f0 + (max(vec3(1.0 - rough), f0) - f0) * pow(1.0 - nv, 5.0);
+    vec3 fEnv = s.f0 + (max(vec3(1.0 - rough), s.f0) - s.f0) * pow(1.0 - nv, 5.0);
     vec3 r = reflect(-v, n);
 
-    color += environment(r, rough) * fEnv * ao;
+    float specularAo = clamp(pow(nv + ao, exp2(-16.0 * a - 1.0)) - 1.0 + ao, 0.0, 1.0);
+    float coatEnv = s.coat * (0.04 + 0.96 * pow(1.0 - nv, 5.0));
+
+    color += environment(r, rough, keyLit) * fEnv * specularAo * (1.0 - coatEnv);
+    color += environment(r, sqrt(s.coatA), keyLit) * coatEnv * specularAo;
+
+    color *= uExposure;
 
     // filmic tone mapping (ACES fit) and display gamma
     color = (color * (2.51 * color + 0.03)) /
             (color * (2.43 * color + 0.59) + 0.14);
 
-    fragColor = vec4(pow(clamp(color, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
+    color = pow(clamp(color, 0.0, 1.0), vec3(1.0 / 2.2));
+
+    // a trace of noise hides the banding of smooth gradients
+    float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+
+    fragColor = vec4(color + (noise - 0.5) / 255.0, 1.0);
 }
 )";
 
@@ -370,7 +618,7 @@ void main()
     meshOk = meshOk &&
              meshProgram_->addShaderFromSourceCode(
                  QOpenGLShader::Fragment,
-                 meshFragmentShader);
+                 withShadows(meshFragmentShader));
 
     if (meshOk)
     {
@@ -379,6 +627,7 @@ void main()
         meshProgram_->bindAttributeLocation("vertexColor", 2);
         meshProgram_->bindAttributeLocation("texcoord", 3);
         meshProgram_->bindAttributeLocation("occlusion", 4);
+        meshProgram_->bindAttributeLocation("sheet", 5);
 
         meshProgram_->link();
     }
@@ -557,8 +806,6 @@ void main()
 )";
 
     const char *shadowFragmentShader = R"(
-#version 330 core
-
 in vec3 vWorld;
 
 // x, z, blur (sigma), weight of every shadow-casting point
@@ -597,7 +844,10 @@ void main()
     if (alpha <= 0.003)
         discard;
 
-    vec3 floorColor = uFloor * (1.0 - shadow);
+    // the shadow cast by the key light, lighter than the one below
+    float keyLit = keyShadow(vWorld, vec3(0.0, 1.0, 0.0));
+
+    vec3 floorColor = uFloor * (1.0 - shadow) * mix(0.55, 1.0, keyLit);
 
     fragColor = vec4(floorColor, alpha);
 }
@@ -610,13 +860,218 @@ void main()
     shadowOk = shadowOk &&
                shadowProgram_->addShaderFromSourceCode(
                    QOpenGLShader::Fragment,
-                   shadowFragmentShader);
+                   withShadows(shadowFragmentShader));
 
     if (shadowOk)
     {
         shadowProgram_->bindAttributeLocation("aPosition", 0);
         shadowProgram_->link();
     }
+}
+
+void KnotGLWidget::initializeShadowMap()
+{
+    depthProgram_ = std::make_unique<QOpenGLShaderProgram>();
+
+    const char *depthVertexShader = R"(
+#version 330 core
+
+layout(location = 0) in vec3 position;
+
+uniform mat4 uLightViewProjection;
+
+void main()
+{
+    gl_Position = uLightViewProjection * vec4(position, 1.0);
+}
+)";
+
+    // only the depth is written
+    const char *depthFragmentShader = R"(
+#version 330 core
+
+void main()
+{
+}
+)";
+
+    bool depthOk = depthProgram_->addShaderFromSourceCode(
+        QOpenGLShader::Vertex,
+        depthVertexShader);
+
+    depthOk = depthOk &&
+              depthProgram_->addShaderFromSourceCode(
+                  QOpenGLShader::Fragment,
+                  depthFragmentShader);
+
+    if (depthOk)
+    {
+        depthProgram_->bindAttributeLocation("position", 0);
+        depthOk = depthProgram_->link();
+    }
+
+    // depth texture compared in the shaders (sampler2DShadow); linear
+    // filtering blends four comparisons for free
+    glGenTextures(1, &shadowTexture_);
+
+    allocateShadowMap();
+
+    glBindTexture(GL_TEXTURE_2D, shadowTexture_);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glGenFramebuffers(1, &shadowFramebuffer_);
+    glBindFramebuffer(GL_FRAMEBUFFER, shadowFramebuffer_);
+
+    glFramebufferTexture2D(
+        GL_FRAMEBUFFER,
+        GL_DEPTH_ATTACHMENT,
+        GL_TEXTURE_2D,
+        shadowTexture_,
+        0);
+
+    // no colour attachment
+    const GLenum none = GL_NONE;
+
+    QOpenGLExtraFunctions *extra = context()->extraFunctions();
+
+    extra->glDrawBuffers(1, &none);
+    extra->glReadBuffer(GL_NONE);
+
+    shadowsReady_ =
+        depthOk &&
+        glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+}
+
+void KnotGLWidget::allocateShadowMap()
+{
+    glBindTexture(GL_TEXTURE_2D, shadowTexture_);
+
+    glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        GL_DEPTH_COMPONENT24,
+        shadowMapSize_,
+        shadowMapSize_,
+        0,
+        GL_DEPTH_COMPONENT,
+        GL_UNSIGNED_INT,
+        nullptr);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void KnotGLWidget::drawShadowMap()
+{
+    if (!shadowsReady_ || !mesh_.isValid() || indexCount_ <= 0)
+        return;
+
+    // nothing casts a shadow without the key light
+    if (!lighting_.keyLight || (!lighting_.knotShadows && !lighting_.floorShadow))
+        return;
+
+    // The light looks at the bounding sphere of the knot from the key
+    // light's direction; the depth range reaches the floor below it.
+    const QVector3D centre = 0.5f * (meshMin_ + meshMax_);
+    const float radius = 1.05f * std::max(0.5f * (meshMax_ - meshMin_).length(), 0.5f);
+
+    const float nearPlane = 0.5f * radius;
+    const float farPlane = 6.0f * radius + 1.0f;
+
+    QMatrix4x4 lightView;
+
+    lightView.lookAt(
+        centre + lightRig().map(KeyLightRig) * (2.0f * radius),
+        centre,
+        QVector3D(0.0f, 1.0f, 0.0f));
+
+    QMatrix4x4 lightProjection;
+
+    lightProjection.ortho(-radius, radius, -radius, radius, nearPlane, farPlane);
+
+    const QMatrix4x4 lightViewProjection = lightProjection * lightView;
+
+    // clip space (-1..1) -> map coordinates (0..1)
+    QMatrix4x4 toMap;
+
+    toMap.translate(0.5f, 0.5f, 0.5f);
+    toMap.scale(0.5f);
+
+    lightMatrix_ = toMap * lightViewProjection;
+
+    // The soft edge is about half a tube radius wide (at least a few
+    // texels), like a key light of some size.
+    shadowTexel_ = 2.0f * radius / static_cast<float>(shadowMapSize_);
+
+    const float tubeRadius =
+        mesh_.centerline.size() >= 4 ? mesh_.centerline.at(3) : 0.05f * radius;
+
+    const float softness =
+        std::max(0.5f * tubeRadius * static_cast<float>(lighting_.shadowSoftness) / 100.0f,
+                 2.5f * shadowTexel_);
+
+    shadowSoftness_ = softness / (2.0f * radius);
+    shadowDepthBias_ = 1.25f * softness / (farPlane - nearPlane);
+
+    // not bound for reading while it is drawn into
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, shadowFramebuffer_);
+    glViewport(0, 0, shadowMapSize_, shadowMapSize_);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    // both sides (the Seifert surface is a sheet), pushed back a little
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(2.0f, 4.0f);
+
+    depthProgram_->bind();
+    depthProgram_->setUniformValue("uLightViewProjection", lightViewProjection);
+
+    meshVao_.bind();
+
+    glDrawElements(GL_TRIANGLES, indexCount_, GL_UNSIGNED_INT, nullptr);
+
+    meshVao_.release();
+    depthProgram_->release();
+
+    glDisable(GL_POLYGON_OFFSET_FILL);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+}
+
+void KnotGLWidget::setShadowUniforms(QOpenGLShaderProgram &program, bool wanted)
+{
+    const bool shadows =
+        wanted && lighting_.keyLight &&
+        shadowsReady_ && mesh_.isValid() && indexCount_ > 0;
+
+    // the map is on texture unit 1
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, shadows ? shadowTexture_ : 0);
+    glActiveTexture(GL_TEXTURE0);
+
+    program.setUniformValue("uKeyDir", lightRig().map(KeyLightRig));
+    program.setUniformValue("uShadowMap", 1);
+    program.setUniformValue("uShadows", shadows ? 1 : 0);
+    program.setUniformValue("uLightMatrix", lightMatrix_);
+    program.setUniformValue("uShadowTexel", shadowTexel_);
+    program.setUniformValue("uShadowSoftness", shadowSoftness_);
+    program.setUniformValue("uShadowDepthBias", shadowDepthBias_);
 }
 
 void KnotGLWidget::configureFlatAttributes()
@@ -774,6 +1229,9 @@ void KnotGLWidget::rebuildGroundGeometry()
     vertices.push_back(corner(-1.0f, 1.0f));
 
     groundBuffer_.bind();
+
+    groundBytes_ =
+        static_cast<qint64>(vertices.size()) * static_cast<qint64>(sizeof(FlatVertex));
 
     groundBuffer_.allocate(
         vertices.constData(),
@@ -1239,6 +1697,66 @@ void KnotGLWidget::setMaterialProperties(float metallic)
     update();
 }
 
+void KnotGLWidget::setLighting(const Lighting::Options &options)
+{
+    lighting_ = options;
+
+    const int size = Lighting::shadowMapSize(options.shadowQuality);
+
+    if (size != shadowMapSize_)
+    {
+        shadowMapSize_ = size;
+
+        if (glInitialized_ && shadowTexture_ != 0)
+        {
+            makeCurrent();
+
+            allocateShadowMap();
+
+            doneCurrent();
+        }
+    }
+
+    update();
+}
+
+const Lighting::Options &KnotGLWidget::lighting() const
+{
+    return lighting_;
+}
+
+KnotGLWidget::MemoryUse KnotGLWidget::memoryUse() const
+{
+    MemoryUse use;
+
+    if (!glInitialized_)
+        return use;
+
+    use.mesh = meshBytes_;
+
+    // depth, 4 bytes per texel
+    use.shadowMap =
+        shadowsReady_
+            ? static_cast<qint64>(shadowMapSize_) * shadowMapSize_ * 4
+            : 0;
+
+    // The view is drawn into a framebuffer with several samples per pixel
+    // (colour and depth/stencil, 4 bytes each), then resolved into a
+    // texture of one colour per pixel.
+    const double dpr = devicePixelRatioF();
+
+    const qint64 pixels =
+        static_cast<qint64>(width() * dpr) * static_cast<qint64>(height() * dpr);
+
+    use.view = pixels * (std::max(1, format().samples()) * 8 + 4);
+
+    use.other =
+        groundBytes_ +
+        static_cast<qint64>(MaxParticles) * static_cast<qint64>(sizeof(FlatVertex));
+
+    return use;
+}
+
 void KnotGLWidget::setSurface(int material, float roughness)
 {
     material_ = std::clamp(material, 0, 3);
@@ -1266,6 +1784,7 @@ void KnotGLWidget::uploadMesh()
 
     const bool hasTexcoords = mesh_.texcoords.size() == vertexCount * 4;
     const bool hasOcclusion = mesh_.occlusion.size() == vertexCount;
+    const bool hasSheet = mesh_.sheet.size() == vertexCount;
 
     for (int i = 0; i < vertexCount; ++i)
     {
@@ -1298,6 +1817,7 @@ void KnotGLWidget::uploadMesh()
         vertex.t3 = hasTexcoords ? mesh_.texcoords.at(i * 4 + 3) : 0.0f;
 
         vertex.ao = hasOcclusion ? mesh_.occlusion.at(i) : 1.0f;
+        vertex.sheet = hasSheet ? mesh_.sheet.at(i) : 0.0f;
 
         vertices.push_back(vertex);
     }
@@ -1360,11 +1880,23 @@ void KnotGLWidget::uploadMesh()
         1,
         stride);
 
+    meshProgram_->enableAttributeArray(5);
+    meshProgram_->setAttributeBuffer(
+        5,
+        GL_FLOAT,
+        static_cast<int>(14 * sizeof(float)),
+        1,
+        stride);
+
     meshProgram_->release();
 
     meshVao_.release();
 
     indexCount_ = mesh_.indices.size();
+
+    meshBytes_ =
+        static_cast<qint64>(vertices.size()) * static_cast<qint64>(sizeof(Vertex)) +
+        static_cast<qint64>(indexCount_) * static_cast<qint64>(sizeof(unsigned int));
 
     vertexBuffer_.release();
     indexBuffer_.release();
@@ -1382,6 +1914,7 @@ void KnotGLWidget::destroyMeshBuffers()
         indexBuffer_.destroy();
 
     indexCount_ = 0;
+    meshBytes_ = 0;
 }
 
 /*
@@ -1423,6 +1956,16 @@ QMatrix4x4 KnotGLWidget::modelMatrix() const
     model.setToIdentity();
 
     return model;
+}
+
+QMatrix4x4 KnotGLWidget::lightRig() const
+{
+    // the camera's turn about the vertical (it sits on +z at yaw 0)
+    QMatrix4x4 rig;
+
+    rig.rotate(lighting_.followCamera ? yaw_ : FixedLightYaw, 0.0f, 1.0f, 0.0f);
+
+    return rig;
 }
 
 QVector3D KnotGLWidget::computeCameraPosition() const
@@ -1547,7 +2090,8 @@ void KnotGLWidget::drawGround(const QMatrix4x4 &viewProjection)
     flatProgram_->setUniformValue("uFadeInner", 0.35f);
     flatProgram_->setUniformValue("uGridAlpha", Theme::isDark() ? 1.0f : 0.5f);
 
-    glDrawArrays(GL_LINES, 0, gridVertexCount_);
+    if (lighting_.floorGrid)
+        glDrawArrays(GL_LINES, 0, gridVertexCount_);
 
     groundVao_.release();
     flatProgram_->release();
@@ -1648,7 +2192,9 @@ void KnotGLWidget::drawShadow(const QMatrix4x4 &viewProjection)
     shadowProgram_->setUniformValue("uCount", static_cast<int>(points.size()));
     shadowProgram_->setUniformValue("uFadeCenter", QVector2D(cx, cz));
     shadowProgram_->setUniformValue("uFadeRadii", QVector2D(rx, rz));
-    shadowProgram_->setUniformValue("uStrength", 0.8f);
+    shadowProgram_->setUniformValue("uStrength", lighting_.contactShadow ? 0.8f : 0.0f);
+
+    setShadowUniforms(*shadowProgram_, lighting_.floorShadow);
 
     shadowProgram_->setUniformValue(
         "uFloor",
@@ -1700,6 +2246,19 @@ void KnotGLWidget::drawMesh(
     meshProgram_->setUniformValue("uMetallic", metallic_);
     meshProgram_->setUniformValue("uRoughness", roughness_);
     meshProgram_->setUniformValue("uMaterial", material_);
+    meshProgram_->setUniformValue("uDarkTheme", Theme::isDark() ? 1 : 0);
+    meshProgram_->setUniformValue("uRig", lightRig().normalMatrix());
+
+    meshProgram_->setUniformValue("uKeyOn", lighting_.keyLight ? 1.0f : 0.0f);
+    meshProgram_->setUniformValue("uFillOn", lighting_.fillLight ? 1.0f : 0.0f);
+    meshProgram_->setUniformValue("uRimOn", lighting_.rimLight ? 1.0f : 0.0f);
+    meshProgram_->setUniformValue("uReflections", lighting_.reflections ? 1.0f : 0.0f);
+    meshProgram_->setUniformValue("uOcclusion", lighting_.occlusion ? 1.0f : 0.0f);
+    meshProgram_->setUniformValue(
+        "uExposure",
+        static_cast<float>(lighting_.brightness) / 100.0f);
+
+    setShadowUniforms(*meshProgram_, lighting_.knotShadows);
 
     meshVao_.bind();
 
@@ -1850,6 +2409,19 @@ void KnotGLWidget::paintGL()
 {
     if (!glInitialized_)
         return;
+
+    // a knot that arrived before the view had its size
+    if (pendingFitPitch_ >= 0.0f)
+    {
+        const float pitch = pendingFitPitch_;
+
+        pendingFitPitch_ = -1.0f;
+
+        resetCamera(pitch, false);
+    }
+
+    // first the shadow map (its own framebuffer and viewport)
+    drawShadowMap();
 
     const float dpr = static_cast<float>(devicePixelRatioF());
 
@@ -2161,12 +2733,50 @@ void KnotGLWidget::wheelEvent(QWheelEvent *event)
     event->accept();
 }
 
-void KnotGLWidget::resetCamera(float highestPitch)
+float KnotGLWidget::sphereDistance(float radius) const
+{
+    const float aspect =
+        height() > 0
+            ? static_cast<float>(width()) / static_cast<float>(height())
+            : 1.0f;
+
+    const float halfY = qDegreesToRadians(FieldOfView * 0.5f);
+    const float halfX = std::atan(std::tan(halfY) * aspect);
+
+    // the ball takes 80% of the narrower angle of view
+    return std::clamp(
+        radius / std::sin(0.8f * std::min(halfX, halfY)),
+        2.2f,
+        30.0f);
+}
+
+void KnotGLWidget::flyToSphere(
+    const QVector3D &centre,
+    float radius,
+    float yaw,
+    float pitch)
+{
+    flyCameraTo(yaw, pitch, sphereDistance(radius), centre);
+}
+
+void KnotGLWidget::fitNewKnot(float highestPitch)
+{
+    if (glInitialized_ && isVisible() && width() > 0 && height() > 0)
+    {
+        resetCamera(highestPitch);
+        return;
+    }
+
+    pendingFitPitch_ = highestPitch;
+    update();
+}
+
+void KnotGLWidget::resetCamera(float highestPitch, bool animate)
 {
     /*
      * Best view of the current knot: the direction in which the curve
      * spreads out most while its strands overlap least, then the
-     * distance at which the whole tube fills about 70% of the view.
+     * distance at which the whole tube fills about half of the view.
      */
 
     const int samples = mesh_.centerline.size() / 4;
@@ -2385,8 +2995,9 @@ void KnotGLWidget::resetCamera(float highestPitch)
 
     center += right * (0.5f * (minX + maxX)) + up * (0.5f * (minY + maxY));
 
-    // the knot fills this much of the shorter side, with room around it
-    constexpr float Fill = 0.70f;
+    // the knot fills this much of the shorter side, with calm room
+    // around it
+    constexpr float Fill = 0.50f;
 
     const float aspect =
         height() > 0
@@ -2409,6 +3020,13 @@ void KnotGLWidget::resetCamera(float highestPitch)
     }
 
     flyCameraTo(bestYaw, bestPitch, std::clamp(distance, 2.2f, 30.0f), center);
+
+    // straight there
+    if (!animate)
+    {
+        flightProgress_ = 1.0f;
+        advanceCameraFlight(0.0f);
+    }
 }
 
 void KnotGLWidget::flyCameraTo(

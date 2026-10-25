@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include "knotglwidget.h"
+#include "knotjoin.h"
 #include "knotmath.h"
 #include "knotrelax.h"
 #include "knotseifert.h"
@@ -19,10 +20,14 @@
 #include <QTimer>
 #include <QVector>
 #include <QElapsedTimer>
+#include <QPair>
+
+#include <map>
 
 class QCheckBox;
 class QDialog;
 class QGroupBox;
+class QProgressBar;
 class QShortcut;
 class QTabWidget;
 class TimelineSlider;
@@ -82,6 +87,10 @@ private slots:
     void unknotScrubbed(
         int value);
 
+    // Joining two knots (connected sum, knotjoin.h)
+    void joinPlayStop();
+    void joinTick();
+
 private:
     // knot choice in the top bar: preset, T(p,q), Browse, Draw
     QWidget *createKnotBar(
@@ -92,6 +101,18 @@ private:
     QWidget *createRightPanel();
 
     QWidget *createSettingsPanel();
+
+    // Settings, Lighting: presets, lights and shadows turned on and off,
+    // and the video memory meter.
+    QWidget *createLightingPanel();
+
+    // Shows, saves and reflects new lighting options.
+    void applyLighting(
+        const Lighting::Options &options);
+
+    void updateLightingControls();
+
+    void updateMemoryMeter();
 
     // F11; Esc leaves full screen
     void toggleFullScreen();
@@ -236,6 +257,10 @@ private:
     QDialog *settingsDialog_ =
         nullptr;
 
+    // the knot the camera was last framed for (generateMesh): a new knot
+    // is framed, a new tube density or thickness keeps the view
+    QString framedKnot_;
+
     QComboBox *languageCombo_ =
         nullptr;
 
@@ -252,6 +277,46 @@ private:
         nullptr;
 
     QPushButton *fullScreenButton_ =
+        nullptr;
+
+    QComboBox *lightingPresetCombo_ =
+        nullptr;
+
+    QLabel *lightingPresetText_ =
+        nullptr;
+
+    // every on/off check box with the option it switches
+    QVector<QPair<QCheckBox *, bool Lighting::Options::*>> lightingChecks_;
+
+    QSlider *brightnessSlider_ =
+        nullptr;
+
+    QLabel *brightnessValue_ =
+        nullptr;
+
+    QSlider *shadowSoftnessSlider_ =
+        nullptr;
+
+    QLabel *shadowSoftnessValue_ =
+        nullptr;
+
+    QComboBox *shadowQualityCombo_ =
+        nullptr;
+
+    QLabel *memoryAdapterLabel_ =
+        nullptr;
+
+    QProgressBar *memoryBar_ =
+        nullptr;
+
+    QLabel *memoryUsedLabel_ =
+        nullptr;
+
+    QLabel *memoryViewLabel_ =
+        nullptr;
+
+    // refreshes the meter while the Settings window is open
+    QTimer *memoryTimer_ =
         nullptr;
 
     QShortcut *leaveFullScreenShortcut_ =
@@ -331,6 +396,11 @@ private:
     QLabel *crossingValueLabel_ =
         nullptr;
 
+    // under the crossing count: the least possible, when the diagram on
+    // screen has more crossings
+    QLabel *crossingNoteLabel_ =
+        nullptr;
+
     QLabel *classificationValueLabel_ =
         nullptr;
 
@@ -382,6 +452,85 @@ private:
 
     QLabel *unknotStatusLabel_ =
         nullptr;
+
+    // Joining two knots: the current knot and a second one become their
+    // connected sum. The animation places them side by side, cuts an arc
+    // out of each, grows the band between the ends and fuses them into one
+    // knot (Relax can then let it settle into its own shape).
+    void startJoin();
+
+    // `restoreKnot`: show the current knot again
+    void stopJoin(
+        bool restoreKnot = true);
+
+    void renderJoinFrame();
+    void updateJoinStatus();
+    void finishJoin();
+
+    // the knot symbol of the current knot ("3₁", "T(2,5)", "3₁ # 4₁")
+    QString currentKnotSymbol() const;
+
+    // a knot made by joining: what it is made of, and the invariants that
+    // follow from its parts
+    struct JoinedKnot
+    {
+        // the Custom Curve text of the joined knot (it is the current knot
+        // while the text is unchanged)
+        QString text;
+
+        // "3₁ # 4₁" and a remark ("the granny knot")
+        QString name;
+        QString remark;
+
+        bool alexanderValid = false;
+        std::map<int, long long> alexander;
+
+        bool jonesValid = false;
+        std::map<int, long long> jones;
+    };
+
+    // shows the joined knot's own name and the invariants of its parts
+    void applyConnectedSumInvariants(
+        KnotMath::Invariants &invariants) const;
+
+    QComboBox *joinSecondCombo_ =
+        nullptr;
+
+    QCheckBox *joinMirrorCheck_ =
+        nullptr;
+
+    QPushButton *joinButton_ =
+        nullptr;
+
+    QLabel *joinStatusLabel_ =
+        nullptr;
+
+    QTimer *joinTimer_ =
+        nullptr;
+
+    QElapsedTimer joinClock_;
+
+    bool joinActive_ =
+        false;
+
+    // seconds into the animation, and the stage shown in the status
+    double joinTime_ =
+        0.0;
+
+    int joinStage_ =
+        -1;
+
+    KnotMath::ConnectedSum join_;
+
+    double joinTubeRadius_ =
+        0.16;
+
+    // the last table knot chosen as the second knot
+    QString joinTableName_ =
+        QStringLiteral("3_1");
+
+    JoinedKnot pendingJoined_;
+    JoinedKnot joined_;
 
     QTimer *unknotTimer_ =
         nullptr;

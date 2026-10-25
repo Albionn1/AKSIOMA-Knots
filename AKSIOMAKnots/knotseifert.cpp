@@ -511,6 +511,7 @@ void addTwoSided(
             mesh.colors << static_cast<float>(color.redF()) << static_cast<float>(color.greenF())
                         << static_cast<float>(color.blueF());
             mesh.texcoords << ropeX << ropeY << 1.0f << 0.0f;
+            mesh.sheet << 1.0f;
 
             // no centre line of its own: keeps the tubes' centre lines
             // (shadows, best view) when the meshes are joined
@@ -537,7 +538,7 @@ void addTwoSided(
 
 Mesh tube(const QVector<Vec3> &curve, double radius, const QColor &color)
 {
-    Mesh mesh = buildTubeMesh(curve, radius, 20, true, ColorMode::SingleColor, 2);
+    Mesh mesh = buildTubeMesh(curve, radius, 32, true, ColorMode::SingleColor, 2);
 
     if (mesh.isValid())
         mesh.fillColor(color);

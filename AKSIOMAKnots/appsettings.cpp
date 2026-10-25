@@ -8,6 +8,8 @@
 #include <QStandardPaths>
 #include <QTranslator>
 
+#include <algorithm>
+
 #ifdef Q_OS_WIN
 #include <QDir>
 
@@ -24,6 +26,7 @@ const QString StartFullScreenKey = QStringLiteral("startFullScreen");
 const QString RememberWindowKey = QStringLiteral("rememberWindow");
 const QString WindowGeometryKey = QStringLiteral("windowGeometry");
 const QString LastFolderKey = QStringLiteral("lastFolder");
+const QString LightingGroup = QStringLiteral("lighting");
 
 QTranslator *installedTranslator = nullptr;
 
@@ -155,6 +158,64 @@ void setWindowGeometry(
     const QByteArray &geometry)
 {
     QSettings().setValue(WindowGeometryKey, geometry);
+}
+
+Lighting::Options lighting()
+{
+    QSettings settings;
+
+    settings.beginGroup(LightingGroup);
+
+    const Lighting::Options defaults;
+    Lighting::Options options;
+
+    auto flag = [&settings](const char *key, bool fallback)
+    {
+        return settings.value(QLatin1String(key), fallback).toBool();
+    };
+
+    auto number = [&settings](const char *key, int fallback, int minimum, int maximum)
+    {
+        return std::clamp(settings.value(QLatin1String(key), fallback).toInt(), minimum, maximum);
+    };
+
+    options.keyLight = flag("key", defaults.keyLight);
+    options.fillLight = flag("fill", defaults.fillLight);
+    options.rimLight = flag("rim", defaults.rimLight);
+    options.reflections = flag("reflections", defaults.reflections);
+    options.followCamera = flag("followCamera", defaults.followCamera);
+    options.knotShadows = flag("knotShadows", defaults.knotShadows);
+    options.floorShadow = flag("floorShadow", defaults.floorShadow);
+    options.contactShadow = flag("contactShadow", defaults.contactShadow);
+    options.occlusion = flag("occlusion", defaults.occlusion);
+    options.floorGrid = flag("floorGrid", defaults.floorGrid);
+    options.brightness = number("brightness", defaults.brightness, 50, 150);
+    options.shadowSoftness = number("shadowSoftness", defaults.shadowSoftness, 25, 400);
+    options.shadowQuality = number("shadowQuality", defaults.shadowQuality, 0, 2);
+
+    return options;
+}
+
+void setLighting(
+    const Lighting::Options &options)
+{
+    QSettings settings;
+
+    settings.beginGroup(LightingGroup);
+
+    settings.setValue(QStringLiteral("key"), options.keyLight);
+    settings.setValue(QStringLiteral("fill"), options.fillLight);
+    settings.setValue(QStringLiteral("rim"), options.rimLight);
+    settings.setValue(QStringLiteral("reflections"), options.reflections);
+    settings.setValue(QStringLiteral("followCamera"), options.followCamera);
+    settings.setValue(QStringLiteral("knotShadows"), options.knotShadows);
+    settings.setValue(QStringLiteral("floorShadow"), options.floorShadow);
+    settings.setValue(QStringLiteral("contactShadow"), options.contactShadow);
+    settings.setValue(QStringLiteral("occlusion"), options.occlusion);
+    settings.setValue(QStringLiteral("floorGrid"), options.floorGrid);
+    settings.setValue(QStringLiteral("brightness"), options.brightness);
+    settings.setValue(QStringLiteral("shadowSoftness"), options.shadowSoftness);
+    settings.setValue(QStringLiteral("shadowQuality"), options.shadowQuality);
 }
 
 void restoreDefaults()

@@ -103,6 +103,10 @@ struct Mesh
     // (computeAmbientOcclusion). Empty: no occlusion.
     QVector<float> occlusion;
 
+    // Per vertex: 1 = part of a thin two-sided sheet (the Seifert surface),
+    // shaded as painted card whatever the tube material. Empty: none.
+    QVector<float> sheet;
+
     // Centre line of every tube: x, y, z, radius per sample; the strand it
     // belongs to and the arc length along that strand.
     QVector<float> centerline;

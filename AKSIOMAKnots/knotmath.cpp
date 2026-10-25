@@ -1225,6 +1225,7 @@ void Mesh::clear()
     indices.clear();
     texcoords.clear();
     occlusion.clear();
+    sheet.clear();
     centerline.clear();
     centerlineStrand.clear();
     centerlineArc.clear();
@@ -1288,6 +1289,7 @@ void Mesh::append(const Mesh &other)
 
     appendPerVertex(texcoords, other.texcoords, 4, 0.0f);
     appendPerVertex(occlusion, other.occlusion, 1, 1.0f);
+    appendPerVertex(sheet, other.sheet, 1, 0.0f);
 
     // centre lines: sample and strand numbers continue after ours
     const int existingSamples = centerline.size() / 4;
@@ -3212,14 +3214,14 @@ Invariants computeInvariantsWithCrossings(
     };
 
     const QString builtInMethod =
-        knotTr("Built-in exact class; numerical geometry diagnostics shown below.");
+        knotTr("Exact values for this knot type. The writhe and the crossings "
+               "are measured on the 3D curve on screen.");
 
     switch (preset)
     {
     case Preset::Unknot:
         result.classification = knotTr("Unknot / trivial knot (0_1)");
-        result.methodology = knotTr(
-            "Built-in exact class; numerical writhe and projection crossing count are supplementary.");
+        result.methodology = builtInMethod;
         break;
 
     case Preset::Trefoil:
@@ -3246,9 +3248,10 @@ Invariants computeInvariantsWithCrossings(
 
     case Preset::CustomTorus:
         result.classification =
-            knotTr("Custom torus geometry") + torusHandedness(torusP, torusQ);
+            knotTr("Torus knot T(%1, %2)").arg(torusP).arg(torusQ) +
+            torusHandedness(torusP, torusQ);
         result.methodology = knotTr(
-            "Numerical crossing count and writhe; symbolic torus metadata supplied separately.");
+            "The writhe and the crossings are measured on the 3D curve on screen.");
         break;
 
     case Preset::KnotTable:
@@ -3284,11 +3287,12 @@ Invariants computeInvariantsWithCrossings(
 
     default:
         result.classification =
-            closed ? knotTr("Custom closed geometry")
-                   : knotTr("Custom open curve");
+            closed ? knotTr("Custom knot")
+                   : knotTr("Open curve");
 
         result.methodology = knotTr(
-            "No knot type is inferred rigorously from geometry alone; diagnostics are numerical.");
+            "The knot type cannot be read off the shape alone. The values are "
+            "measured on the 3D curve on screen.");
 
         if (preset == Preset::CustomCoordinates && closed)
         {
@@ -3334,6 +3338,19 @@ Invariants computeInvariantsWithCrossings(
             }
         }
         break;
+    }
+
+    // knot names such as 3_1 written as in the knot list: 3₁
+    static const QRegularExpression tableName(QStringLiteral("\\b\\d+_\\d+\\b"));
+
+    QRegularExpressionMatch match;
+
+    while ((match = tableName.match(result.classification)).hasMatch())
+    {
+        result.classification.replace(
+            match.capturedStart(),
+            match.capturedLength(),
+            KnotTable::displayName(match.captured()));
     }
 
     return result;
