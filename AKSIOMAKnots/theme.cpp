@@ -49,7 +49,10 @@ const QHash<QString, QString> &lightMapping()
         {QStringLiteral("#D99B42"), QStringLiteral("#A5660F")},
         {QStringLiteral("#1A1A1A"), QStringLiteral("#D6D4CE")},
         // blue strand in the unknotting texts
-        {QStringLiteral("#5B9BFF"), QStringLiteral("#2C6BD1")}
+        {QStringLiteral("#5B9BFF"), QStringLiteral("#2C6BD1")},
+        // the two loops of a Seifert matrix entry
+        {QStringLiteral("#46CD78"), QStringLiteral("#1C8A47")},
+        {QStringLiteral("#E150C8"), QStringLiteral("#B02A9A")}
     };
 
     return mapping;

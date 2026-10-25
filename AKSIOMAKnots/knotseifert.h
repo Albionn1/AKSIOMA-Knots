@@ -107,6 +107,25 @@ struct SeifertSurface
     // Delta(t) = Delta(1/t), Delta(1) = 1
     std::map<int, long long> alexander;
     QString alexanderText;
+
+    // The loops a_1 ... a_2g behind the matrix (only if matrixValid): on
+    // the surface, the positive normal of the surface at each of their
+    // points, and pushed off the positive side along it, so that
+    // V_ij = lk(loops[i], pushedLoops[j]).
+    QVector<QVector<Vec3>> loops;
+    QVector<QVector<Vec3>> loopNormals;
+    QVector<QVector<Vec3>> pushedLoops;
+};
+
+// Two loops of the Seifert matrix shown on the finished surface (step 3):
+// loop `loop` on the surface and loop `lifted` lifted off the positive
+// side, so that the entry V[loop][lifted] can be seen; -1 shows none.
+struct SeifertHighlight
+{
+    int loop = -1;
+    int lifted = -1;
+    QColor loopColor;
+    QColor liftedColor;
 };
 
 // Point of a band: u from 0 (circle A) to 1 (circle B), v from 0 (the
@@ -139,6 +158,9 @@ SeifertSurface buildSeifertSurface(
  * The two sides of the surface have different colours (`front` is the
  * positive side). The model lies flat, like a map on the floor: the
  * diagram in the x-z plane, the levels of the circles going up (+y).
+ *
+ * At step 3, `highlight` adds two loops of the Seifert matrix as thin
+ * tubes over the surface.
  */
 Mesh seifertMesh(
     const SeifertSurface &surface,
@@ -146,7 +168,15 @@ Mesh seifertMesh(
     double tubeRadius,
     const QColor &knotColor,
     const QColor &front,
-    const QColor &back);
+    const QColor &back,
+    const SeifertHighlight &highlight = SeifertHighlight());
+
+// Loop `index` of the Seifert matrix lifted off the positive side as it is
+// shown (farther than pushedLoops, so that it can be seen; in the model's
+// own coordinates, before the model is laid flat).
+QVector<Vec3> seifertLiftedLoop(
+    const SeifertSurface &surface,
+    int index);
 
 // Tube radius that fits the bands of the surface (never more than
 // `requestedRadius`).

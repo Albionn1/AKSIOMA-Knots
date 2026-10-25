@@ -154,6 +154,12 @@ private:
         int step);
     void updateSeifertInfo();
 
+    // A clicked entry "i,j" of the Seifert matrix shows its two loops on
+    // the surface; the same entry again, or "clear", removes them.
+    void showSeifertLoops(
+        const QString &link);
+    void clearSeifertLoops();
+
     void showAbout();
 
     void showSettings();
@@ -489,6 +495,14 @@ private:
         0;
 
     KnotMath::SeifertSurface seifert_;
+
+    // entry V[i][j] whose loops are shown (-1: none): loop i on the
+    // surface, loop j lifted off it
+    int seifertLoop_ =
+        -1;
+
+    int seifertLifted_ =
+        -1;
 
     // goes through the steps after "Build"
     QTimer *seifertTimer_ =

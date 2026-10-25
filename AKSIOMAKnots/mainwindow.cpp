@@ -1198,9 +1198,17 @@ QWidget *MainWindow::createLeftPanel()
     seifertInfoLabel_->setWordWrap(true);
     seifertInfoLabel_->setTextFormat(Qt::RichText);
     seifertInfoLabel_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    seifertInfoLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    // the entries of the matrix are links (see updateSeifertInfo)
+    seifertInfoLabel_->setTextInteractionFlags(
+        Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse | Qt::LinksAccessibleByKeyboard);
+    seifertInfoLabel_->setOpenExternalLinks(false);
 
     layout->addWidget(seifertInfoLabel_);
+
+    connect(seifertInfoLabel_,
+            &QLabel::linkActivated,
+            this,
+            &MainWindow::showSeifertLoops);
 
     layout->addStretch(1);
 
@@ -1672,6 +1680,9 @@ void MainWindow::applyThemeSettings()
 
     // texts with their own colours
     updateLearnSection();
+
+    if (seifertActive_ && !seifertDirty_ && seifert_.valid)
+        updateSeifertInfo();
 
     if (unknotActive_)
         renderUnknotFrame();
@@ -2175,6 +2186,13 @@ void MainWindow::generateMesh()
 
         seifertDirty_ =
             true;
+
+        // the loops belonged to the old surface
+        seifertLoop_ =
+            -1;
+
+        seifertLifted_ =
+            -1;
 
         // Crossings are computed once and shared by the colouring and the
         // numbered markers. Their positions are stored as arc-length
@@ -4049,6 +4067,11 @@ namespace
 const QColor SeifertFront(217, 155, 66);
 const QColor SeifertBack(64, 118, 190);
 
+// the two loops of a matrix entry: on the surface and lifted off it (the
+// texts use the same colours, #46CD78 and #E150C8)
+const QColor SeifertLoopColor(70, 205, 120);
+const QColor SeifertLiftedColor(225, 80, 200);
+
 } // namespace
 
 void MainWindow::toggleSeifert()
@@ -4106,6 +4129,13 @@ void MainWindow::stopSeifert()
     seifertButton_->setText(tr("▶  BUILD SURFACE"));
     seifertStepSlider_->setEnabled(false);
 
+    // the matrix stays, without its links and loops
+    seifertLoop_ = -1;
+    seifertLifted_ = -1;
+
+    if (!seifertDirty_ && seifert_.valid)
+        updateSeifertInfo();
+
     // the knot again
     rebuildMesh();
 }
@@ -4114,6 +4144,16 @@ void MainWindow::setSeifertStep(
     int step)
 {
     seifertStep_ = std::clamp(step, 0, 3);
+
+    // the loops of the matrix are shown on the finished surface only
+    if (seifertStep_ < 3 && seifertLoop_ >= 0)
+    {
+        seifertLoop_ = -1;
+        seifertLifted_ = -1;
+
+        if (seifertActive_ && !seifertDirty_)
+            updateSeifertInfo();
+    }
 
     {
         const QSignalBlocker blocker(seifertStepSlider_);
@@ -4187,6 +4227,9 @@ void MainWindow::renderSeifert()
 
         seifert_ = KnotMath::buildSeifertSurface(currentData_.points, true);
 
+        seifertLoop_ = -1;
+        seifertLifted_ = -1;
+
         updateSeifertInfo();
     }
 
@@ -4201,6 +4244,13 @@ void MainWindow::renderSeifert()
             seifert_,
             static_cast<double>(thicknessSlider_->value()) / 100.0);
 
+    KnotMath::SeifertHighlight highlight;
+
+    highlight.loop = seifertLoop_;
+    highlight.lifted = seifertLifted_;
+    highlight.loopColor = SeifertLoopColor;
+    highlight.liftedColor = SeifertLiftedColor;
+
     const KnotMath::Mesh mesh =
         KnotMath::seifertMesh(
             seifert_,
@@ -4208,7 +4258,8 @@ void MainWindow::renderSeifert()
             radius,
             meshColor_,
             SeifertFront,
-            SeifertBack);
+            SeifertBack,
+            highlight);
 
     if (!mesh.isValid())
         return;
@@ -4302,22 +4353,90 @@ void MainWindow::updateSeifertInfo()
                    "on the surface with the loops lifted off its amber side.")
                     .arg(size);
 
+        // while the surface is shown, every entry is a link "i,j" to its
+        // two loops
+        const bool clickable =
+            seifertActive_ &&
+            s.loops.size() == size;
+
         if (size <= 10)
         {
             QString rows;
 
-            for (const QVector<int> &row : s.seifertMatrix)
+            for (int i = 0; i < size; ++i)
             {
                 QString line;
 
-                for (int value : row)
-                    line += QStringLiteral("%1").arg(value, 4);
+                for (int j = 0; j < size; ++j)
+                {
+                    const QString number = QString::number(s.seifertMatrix[i][j]);
+
+                    line += QString(std::max(1, 4 - static_cast<int>(number.size())), QLatin1Char(' '));
+
+                    if (!clickable)
+                    {
+                        line += number;
+                        continue;
+                    }
+
+                    const bool selected = i == seifertLoop_ && j == seifertLifted_;
+
+                    line += QStringLiteral("<a href='%1,%2' style='text-decoration:none;'>"
+                                           "<span style='color:%3;%4'>%5</span></a>")
+                                .arg(i)
+                                .arg(j)
+                                .arg(selected ? QStringLiteral("#D99B42") : QStringLiteral("#BAB9B4"),
+                                     selected ? QStringLiteral("font-weight:bold;text-decoration:underline;")
+                                              : QString(),
+                                     number);
+                }
 
                 rows += line + QLatin1Char('\n');
             }
 
             html += QStringLiteral("<pre style='font-family:Consolas,monospace;'>%1</pre>")
-                        .arg(rows.toHtmlEscaped());
+                        .arg(rows);
+
+            if (clickable && seifertLoop_ < 0)
+            {
+                html += QStringLiteral("<span style='color:#8A8780;'>%1</span><br><br>")
+                            .arg(tr("Click an entry of V to see its two loops on the surface."));
+            }
+            else if (clickable)
+            {
+                const int i = seifertLoop_;
+                const int j = seifertLifted_;
+                const int value = s.seifertMatrix[i][j];
+
+                if (i == j)
+                {
+                    html += tr("<b>V[%1][%1] = lk(a<sub>%1</sub>, a<sub>%1</sub><sup>+</sup>) = %2</b><br>"
+                               "The <span style='color:#46CD78;'>green</span> loop "
+                               "a<sub>%1</sub> lies on the surface, the "
+                               "<span style='color:#E150C8;'>pink</span> loop is its own copy "
+                               "lifted off the amber side. The entry counts how many times "
+                               "the copy winds around the loop: how many full twists the "
+                               "surface makes along it.")
+                                .arg(i + 1)
+                                .arg(value);
+                }
+                else
+                {
+                    html += tr("<b>V[%1][%2] = lk(a<sub>%1</sub>, a<sub>%2</sub><sup>+</sup>) = %3</b><br>"
+                               "The <span style='color:#46CD78;'>green</span> loop "
+                               "a<sub>%1</sub> lies on the surface, the "
+                               "<span style='color:#E150C8;'>pink</span> loop is "
+                               "a<sub>%2</sub> lifted off the amber side. The entry, their "
+                               "linking number, counts how many times the two loops wind "
+                               "around each other (with a sign for the direction).")
+                                .arg(i + 1)
+                                .arg(j + 1)
+                                .arg(value);
+                }
+
+                html += QStringLiteral(" <a href='clear' style='color:#D99B42;'>%1</a><br><br>")
+                            .arg(tr("Clear"));
+            }
         }
         else
         {
@@ -4339,7 +4458,59 @@ void MainWindow::updateSeifertInfo()
         html += QStringLiteral("<br><br>") + s.matrixError.toHtmlEscaped();
     }
 
-    seifertInfoLabel_->setText(html);
+    // the colours of the links and loops follow the theme
+    seifertInfoLabel_->setText(Theme::html(html));
+}
+
+void MainWindow::showSeifertLoops(
+    const QString &link)
+{
+    if (link == QLatin1String("clear"))
+    {
+        clearSeifertLoops();
+        return;
+    }
+
+    const QStringList parts = link.split(QLatin1Char(','));
+
+    if (parts.size() != 2 || !seifertActive_ || seifertDirty_)
+        return;
+
+    const int i = parts[0].toInt();
+    const int j = parts[1].toInt();
+    const int count = seifert_.loops.size();
+
+    if (i < 0 || i >= count || j < 0 || j >= count)
+        return;
+
+    // the same entry again
+    if (i == seifertLoop_ && j == seifertLifted_)
+    {
+        clearSeifertLoops();
+        return;
+    }
+
+    seifertLoop_ = i;
+    seifertLifted_ = j;
+
+    // on the finished surface
+    seifertTimer_->stop();
+
+    setSeifertStep(3);
+
+    updateSeifertInfo();
+}
+
+void MainWindow::clearSeifertLoops()
+{
+    if (seifertLoop_ < 0)
+        return;
+
+    seifertLoop_ = -1;
+    seifertLifted_ = -1;
+
+    updateSeifertInfo();
+    renderSeifert();
 }
 
 /*

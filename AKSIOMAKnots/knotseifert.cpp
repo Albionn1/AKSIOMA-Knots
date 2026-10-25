@@ -25,6 +25,15 @@ QString seifertTr(const char *text)
 // take long, and 64-bit determinants could overflow).
 constexpr int MaxMatrixSize = 16;
 
+// How far a highlighted loop is lifted off the surface (times the extent).
+// Lifted farther, it can pass through another part of the surface or the
+// other loop and change the linking number (it does from about 0.025 on).
+constexpr double SeifertLoopLift = 0.015;
+
+// How far inside its circle a loop crosses a disk (times the extent; less
+// in thin circles).
+constexpr double LoopInset = 0.025;
+
 /*
  * Arc length along the closed diagram polyline.
  */
@@ -662,6 +671,9 @@ SeifertSurface buildSeifertSurface(const QVector<Vec3> &curve, bool computeMatri
     {
         first.matrixValid = false;
         first.seifertMatrix.clear();
+        first.loops.clear();
+        first.loopNormals.clear();
+        first.pushedLoops.clear();
         first.matrixError =
             seifertTr("The Seifert matrix could not be determined reliably for this knot.");
     }
@@ -1039,7 +1051,7 @@ SeifertSurface buildSeifertSurface(const KnotDiagram &diagram, double extent, bo
     // Paths across a disk follow its circle, offset slightly inwards; thin
     // circles (between two crossings of a twist) get a smaller offset.
     // Area / perimeter is about a third of the width of a thin circle.
-    QVector<double> inset(circleCount, 0.025 * extent);
+    QVector<double> inset(circleCount, LoopInset * extent);
 
     for (int i = 0; i < circleCount; ++i)
     {
@@ -1150,6 +1162,7 @@ SeifertSurface buildSeifertSurface(const KnotDiagram &diagram, double extent, bo
     // the loops as curves on the surface, and pushed off it
     QVector<QVector<Vec3>> onSurface;
     QVector<QVector<Vec3>> pushed;
+    QVector<QVector<Vec3>> normalsAlong;
 
     constexpr int bandSteps = 12;
 
@@ -1157,6 +1170,7 @@ SeifertSurface buildSeifertSurface(const KnotDiagram &diagram, double extent, bo
     {
         QVector<Vec3> curve;
         QVector<Vec3> off;
+        QVector<Vec3> normals;
 
         for (int i = 0; i < loop.size(); ++i)
         {
@@ -1186,6 +1200,7 @@ SeifertSurface buildSeifertSurface(const KnotDiagram &diagram, double extent, bo
 
                 curve.push_back(p);
                 off.push_back(p + normal * pushOff);
+                normals.push_back(normal);
             }
 
             // across the disk of the next circle, to the next band
@@ -1223,11 +1238,13 @@ SeifertSurface buildSeifertSurface(const KnotDiagram &diagram, double extent, bo
             {
                 curve.push_back(p);
                 off.push_back(p + normal * pushOff);
+                normals.push_back(normal);
             }
         }
 
         onSurface.push_back(curve);
         pushed.push_back(off);
+        normalsAlong.push_back(normals);
     }
 
     QVector<QVector<int>> matrix(size, QVector<int>(size, 0));
@@ -1325,7 +1342,29 @@ SeifertSurface buildSeifertSurface(const KnotDiagram &diagram, double extent, bo
     surface.alexanderText = formatPolynomial(surface.alexander);
     surface.matrixValid = true;
 
+    // the loops behind the matrix, to be shown on the surface
+    surface.loops = onSurface;
+    surface.loopNormals = normalsAlong;
+    surface.pushedLoops = pushed;
+
     return surface;
+}
+
+QVector<Vec3> seifertLiftedLoop(const SeifertSurface &surface, int index)
+{
+    QVector<Vec3> curve;
+
+    if (index < 0 || index >= surface.loops.size())
+        return curve;
+
+    const QVector<Vec3> &loop = surface.loops[index];
+    const QVector<Vec3> &normals = surface.loopNormals[index];
+    const double lift = SeifertLoopLift * surface.extent;
+
+    for (int i = 0; i < loop.size(); ++i)
+        curve.push_back(loop[i] + normals[i] * lift);
+
+    return curve;
 }
 
 double seifertTubeRadius(const SeifertSurface &surface, double requestedRadius)
@@ -1339,7 +1378,8 @@ Mesh seifertMesh(
     double tubeRadius,
     const QColor &knotColor,
     const QColor &front,
-    const QColor &back)
+    const QColor &back,
+    const SeifertHighlight &highlight)
 {
     Mesh mesh;
 
@@ -1422,7 +1462,47 @@ Mesh seifertMesh(
             addTwoSided(surfaceMesh, positions, normals, triangles, front, back);
         }
 
-        mesh.append(tube(surface.boundary, tubeRadius, knotColor));
+        // Two loops of the Seifert matrix: thin enough that the lifted
+        // one, just off the surface, does not touch the other.
+        const int count = surface.loops.size();
+
+        const bool showLoops =
+            surface.matrixValid && highlight.loop >= 0 && highlight.loop < count &&
+            highlight.lifted >= 0 && highlight.lifted < count;
+
+        // On the disks the loops run close to the knot: a thinner knot
+        // leaves them in sight.
+        mesh.append(tube(surface.boundary,
+                         showLoops ? std::min(tubeRadius, 0.45 * LoopInset * surface.extent) : tubeRadius,
+                         knotColor));
+
+        if (showLoops)
+        {
+            const double loopRadius =
+                std::min(0.35 * tubeRadius, 0.4 * SeifertLoopLift * surface.extent);
+
+            // without repeated points (where a band meets a disk)
+            auto cleaned = [](const QVector<Vec3> &curve)
+            {
+                QVector<Vec3> result;
+
+                for (const Vec3 &p : curve)
+                {
+                    if (result.isEmpty() || (p - result.last()).length() > 1e-9)
+                        result.push_back(p);
+                }
+
+                if (result.size() > 1 && (result.first() - result.last()).length() <= 1e-9)
+                    result.removeLast();
+
+                return result;
+            };
+
+            mesh.append(tube(cleaned(surface.loops[highlight.loop]), loopRadius, highlight.loopColor));
+            mesh.append(tube(cleaned(seifertLiftedLoop(surface, highlight.lifted)),
+                             loopRadius,
+                             highlight.liftedColor));
+        }
     }
 
     mesh.append(surfaceMesh);

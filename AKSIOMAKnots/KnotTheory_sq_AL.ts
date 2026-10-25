@@ -1755,6 +1755,22 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>&lt;b&gt;Matrica e Seifertit V&lt;/b&gt; (%1 × %1): numrat e lidhjes së %1 laqeve mbi sipërfaqe me laqet e ngritura nga ana e saj ngjyrë qelibari.</translation>
     </message>
     <message>
+        <source>Click an entry of V to see its two loops on the surface.</source>
+        <translation>Klikoni një element të V-së për të parë dy laqet e tij mbi sipërfaqe.</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;V[%1][%1] = lk(a&lt;sub&gt;%1&lt;/sub&gt;, a&lt;sub&gt;%1&lt;/sub&gt;&lt;sup&gt;+&lt;/sup&gt;) = %2&lt;/b&gt;&lt;br&gt;The &lt;span style=&apos;color:#46CD78;&apos;&gt;green&lt;/span&gt; loop a&lt;sub&gt;%1&lt;/sub&gt; lies on the surface, the &lt;span style=&apos;color:#E150C8;&apos;&gt;pink&lt;/span&gt; loop is its own copy lifted off the amber side. The entry counts how many times the copy winds around the loop: how many full twists the surface makes along it.</source>
+        <translation>&lt;b&gt;V[%1][%1] = lk(a&lt;sub&gt;%1&lt;/sub&gt;, a&lt;sub&gt;%1&lt;/sub&gt;&lt;sup&gt;+&lt;/sup&gt;) = %2&lt;/b&gt;&lt;br&gt;Laku &lt;span style=&apos;color:#46CD78;&apos;&gt;jeshil&lt;/span&gt; a&lt;sub&gt;%1&lt;/sub&gt; shtrihet mbi sipërfaqe, laku &lt;span style=&apos;color:#E150C8;&apos;&gt;rozë&lt;/span&gt; është kopja e tij e ngritur nga ana ngjyrë qelibari. Elementi numëron sa herë kopja mbështillet rreth lakut: sa përdredhje të plota bën sipërfaqja përgjatë tij.</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;V[%1][%2] = lk(a&lt;sub&gt;%1&lt;/sub&gt;, a&lt;sub&gt;%2&lt;/sub&gt;&lt;sup&gt;+&lt;/sup&gt;) = %3&lt;/b&gt;&lt;br&gt;The &lt;span style=&apos;color:#46CD78;&apos;&gt;green&lt;/span&gt; loop a&lt;sub&gt;%1&lt;/sub&gt; lies on the surface, the &lt;span style=&apos;color:#E150C8;&apos;&gt;pink&lt;/span&gt; loop is a&lt;sub&gt;%2&lt;/sub&gt; lifted off the amber side. The entry, their linking number, counts how many times the two loops wind around each other (with a sign for the direction).</source>
+        <translation>&lt;b&gt;V[%1][%2] = lk(a&lt;sub&gt;%1&lt;/sub&gt;, a&lt;sub&gt;%2&lt;/sub&gt;&lt;sup&gt;+&lt;/sup&gt;) = %3&lt;/b&gt;&lt;br&gt;Laku &lt;span style=&apos;color:#46CD78;&apos;&gt;jeshil&lt;/span&gt; a&lt;sub&gt;%1&lt;/sub&gt; shtrihet mbi sipërfaqe, laku &lt;span style=&apos;color:#E150C8;&apos;&gt;rozë&lt;/span&gt; është a&lt;sub&gt;%2&lt;/sub&gt; i ngritur nga ana ngjyrë qelibari. Elementi, numri i lidhjes së tyre, numëron sa herë dy laqet mbështillen rreth njëri-tjetrit (me një shenjë për drejtimin).</translation>
+    </message>
+    <message>
+        <source>Clear</source>
+        <translation>Pastro</translation>
+    </message>
+    <message>
         <source>Signature σ(V + Vᵀ) = &lt;b&gt;%1&lt;/b&gt;</source>
         <translation>Signatura σ(V + Vᵀ) = &lt;b&gt;%1&lt;/b&gt;</translation>
     </message>
