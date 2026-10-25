@@ -769,8 +769,8 @@ bool segmentsIntersect2D(
     /*
      * Half-open intervals [0,1): a crossing that lies exactly on a vertex
      * of the polyline (very common for symmetric curves) belongs to exactly
-     * one of the two segments that meet there. With open intervals such a
-     * crossing was lost completely.
+     * one of the two segments that meet there (open intervals would miss
+     * it on both).
      */
     constexpr double tolerance = 1.0e-9;
 
@@ -1591,11 +1591,10 @@ QVector<Vec3> stevedoreCurve(int samples)
     if (perGenerator % 2 == 0)
         ++perGenerator;
 
-    // Every swap of two strands is squeezed into the middle of its section.
-    // On the inner strands (small circle) that gave bends with a radius of
-    // about 2 tube radii. A wider core with slightly wider spacing (scaled to
-    // the old overall size) and light smoothing bend about twice as gently
-    // and keep the strands at least 0.43 apart; the knot is unchanged.
+    // Every swap of two strands is squeezed into the middle of its section,
+    // which bends the inner strands sharply. A wide core, slightly wider
+    // spacing and light smoothing keep the bends gentle and the strands at
+    // least 0.43 apart; the knot is unchanged.
     return smoothClosedCurve(
         braidClosureCurve(word, 4, perGenerator, 2.08, 0.56),
         0.15 * perGenerator);
@@ -4890,10 +4889,9 @@ double UnknottingAnimation::measureClearance(
         auto testPair = [&](int i, int j)
         {
             // Gap along the curve between the two segments (from the end of
-            // one to the start of the other, both ways round). Measuring from
-            // start to start counted neighbouring segments, which share an
-            // end point (distance 0), as soon as one segment was longer than
-            // arcSkip; every plan was then rejected and rebuilt.
+            // one to the start of the other, both ways round), so that
+            // neighbouring segments, which share an end point (distance 0),
+            // are always skipped, however long they are.
             const double gap = arc.at(j) - arc.at(i + 1);
             const double gapAround = total - arc.at(j + 1) + arc.at(i);
 

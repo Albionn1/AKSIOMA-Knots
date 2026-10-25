@@ -93,9 +93,7 @@ else()
 endif()
 
 # Albanian translation, compiled into the program as :/i18n/KnotTheory_sq_AL.qm
-# (chosen in the Settings tab). After changing texts in the code, build the
-# "update_translations" target to add the new texts to the .ts file, then
-# translate them (Qt Linguist or any text editor).
+# (chosen in the Settings tab).
 qt_add_translations(AKSIOMAKnots
     TS_FILES KnotTheory_sq_AL.ts
     RESOURCE_PREFIX /i18n

@@ -11,6 +11,10 @@ Uses the Qt SVG module (Qt Svg, installed with Qt by default) for diagram export
 NOTE: resources.qrc and the icons/ folder must stay next to CMakeLists.txt
 (they hold the dropdown arrows and the checkbox tick used by the theme).
 
+Translation: after changing texts in the code, build the "update_translations"
+target to add the new texts to KnotTheory_sq_AL.ts, then translate them
+(Qt Linguist or any text editor).
+
 Windows installer (Inno Setup 6.7 or newer: winget install JRSoftware.InnoSetup)
 
   powershell -ExecutionPolicy Bypass -File installer\build_installer.ps1

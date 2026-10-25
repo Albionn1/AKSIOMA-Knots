@@ -1713,7 +1713,7 @@ void KnotGLWidget::drawMesh(
 
 void KnotGLWidget::drawParticles(const QMatrix4x4 &viewProjection)
 {
-    // Floating glow particles were removed on purpose (flat, calm look).
+    // No floating particles are drawn (flat, calm look).
     (void)viewProjection;
     return;
 
@@ -2014,7 +2014,7 @@ void KnotGLWidget::onAnimationTick()
     }
     else if (autoRotation_)
     {
-        // 18 degrees per second (the old code advanced 0.3 degrees per frame)
+        // 18 degrees per second
         yaw_ += 18.0f * dt;
 
         if (yaw_ > 360.0f)

@@ -2,13 +2,9 @@
 ; AKSIOMA Knots - Windows installer (Inno Setup 6.7 or newer)
 ; =============================================================
 ;
-; Built by build_installer.ps1, which makes a Release build, collects the
-; program and its Qt files with windeployqt and passes their folder and the
-; version to this script:
-;
-;   ISCC.exe /DStageDir=<folder> /DManualDir=<folder> /DAppVersion=1.0.0 AKSIOMAKnots.iss
-;
-; The installer is written to output\AKSIOMA-Knots-<version>-Setup.exe.
+; StageDir is the folder with the program and its Qt files (windeployqt),
+; ManualDir the user manuals and AppVersion the version; build_installer.ps1
+; passes all three. The installer is written to output\AKSIOMA-Knots-<version>-Setup.exe.
 
 #ifndef AppVersion
   #define AppVersion "1.0.0"
@@ -27,7 +23,7 @@
 #define AppPublisher "AKSIOMA"
 
 [Setup]
-; Never change the AppId: it is how a newer version finds the installed one.
+; The AppId is how a newer version finds the installed one (fixed for good).
 AppId={{75678F91-CD50-4EB2-B275-595845BAC7F7}
 AppName={#AppName}
 AppVersion={#AppVersion}

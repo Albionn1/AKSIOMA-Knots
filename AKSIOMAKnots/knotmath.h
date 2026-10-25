@@ -29,7 +29,7 @@ struct Vec3
     Vec3 operator-(const Vec3 &other) const;
     Vec3 operator*(double scalar) const;
 
-    // NOTE: dividing by (almost) zero returns the zero vector instead of inf/nan.
+    // Dividing by (almost) zero returns the zero vector instead of inf/nan.
     Vec3 operator/(double scalar) const;
 
     Vec3 &operator+=(const Vec3 &other);

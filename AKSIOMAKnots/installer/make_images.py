@@ -1,9 +1,6 @@
 """
-Wizard images of the installer, made from icons/aksioma_logo.png.
-
-    python make_images.py
-
-writes images/wizard_<w>x<h>.png (the large image on the Welcome and
+Wizard images of the installer, made from icons/aksioma_logo.png:
+images/wizard_<w>x<h>.png (the large image on the Welcome and
 Finished pages: the whole logo on its own background) and
 images/small_<w>x<h>.png (the small image at the top of the other pages:
 the knot on a rounded dark tile). Several sizes of each, so

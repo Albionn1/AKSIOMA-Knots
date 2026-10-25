@@ -1,8 +1,6 @@
 <#
     Builds the Windows installer of AKSIOMA Knots.
 
-        powershell -ExecutionPolicy Bypass -File installer\build_installer.ps1
-
     1. Release build of the program (CMake + Ninja, Qt's MinGW)
     2. The program and the Qt files it needs in one folder (windeployqt)
     3. The installer from AKSIOMAKnots.iss (Inno Setup 6.7 or newer)
