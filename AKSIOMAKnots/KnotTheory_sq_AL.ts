@@ -825,6 +825,30 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <source> or </source>
         <translation> ose </translation>
     </message>
+    <message>
+        <source>The Seifert matrix could not be determined reliably for this knot.</source>
+        <translation>Matrica e Seifertit nuk mund të përcaktohej me siguri për këtë nyjë.</translation>
+    </message>
+    <message>
+        <source>The knot diagram is empty.</source>
+        <translation>Diagrami i nyjës është bosh.</translation>
+    </message>
+    <message>
+        <source>The surface is too large for the Seifert matrix (genus %1).</source>
+        <translation>Sipërfaqja është shumë e madhe për matricën e Seifertit (gjinia %1).</translation>
+    </message>
+    <message>
+        <source>The Seifert circles are not connected.</source>
+        <translation>Rrathët e Seifertit nuk janë të lidhur.</translation>
+    </message>
+    <message>
+        <source>A linking number on the surface could not be determined.</source>
+        <translation>Një numër lidhjeje mbi sipërfaqe nuk mund të përcaktohej.</translation>
+    </message>
+    <message>
+        <source>The Seifert matrix failed its check (det(V - V^T) = 1).</source>
+        <translation>Matrica e Seifertit nuk e kaloi kontrollin (det(V - V^T) = 1).</translation>
+    </message>
 </context>
 <context>
     <name>KnotMath::KnotRelaxation</name>
@@ -1229,6 +1253,26 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Step by step (pause at every stage)</source>
         <translation>Hap pas hapi (ndalo në çdo fazë)</translation>
+    </message>
+    <message>
+        <source>SEIFERT SURFACE</source>
+        <translation>SIPËRFAQJA E SEIFERTIT</translation>
+    </message>
+    <message>
+        <source>Every knot is the edge of a surface with two sides, a Seifert surface. Seifert&apos;s algorithm builds one from the knot diagram in four steps.</source>
+        <translation>Çdo nyjë është buza e një sipërfaqeje me dy anë, një sipërfaqeje të Seifertit. Algoritmi i Seifertit e ndërton një të tillë nga diagrami i nyjës në katër hapa.</translation>
+    </message>
+    <message>
+        <source>▶  BUILD SURFACE</source>
+        <translation>▶  NDËRTO SIPËRFAQEN</translation>
+    </message>
+    <message>
+        <source>Go back and forth through the four steps.</source>
+        <translation>Lëvizni para dhe mbrapa nëpër katër hapat.</translation>
+    </message>
+    <message>
+        <source>SURFACE</source>
+        <translation>SIPËRFAQJA</translation>
     </message>
     <message>
         <source>CLASSIFICATION</source>
@@ -1637,6 +1681,94 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Raporti nuk mund të ruhej.
 
 %1</translation>
+    </message>
+    <message>
+        <source>A Seifert surface is built here for a single closed knot. Choose a knot preset, a table knot or a custom curve.</source>
+        <translation>Sipërfaqja e Seifertit ndërtohet këtu për një nyjë të vetme të mbyllur. Zgjidhni një nyjë të gatshme, një nyjë nga tabela ose një kurbë të personalizuar.</translation>
+    </message>
+    <message>
+        <source>■  BACK TO THE KNOT</source>
+        <translation>■  KTHEHU TE NYJA</translation>
+    </message>
+    <message>
+        <source>1 / 4   THE KNOT DIAGRAM</source>
+        <translation>1 / 4   DIAGRAMI I NYJËS</translation>
+    </message>
+    <message>
+        <source>The knot is laid flat: its diagram, from the direction with the fewest crossings. The knot has a direction, and every crossing is kept as it is.</source>
+        <translation>Nyja shtrihet rrafsh: diagrami i saj, nga drejtimi me sa më pak kryqëzime. Nyja ka një drejtim dhe çdo kryqëzim mbahet ashtu siç është.</translation>
+    </message>
+    <message>
+        <source>2 / 4   SEIFERT CIRCLES</source>
+        <translation>2 / 4   RRATHËT E SEIFERTIT</translation>
+    </message>
+    <message>
+        <source>Walk along the knot and, at every crossing, turn onto the other strand instead of crossing it. The diagram falls apart into loops that never cross: the Seifert circles. A circle inside another one is lifted higher.</source>
+        <translation>Ecni përgjatë nyjës dhe, në çdo kryqëzim, kthehuni në fijen tjetër në vend që ta kaloni. Diagrami ndahet në laqe që nuk kryqëzohen kurrë: rrathët e Seifertit. Një rreth brenda një tjetri ngrihet më lart.</translation>
+    </message>
+    <message>
+        <source>3 / 4   DISKS</source>
+        <translation>3 / 4   DISQET</translation>
+    </message>
+    <message>
+        <source>Every circle is filled with a disk. The two sides get different colours: amber is the side from which the circle runs anticlockwise, blue the other side.</source>
+        <translation>Çdo rreth mbushet me një disk. Dy anët marrin ngjyra të ndryshme: ngjyrë qelibari është ana nga e cila rrethi shkon në drejtim kundërorar, blu ana tjetër.</translation>
+    </message>
+    <message>
+        <source>4 / 4   TWISTED BANDS</source>
+        <translation>4 / 4   SHIRITAT E PËRDREDHUR</translation>
+    </message>
+    <message>
+        <source>At every crossing the two disks are joined by a band with a half twist, turned like the crossing. The edge of the surface is the knot again. Amber always meets amber: the surface has two sides (it is orientable).</source>
+        <translation>Në çdo kryqëzim dy disqet bashkohen me një shirit me një gjysmëpërdredhje, të kthyer si kryqëzimi. Buza e sipërfaqes është sërish nyja. Qelibari takon gjithmonë qelibarin: sipërfaqja ka dy anë (është e orientueshme).</translation>
+    </message>
+    <message>
+        <source>No Seifert surface could be built: %1</source>
+        <translation>Nuk mund të ndërtohej asnjë sipërfaqe e Seifertit: %1</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;%1&lt;/b&gt; crossings and &lt;b&gt;%2&lt;/b&gt; Seifert circles give a surface of genus &lt;b&gt;g = (%1 − %2 + 1) / 2 = %3&lt;/b&gt; (the number of &quot;handles&quot;).</source>
+        <translation>&lt;b&gt;%1&lt;/b&gt; kryqëzime dhe &lt;b&gt;%2&lt;/b&gt; rrathë të Seifertit japin një sipërfaqe me gjini &lt;b&gt;g = (%1 − %2 + 1) / 2 = %3&lt;/b&gt; (numri i &quot;dorezave&quot;).</translation>
+    </message>
+    <message>
+        <source>The surface is a disk, so this knot is the unknot.</source>
+        <translation>Sipërfaqja është një disk, prandaj kjo nyjë është nyja triviale.</translation>
+    </message>
+    <message>
+        <source>The genus of this knot is %1 (KnotInfo), so this surface is as simple as possible.</source>
+        <translation>Gjinia e kësaj nyjeje është %1 (KnotInfo), prandaj kjo sipërfaqe është sa më e thjeshtë që të jetë e mundur.</translation>
+    </message>
+    <message>
+        <source>The genus of this knot is %1 (KnotInfo): another diagram gives a simpler surface.</source>
+        <translation>Gjinia e kësaj nyjeje është %1 (KnotInfo): një diagram tjetër jep një sipërfaqe më të thjeshtë.</translation>
+    </message>
+    <message>
+        <source>The Alexander polynomial shows that every surface of this knot has genus at least %1, so this one is as simple as possible: the knot has genus %1.</source>
+        <translation>Polinomi i Aleksandrit tregon se çdo sipërfaqe e kësaj nyjeje ka gjini të paktën %1, prandaj kjo është sa më e thjeshtë që të jetë e mundur: nyja ka gjini %1.</translation>
+    </message>
+    <message>
+        <source>The Alexander polynomial shows that every surface of this knot has genus at least %1.</source>
+        <translation>Polinomi i Aleksandrit tregon se çdo sipërfaqe e kësaj nyjeje ka gjini të paktën %1.</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;Seifert matrix V&lt;/b&gt; (%1 × %1): the linking numbers of %1 loops on the surface with the loops lifted off its amber side.</source>
+        <translation>&lt;b&gt;Matrica e Seifertit V&lt;/b&gt; (%1 × %1): numrat e lidhjes së %1 laqeve mbi sipërfaqe me laqet e ngritura nga ana e saj ngjyrë qelibari.</translation>
+    </message>
+    <message>
+        <source>Signature σ(V + Vᵀ) = &lt;b&gt;%1&lt;/b&gt;</source>
+        <translation>Signatura σ(V + Vᵀ) = &lt;b&gt;%1&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <source>Determinant |det(V + Vᵀ)| = &lt;b&gt;%1&lt;/b&gt;</source>
+        <translation>Përcaktori |det(V + Vᵀ)| = &lt;b&gt;%1&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <source>Alexander polynomial det(V − t Vᵀ) = &lt;b&gt;%1&lt;/b&gt;</source>
+        <translation>Polinomi i Aleksandrit det(V − t Vᵀ) = &lt;b&gt;%1&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <source>The same Alexander polynomial as in the analysis panel, found in a completely different way.</source>
+        <translation>I njëjti polinom i Aleksandrit si në panelin e analizës, i gjetur në një mënyrë krejt tjetër.</translation>
     </message>
     <message>
         <source>Relaxing needs a single closed curve. Choose a knot preset or a custom curve.</source>

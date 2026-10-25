@@ -320,26 +320,17 @@ KnotDiagram makeDiagramFromStroke(
     return diagram;
 }
 
-KnotDiagram diagramFromCurve(
-    const QVector<Vec3> &curve,
-    double halfExtent,
-    QString &error)
+namespace
+{
+
+// The projected curve centred and scaled to `halfExtent`, with its
+// crossings.
+KnotDiagram makeDiagram(
+    const QVector<Vec3> &projected,
+    const QVector<CrossingInfo> &crossings,
+    double halfExtent)
 {
     KnotDiagram diagram;
-
-    QVector<Vec3> projected;
-    QVector<CrossingInfo> crossings;
-
-    // Coarse curves (the knot table stores about a hundred points) would
-    // be drawn with visible corners: a smooth spline through the points
-    // first.
-    QVector<Vec3> smooth = curve;
-
-    if (smooth.size() >= 8 && smooth.size() < 300)
-        smooth = refineCurve(smooth, (300 + smooth.size() - 1) / smooth.size(), true);
-
-    if (!cleanestProjection(smooth, projected, crossings, error))
-        return diagram;
 
     double minX = 1e300, maxX = -1e300, minY = 1e300, maxY = -1e300;
 
@@ -354,10 +345,7 @@ KnotDiagram diagramFromCurve(
     const double half = std::max(0.5 * (maxX - minX), 0.5 * (maxY - minY));
 
     if (half < 1e-12)
-    {
-        error = QCoreApplication::translate("KnotMath", "The curve is degenerate.");
         return diagram;
-    }
 
     const double cx = 0.5 * (minX + maxX);
     const double cy = 0.5 * (minY + maxY);
@@ -386,6 +374,133 @@ KnotDiagram diagramFromCurve(
     }
 
     return diagram;
+}
+
+// How well the crossings are spread out (larger is better): the smaller
+// of the closest distance of two crossings in the picture and the
+// shortest piece of curve between two passes, both relative to the size.
+double crossingSpread(const KnotDiagram &diagram, double halfExtent)
+{
+    const int c = diagram.crossings.size();
+
+    if (c == 0)
+        return 1.0;
+
+    double closest = 2.0 * halfExtent;
+
+    for (int i = 0; i < c; ++i)
+    {
+        for (int j = i + 1; j < c; ++j)
+            closest = std::min(closest, dist2D(diagram.crossings[i].position,
+                                               diagram.crossings[j].position));
+    }
+
+    const int n = diagram.points.size();
+
+    QVector<double> cum(n + 1, 0.0);
+
+    for (int i = 0; i < n; ++i)
+        cum[i + 1] = cum[i] + dist2D(diagram.points[i], diagram.points[(i + 1) % n]);
+
+    auto lengthAt = [&](int segment, double t)
+    {
+        return cum[segment] + t * (cum[segment + 1] - cum[segment]);
+    };
+
+    QVector<double> passes;
+
+    for (const DiagramCrossing &crossing : diagram.crossings)
+        passes << lengthAt(crossing.segA, crossing.tA) << lengthAt(crossing.segB, crossing.tB);
+
+    std::sort(passes.begin(), passes.end());
+
+    double shortest = cum[n] - passes.last() + passes.first();
+
+    for (int i = 0; i + 1 < passes.size(); ++i)
+        shortest = std::min(shortest, passes[i + 1] - passes[i]);
+
+    // the shortest piece compared with an even spacing of the passes
+    return std::min(closest / (2.0 * halfExtent), shortest * passes.size() / cum[n]);
+}
+
+} // namespace
+
+QVector<KnotDiagram> diagramsFromCurve(
+    const QVector<Vec3> &curve,
+    double halfExtent,
+    QString &error,
+    int maxCount)
+{
+    QVector<KnotDiagram> result;
+
+    // Coarse curves (the knot table stores about a hundred points) would
+    // be drawn with visible corners: a smooth spline through the points
+    // first.
+    QVector<Vec3> smooth = curve;
+
+    if (smooth.size() >= 8 && smooth.size() < 300)
+        smooth = refineCurve(smooth, (300 + smooth.size() - 1) / smooth.size(), true);
+
+    QVector<QVector<Vec3>> projected;
+    QVector<QVector<CrossingInfo>> crossings;
+
+    if (!cleanProjections(smooth, projected, crossings, error))
+        return result;
+
+    struct Candidate
+    {
+        KnotDiagram diagram;
+        double spread = 0.0;
+    };
+
+    QVector<Candidate> candidates;
+
+    for (int i = 0; i < projected.size(); ++i)
+    {
+        Candidate candidate;
+
+        candidate.diagram = makeDiagram(projected[i], crossings[i], halfExtent);
+
+        if (!candidate.diagram.isValid())
+            continue;
+
+        candidate.spread = crossingSpread(candidate.diagram, halfExtent);
+
+        candidates.push_back(candidate);
+    }
+
+    if (candidates.isEmpty())
+    {
+        error = QCoreApplication::translate("KnotMath", "The curve is degenerate.");
+        return result;
+    }
+
+    std::stable_sort(
+        candidates.begin(),
+        candidates.end(),
+        [](const Candidate &a, const Candidate &b)
+        {
+            if (a.diagram.crossings.size() != b.diagram.crossings.size())
+                return a.diagram.crossings.size() < b.diagram.crossings.size();
+
+            return a.spread > b.spread;
+        });
+
+    for (int i = 0; i < candidates.size() && i < maxCount; ++i)
+        result.push_back(candidates[i].diagram);
+
+    return result;
+}
+
+KnotDiagram diagramFromCurve(
+    const QVector<Vec3> &curve,
+    double halfExtent,
+    QString &error)
+{
+    const QVector<KnotDiagram> diagrams =
+        diagramsFromCurve(curve, halfExtent, error, 1);
+
+    return diagrams.isEmpty() ? KnotDiagram() : diagrams.first();
 }
 
 QVector<Vec3> diagramToCurve(

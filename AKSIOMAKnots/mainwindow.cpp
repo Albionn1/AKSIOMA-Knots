@@ -1136,6 +1136,114 @@ QWidget *MainWindow::createLeftPanel()
 
     tabs->addTab(animatePage, tr("ANIMATE"));
 
+    /*
+     * SURFACE: the Seifert surface of the knot
+     */
+
+    QScrollArea *surfacePage = makePage(layout);
+
+    panel = surfacePage->widget();
+
+    addSectionHeader(layout, panel, QString(), tr("SEIFERT SURFACE"));
+
+    QLabel *surfaceIntro =
+        new QLabel(
+            tr("Every knot is the edge of a surface with two sides, a "
+               "Seifert surface. Seifert's algorithm builds one from the "
+               "knot diagram in four steps."),
+            panel);
+
+    surfaceIntro->setObjectName(QStringLiteral("Subtitle"));
+    surfaceIntro->setWordWrap(true);
+
+    layout->addWidget(surfaceIntro);
+
+    seifertButton_ = new QPushButton(tr("▶  BUILD SURFACE"), panel);
+
+    seifertButton_->setObjectName(QStringLiteral("GenerateButton"));
+    seifertButton_->setMinimumHeight(40);
+
+    layout->addWidget(seifertButton_);
+
+    seifertStepSlider_ = new QSlider(Qt::Horizontal, panel);
+
+    seifertStepSlider_->setRange(0, 3);
+    seifertStepSlider_->setPageStep(1);
+    seifertStepSlider_->setTickPosition(QSlider::TicksBelow);
+    seifertStepSlider_->setTickInterval(1);
+    seifertStepSlider_->setEnabled(false);
+    seifertStepSlider_->setToolTip(tr("Go back and forth through the four steps."));
+
+    layout->addWidget(seifertStepSlider_);
+
+    seifertStepTitle_ = new QLabel(panel);
+
+    seifertStepTitle_->setObjectName(QStringLiteral("Section"));
+
+    layout->addWidget(seifertStepTitle_);
+
+    seifertStepText_ = new QLabel(panel);
+
+    seifertStepText_->setObjectName(QStringLiteral("Subtitle"));
+    seifertStepText_->setWordWrap(true);
+    seifertStepText_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+
+    layout->addWidget(seifertStepText_);
+
+    layout->addSpacing(6);
+
+    seifertInfoLabel_ = new QLabel(panel);
+
+    seifertInfoLabel_->setObjectName(QStringLiteral("Status"));
+    seifertInfoLabel_->setWordWrap(true);
+    seifertInfoLabel_->setTextFormat(Qt::RichText);
+    seifertInfoLabel_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    seifertInfoLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+
+    layout->addWidget(seifertInfoLabel_);
+
+    layout->addStretch(1);
+
+    seifertTimer_ = new QTimer(this);
+
+    seifertTimer_->setInterval(2200);
+
+    connect(seifertButton_, &QPushButton::clicked, this, &MainWindow::toggleSeifert);
+
+    connect(seifertTimer_,
+            &QTimer::timeout,
+            this,
+            [this]()
+            {
+                if (seifertStep_ < 3)
+                    setSeifertStep(seifertStep_ + 1);
+
+                if (seifertStep_ >= 3)
+                    seifertTimer_->stop();
+            });
+
+    // dragging the slider stops the automatic steps
+    connect(seifertStepSlider_,
+            &QSlider::sliderPressed,
+            seifertTimer_,
+            &QTimer::stop);
+
+    connect(seifertStepSlider_,
+            &QSlider::valueChanged,
+            this,
+            [this](int value)
+            {
+                if (value != seifertStep_)
+                {
+                    seifertTimer_->stop();
+                    setSeifertStep(value);
+                }
+            });
+
+    tabs->addTab(surfacePage, tr("SURFACE"));
+
+    setSeifertStep(0);
+
     return tabs;
 }
 
@@ -2065,6 +2173,9 @@ void MainWindow::generateMesh()
         currentData_ =
             data;
 
+        seifertDirty_ =
+            true;
+
         // Crossings are computed once and shared by the colouring and the
         // numbered markers. Their positions are stored as arc-length
         // fractions, so they stay valid for any tube resolution.
@@ -2149,6 +2260,13 @@ void MainWindow::applySurface()
 
 void MainWindow::rebuildMesh()
 {
+    // thickness and colour changes redraw the surface
+    if (seifertActive_)
+    {
+        renderSeifert();
+        return;
+    }
+
     // the moving curve is drawn every frame (with the current thickness)
     if (relaxRunning_)
         return;
@@ -2440,8 +2558,10 @@ void MainWindow::updateColorSwatch()
 
 void MainWindow::resetCamera()
 {
+    // the Seifert surface lies flat: seen from the side at an angle, its
+    // levels show
     if (glWidget_ != nullptr)
-        glWidget_->resetCamera();
+        glWidget_->resetCamera(seifertActive_ ? 45.0f : 75.0f);
 }
 
 void MainWindow::showError(
@@ -2502,6 +2622,9 @@ void MainWindow::startUnknotting()
 {
     if (!hasData_ || unknotPreparing_)
         return;
+
+    if (seifertActive_)
+        stopSeifert();
 
     // unknots the curve as it is now
     if (relaxRunning_)
@@ -3915,6 +4038,312 @@ void MainWindow::exportReport()
 
 /*
  * =============================================================
+ * SEIFERT SURFACE
+ * =============================================================
+ */
+
+namespace
+{
+
+// the two sides of the surface
+const QColor SeifertFront(217, 155, 66);
+const QColor SeifertBack(64, 118, 190);
+
+} // namespace
+
+void MainWindow::toggleSeifert()
+{
+    if (seifertActive_)
+    {
+        stopSeifert();
+        return;
+    }
+
+    if (!hasData_)
+        return;
+
+    if (currentData_.multiStrand || !currentData_.closed)
+    {
+        seifertInfoLabel_->setText(
+            tr("A Seifert surface is built here for a single closed knot. "
+               "Choose a knot preset, a table knot or a custom curve."));
+
+        return;
+    }
+
+    // the surface of the curve as it is now
+    pauseRelaxation();
+
+    if (unknotActive_ || unknotPreparing_)
+        stopUnknotting(false);
+
+    seifertActive_ = true;
+    seifertDirty_ = true;
+
+    seifertButton_->setText(tr("■  BACK TO THE KNOT"));
+    seifertStepSlider_->setEnabled(true);
+
+    setSeifertStep(0);
+
+    if (!seifertActive_)
+        return;
+
+    resetCamera();
+
+    // then the steps one after the other
+    seifertTimer_->start();
+}
+
+void MainWindow::stopSeifert()
+{
+    if (!seifertActive_)
+        return;
+
+    seifertActive_ = false;
+
+    seifertTimer_->stop();
+
+    seifertButton_->setText(tr("▶  BUILD SURFACE"));
+    seifertStepSlider_->setEnabled(false);
+
+    // the knot again
+    rebuildMesh();
+}
+
+void MainWindow::setSeifertStep(
+    int step)
+{
+    seifertStep_ = std::clamp(step, 0, 3);
+
+    {
+        const QSignalBlocker blocker(seifertStepSlider_);
+
+        seifertStepSlider_->setValue(seifertStep_);
+    }
+
+    switch (seifertStep_)
+    {
+    case 0:
+        seifertStepTitle_->setText(tr("1 / 4   THE KNOT DIAGRAM"));
+        seifertStepText_->setText(
+            tr("The knot is laid flat: its diagram, from the direction with the "
+               "fewest crossings. The knot has a direction, and every crossing is "
+               "kept as it is."));
+        break;
+
+    case 1:
+        seifertStepTitle_->setText(tr("2 / 4   SEIFERT CIRCLES"));
+        seifertStepText_->setText(
+            tr("Walk along the knot and, at every crossing, turn onto the other "
+               "strand instead of crossing it. The diagram falls apart into loops "
+               "that never cross: the Seifert circles. A circle inside another "
+               "one is lifted higher."));
+        break;
+
+    case 2:
+        seifertStepTitle_->setText(tr("3 / 4   DISKS"));
+        seifertStepText_->setText(
+            tr("Every circle is filled with a disk. The two sides get different "
+               "colours: amber is the side from which the circle runs "
+               "anticlockwise, blue the other side."));
+        break;
+
+    default:
+        seifertStepTitle_->setText(tr("4 / 4   TWISTED BANDS"));
+        seifertStepText_->setText(
+            tr("At every crossing the two disks are joined by a band with a half "
+               "twist, turned like the crossing. The edge of the surface is the "
+               "knot again. Amber always meets amber: the surface has two sides "
+               "(it is orientable)."));
+        break;
+    }
+
+    if (seifertActive_)
+        renderSeifert();
+}
+
+void MainWindow::renderSeifert()
+{
+    if (!seifertActive_ || glWidget_ == nullptr || !hasData_)
+        return;
+
+    if (seifertDirty_)
+    {
+        seifertDirty_ = false;
+
+        // a new knot that has no surface here (several components)
+        if (currentData_.multiStrand || !currentData_.closed)
+        {
+            seifert_ = KnotMath::SeifertSurface();
+
+            stopSeifert();
+
+            seifertInfoLabel_->setText(
+                tr("A Seifert surface is built here for a single closed knot. "
+                   "Choose a knot preset, a table knot or a custom curve."));
+
+            return;
+        }
+
+        seifert_ = KnotMath::buildSeifertSurface(currentData_.points, true);
+
+        updateSeifertInfo();
+    }
+
+    if (!seifert_.valid)
+    {
+        stopSeifert();
+        return;
+    }
+
+    const double radius =
+        KnotMath::seifertTubeRadius(
+            seifert_,
+            static_cast<double>(thicknessSlider_->value()) / 100.0);
+
+    const KnotMath::Mesh mesh =
+        KnotMath::seifertMesh(
+            seifert_,
+            seifertStep_,
+            radius,
+            meshColor_,
+            SeifertFront,
+            SeifertBack);
+
+    if (!mesh.isValid())
+        return;
+
+    glWidget_->setShowCrossingNumbers(false);
+    glWidget_->setCrossings({});
+    glWidget_->setMesh(mesh);
+    glWidget_->setMeshColor(meshColor_);
+
+    applySurface();
+}
+
+void MainWindow::updateSeifertInfo()
+{
+    const KnotMath::SeifertSurface &s = seifert_;
+
+    if (!s.valid)
+    {
+        seifertInfoLabel_->setText(
+            tr("No Seifert surface could be built: %1").arg(s.error.toHtmlEscaped()));
+
+        return;
+    }
+
+    QString html;
+
+    html += tr("<b>%1</b> crossings and <b>%2</b> Seifert circles give a surface of "
+               "genus <b>g = (%1 − %2 + 1) / 2 = %3</b> (the number of "
+               "\"handles\").")
+                .arg(s.crossings)
+                .arg(s.circles)
+                .arg(s.genus);
+
+    if (s.genus == 0)
+    {
+        html += QStringLiteral("<br><br>") +
+                tr("The surface is a disk, so this knot is the unknot.");
+    }
+
+    // what is known about the genus of the knot itself
+    int knotGenus = -1;
+
+    if (currentData_.tableIndex >= 0 &&
+        currentData_.tableIndex < KnotMath::KnotTable::instance().size())
+    {
+        knotGenus = KnotMath::KnotTable::instance().at(currentData_.tableIndex).genus;
+    }
+
+    int lowerBound = -1;
+
+    if (s.matrixValid && !s.alexander.empty())
+        lowerBound = (s.alexander.rbegin()->first - s.alexander.begin()->first) / 2;
+
+    if (s.genus > 0)
+    {
+        html += QStringLiteral("<br><br>");
+
+        if (knotGenus >= 0 && knotGenus == s.genus)
+        {
+            html += tr("The genus of this knot is %1 (KnotInfo), so this surface is "
+                       "as simple as possible.")
+                        .arg(knotGenus);
+        }
+        else if (knotGenus >= 0)
+        {
+            html += tr("The genus of this knot is %1 (KnotInfo): another diagram gives "
+                       "a simpler surface.")
+                        .arg(knotGenus);
+        }
+        else if (lowerBound == s.genus)
+        {
+            html += tr("The Alexander polynomial shows that every surface of this knot "
+                       "has genus at least %1, so this one is as simple as possible: "
+                       "the knot has genus %1.")
+                        .arg(lowerBound);
+        }
+        else if (lowerBound >= 0)
+        {
+            html += tr("The Alexander polynomial shows that every surface of this knot "
+                       "has genus at least %1.")
+                        .arg(lowerBound);
+        }
+    }
+
+    if (s.genus > 0 && s.matrixValid)
+    {
+        const int size = s.seifertMatrix.size();
+
+        html += QStringLiteral("<br><br>") +
+                tr("<b>Seifert matrix V</b> (%1 × %1): the linking numbers of %1 loops "
+                   "on the surface with the loops lifted off its amber side.")
+                    .arg(size);
+
+        if (size <= 10)
+        {
+            QString rows;
+
+            for (const QVector<int> &row : s.seifertMatrix)
+            {
+                QString line;
+
+                for (int value : row)
+                    line += QStringLiteral("%1").arg(value, 4);
+
+                rows += line + QLatin1Char('\n');
+            }
+
+            html += QStringLiteral("<pre style='font-family:Consolas,monospace;'>%1</pre>")
+                        .arg(rows.toHtmlEscaped());
+        }
+        else
+        {
+            html += QStringLiteral("<br>");
+        }
+
+        html += tr("Signature σ(V + Vᵀ) = <b>%1</b>").arg(s.signature) +
+                QStringLiteral("<br>") +
+                tr("Determinant |det(V + Vᵀ)| = <b>%1</b>").arg(s.determinant) +
+                QStringLiteral("<br>") +
+                tr("Alexander polynomial det(V − t Vᵀ) = <b>%1</b>")
+                    .arg(s.alexanderText.toHtmlEscaped()) +
+                QStringLiteral("<br><br>") +
+                tr("The same Alexander polynomial as in the analysis panel, "
+                   "found in a completely different way.");
+    }
+    else if (s.genus > 0)
+    {
+        html += QStringLiteral("<br><br>") + s.matrixError.toHtmlEscaped();
+    }
+
+    seifertInfoLabel_->setText(html);
+}
+
+/*
+ * =============================================================
  * RELAX AND SCRAMBLE
  * =============================================================
  */
@@ -3923,6 +4352,9 @@ bool MainWindow::prepareRelaxation()
 {
     if (!hasData_)
         return false;
+
+    if (seifertActive_)
+        stopSeifert();
 
     if (currentData_.multiStrand ||
         !currentData_.closed)

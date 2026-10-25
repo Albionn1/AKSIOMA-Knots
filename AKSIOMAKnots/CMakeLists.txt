@@ -37,6 +37,8 @@ qt_add_executable(AKSIOMAKnots
     practicedialog.cpp
     knotexport.h
     knotexport.cpp
+    knotseifert.h
+    knotseifert.cpp
     timelineslider.h
     timelineslider.cpp
     knottable.h
@@ -95,5 +97,5 @@ endif()
 qt_add_translations(AKSIOMAKnots
     TS_FILES KnotTheory_sq_AL.ts
     RESOURCE_PREFIX /i18n
-    LUPDATE_OPTIONS -no-obsolete -locations none -tr-function-alias tr+=knotTr,tr+=exportTr
+    LUPDATE_OPTIONS -no-obsolete -locations none -tr-function-alias tr+=knotTr,tr+=exportTr,tr+=seifertTr
 )

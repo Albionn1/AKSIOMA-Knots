@@ -2161,7 +2161,7 @@ void KnotGLWidget::wheelEvent(QWheelEvent *event)
     event->accept();
 }
 
-void KnotGLWidget::resetCamera()
+void KnotGLWidget::resetCamera(float highestPitch)
 {
     /*
      * Best view of the current knot: the direction in which the curve
@@ -2255,7 +2255,7 @@ void KnotGLWidget::resetCamera()
     QVector<QVector2D> flat(n);
 
     // from slightly above to well above: never from below the floor
-    for (float pitch = 5.0f; pitch <= 75.0f; pitch += 5.0f)
+    for (float pitch = 5.0f; pitch <= highestPitch + 0.01f; pitch += 5.0f)
     {
         for (float yaw = 0.0f; yaw < 360.0f; yaw += 15.0f)
         {

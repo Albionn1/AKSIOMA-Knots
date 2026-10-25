@@ -4,6 +4,7 @@
 #include "knotglwidget.h"
 #include "knotmath.h"
 #include "knotrelax.h"
+#include "knotseifert.h"
 
 #include <QColor>
 #include <QComboBox>
@@ -143,6 +144,15 @@ private:
     void exportDiagram();
     void exportCoordinates();
     void exportReport();
+
+    // Seifert surface (knotseifert.h): shown in the 3D view instead of the
+    // knot, built up in four steps.
+    void toggleSeifert();
+    void stopSeifert();
+    void renderSeifert();
+    void setSeifertStep(
+        int step);
+    void updateSeifertInfo();
 
     void showAbout();
 
@@ -466,6 +476,38 @@ private:
 
     // what the analysis panel shows (for the report)
     KnotMath::Invariants currentInvariants_;
+
+    // Seifert surface mode
+    bool seifertActive_ =
+        false;
+
+    // the knot changed since the surface was built
+    bool seifertDirty_ =
+        true;
+
+    int seifertStep_ =
+        0;
+
+    KnotMath::SeifertSurface seifert_;
+
+    // goes through the steps after "Build"
+    QTimer *seifertTimer_ =
+        nullptr;
+
+    QPushButton *seifertButton_ =
+        nullptr;
+
+    QSlider *seifertStepSlider_ =
+        nullptr;
+
+    QLabel *seifertStepTitle_ =
+        nullptr;
+
+    QLabel *seifertStepText_ =
+        nullptr;
+
+    QLabel *seifertInfoLabel_ =
+        nullptr;
 
     QVector<KnotMath::CrossingInfo>
         currentCrossings_;

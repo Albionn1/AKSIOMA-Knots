@@ -6132,6 +6132,17 @@ bool cleanestProjection(
     return true;
 }
 
+bool cleanProjections(
+    const QVector<Vec3> &curve,
+    QVector<QVector<Vec3>> &projected,
+    QVector<QVector<CrossingInfo>> &crossings,
+    QString &error)
+{
+    crossings = cleanDiagrams(curve, error, &projected);
+
+    return !crossings.isEmpty();
+}
+
 AlexanderPolynomial computeAlexanderPolynomial(
     const QVector<Vec3> &curve,
     int maxCrossings)

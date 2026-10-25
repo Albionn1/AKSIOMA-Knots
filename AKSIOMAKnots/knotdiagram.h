@@ -45,14 +45,23 @@ KnotDiagram makeDiagramFromStroke(
     int samples = 160,
     double halfExtent = 2.0);
 
-// Diagram of a closed 3D curve: its cleanest projection
-// (cleanestProjection() in knotmath.h), centred at the origin and scaled to
+// Diagram of a closed 3D curve: its cleanest projection (fewest crossings,
+// spread out best; see diagramsFromCurve()), centred at the origin and scaled to
 // half-extent `halfExtent`, with over/under taken from the curve. Returns
 // an invalid diagram (with `error`) if there is no clean projection.
 KnotDiagram diagramFromCurve(
     const QVector<Vec3> &curve,
     double halfExtent,
     QString &error);
+
+// Several diagrams of the curve, best first: fewest crossings, then the
+// crossings most evenly spread (far apart in the picture and along the
+// curve). At most `maxCount`.
+QVector<KnotDiagram> diagramsFromCurve(
+    const QVector<Vec3> &curve,
+    double halfExtent,
+    QString &error,
+    int maxCount);
 
 // Finds all crossings of the polyline (keeps nothing from before) and sets
 // them alternating along the curve.

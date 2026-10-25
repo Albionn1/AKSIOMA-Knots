@@ -115,8 +115,10 @@ public:
     bool autoRotation() const;
 
     // Turns to the clearest view of the current knot and fits it into
-    // the window, with a short camera flight.
-    void resetCamera();
+    // the window, with a short camera flight. The view is never steeper
+    // than `highestPitch` degrees above the floor.
+    void resetCamera(
+        float highestPitch = 75.0f);
 
     QSize minimumSizeHint() const override;
     QSize sizeHint() const override;

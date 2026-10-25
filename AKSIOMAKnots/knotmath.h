@@ -363,6 +363,13 @@ bool cleanestProjection(
     QVector<CrossingInfo> &crossings,
     QString &error);
 
+// All clean projections found (fewest crossings first), as above.
+bool cleanProjections(
+    const QVector<Vec3> &curve,
+    QVector<QVector<Vec3>> &projected,
+    QVector<QVector<CrossingInfo>> &crossings,
+    QString &error);
+
 struct AlexanderPolynomial
 {
     bool valid = false;
