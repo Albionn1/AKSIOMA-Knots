@@ -33,6 +33,9 @@ Manuali i përdoruesit (PDF): [Shqip](Manual/AKSIOMA_Knots_Manual_SQ.pdf) ·
 [English](Manual/AKSIOMA_Knots_Manual_EN.pdf) ·
 [të dyja](Manual/AKSIOMA_Knots_Manual_EN_SQ.pdf)
 
+Formati i skedarit `.aknot` (PDF): [Shqip](Manual/AKSIOMA_aknot_File_Format_SQ.pdf) ·
+[English](Manual/AKSIOMA_aknot_File_Format_EN.pdf)
+
 ## Mundësitë
 
 - **Nyje në 3D**: nyje të gatshme, nyje torike T(p,q), kurba të
