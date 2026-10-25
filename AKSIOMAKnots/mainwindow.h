@@ -104,6 +104,10 @@ private:
     void applyThemeSettings();
     void rebuildWindow();
 
+    // Side panel widths for the text size: wider with larger text, and
+    // never narrower than their tabs.
+    void fitPanelsToText();
+
     // Takes over the knot, the view settings and the window placement.
     void takeOverFrom(
         MainWindow &previous);
@@ -224,6 +228,10 @@ private:
 
     QTabWidget *rightTabs_ =
         nullptr;
+
+    // text size the panel widths were last set for
+    int panelTextScale_ =
+        0;
 
     QDialog *settingsDialog_ =
         nullptr;

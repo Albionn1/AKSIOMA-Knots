@@ -1195,7 +1195,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Open and save knots, export pictures and data</source>
-        <translation>Hapni dhe ruani nyje, eksportoni figura dhe të dhëna</translation>
+        <translation>Hapni dhe ruani nyje, figura dhe të dhëna</translation>
     </message>
     <message>
         <source>Open knot...</source>
@@ -1207,19 +1207,19 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Export 3D picture...</source>
-        <translation>Eksporto figurën 3D...</translation>
+        <translation>Ruaj figurën 3D...</translation>
     </message>
     <message>
         <source>Export knot diagram...</source>
-        <translation>Eksporto diagramin e nyjës...</translation>
+        <translation>Ruaj diagramin e nyjës...</translation>
     </message>
     <message>
         <source>Export coordinates...</source>
-        <translation>Eksporto koordinatat...</translation>
+        <translation>Ruaj koordinatat...</translation>
     </message>
     <message>
         <source>Export analysis report...</source>
-        <translation>Eksporto raportin e analizës...</translation>
+        <translation>Ruaj raportin e analizës...</translation>
     </message>
     <message>
         <source>Practice</source>
@@ -1611,7 +1611,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Export 3D picture</source>
-        <translation>Eksporto figurën 3D</translation>
+        <translation>Ruaj figurën 3D</translation>
     </message>
     <message>
         <source>PNG image (*.png)</source>
@@ -1639,7 +1639,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Export knot diagram</source>
-        <translation>Eksporto diagramin e nyjës</translation>
+        <translation>Ruaj diagramin e nyjës</translation>
     </message>
     <message>
         <source>SVG drawing (*.svg)</source>
@@ -1655,7 +1655,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Export coordinates</source>
-        <translation>Eksporto koordinatat</translation>
+        <translation>Ruaj koordinatat</translation>
     </message>
     <message>
         <source>Text, one point per line (*.txt)</source>
@@ -1675,7 +1675,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Export analysis report</source>
-        <translation>Eksporto raportin e analizës</translation>
+        <translation>Ruaj raportin e analizës</translation>
     </message>
     <message>
         <source>Text (*.txt)</source>

@@ -34,6 +34,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QSplitter>
 #include <QSpinBox>
@@ -148,7 +149,15 @@ MainWindow::MainWindow(
         addFileAction(tr("Export coordinates..."), QKeySequence(), &MainWindow::exportCoordinates);
         addFileAction(tr("Export analysis report..."), QKeySequence(), &MainWindow::exportReport);
 
-        fileButton->setMenu(fileMenu);
+        // Opened by hand, not with setMenu(): a button with a menu keeps
+        // room for a menu arrow and pushed its text out on the left.
+        connect(fileButton,
+                &QPushButton::clicked,
+                fileMenu,
+                [fileButton, fileMenu]()
+                {
+                    fileMenu->popup(fileButton->mapToGlobal(QPoint(0, fileButton->height())));
+                });
     }
 
     QPushButton *practiceButton = new QPushButton(tr("Practice"), topBar);
@@ -245,7 +254,8 @@ MainWindow::MainWindow(
     mainSplitter_->setStretchFactor(1, 1);
     mainSplitter_->setStretchFactor(2, 0);
 
-    mainSplitter_->setSizes(QVector<int>{ 330, 1000, 370 });
+    // panel widths and first sizes for the text size
+    fitPanelsToText();
 
     rootLayout->addWidget(mainSplitter_, 1);
 
@@ -1678,6 +1688,8 @@ void MainWindow::applyThemeSettings()
         AppSettings::darkTheme(),
         AppSettings::textScale());
 
+    fitPanelsToText();
+
     // texts with their own colours
     updateLearnSection();
 
@@ -1689,6 +1701,65 @@ void MainWindow::applyThemeSettings()
 
     if (glWidget_ != nullptr)
         glWidget_->update();
+}
+
+void MainWindow::fitPanelsToText()
+{
+    const int scale =
+        Theme::textScale();
+
+    // widths at the normal text size: least, most, first
+    struct Panel
+    {
+        QTabWidget *tabs;
+        int minimum;
+        int maximum;
+        int initial;
+    };
+
+    const Panel panels[] =
+    {
+        {leftTabs_, 300, 380, 330},
+        {rightTabs_, 320, 460, 370}
+    };
+
+    QVector<int> initial;
+
+    for (const Panel &panel : panels)
+    {
+        // the tab bar scrolls when its tabs do not fit (with the style
+        // sheet's font, also before the window is first shown)
+        panel.tabs->ensurePolished();
+
+        const int minimum =
+            std::max(
+                panel.minimum * scale / 100,
+                panel.tabs->tabBar()->sizeHint().width());
+
+        panel.tabs->setMinimumWidth(minimum);
+        panel.tabs->setMaximumWidth(std::max(panel.maximum * scale / 100, minimum));
+
+        initial.push_back(std::max(panel.initial * scale / 100, minimum));
+    }
+
+    // the first sizes again only when the text size changed, so that a
+    // dragged divider stays where it is when only the theme changes
+    if (scale == panelTextScale_)
+        return;
+
+    panelTextScale_ = scale;
+
+    int total = 0;
+
+    for (const int size : mainSplitter_->sizes())
+        total += size;
+
+    // before the window is shown the splitter has no size yet
+    if (total < initial[0] + initial[1] + 400)
+        total = 1700;
+
+    mainSplitter_->setSizes(
+        QVector<int>{ initial[0], total - initial[0] - initial[1], initial[1] });
 }
 
 void MainWindow::toggleFullScreen()
