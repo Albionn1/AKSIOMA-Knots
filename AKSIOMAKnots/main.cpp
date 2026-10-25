@@ -42,7 +42,7 @@ int main(
 
     app.setApplicationDisplayName(
         QStringLiteral(
-            "AKSIOMA — Knots"));
+            "AKSIOMA: Knots"));
 
     app.setApplicationVersion(
         QStringLiteral(

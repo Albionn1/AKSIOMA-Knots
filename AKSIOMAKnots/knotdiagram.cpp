@@ -1,5 +1,7 @@
 #include "knotdiagram.h"
 
+#include <QCoreApplication>
+
 #include <algorithm>
 #include <cmath>
 
@@ -314,6 +316,66 @@ KnotDiagram makeDiagramFromStroke(
     }
 
     detectDiagramCrossings(diagram);
+
+    return diagram;
+}
+
+KnotDiagram diagramFromCurve(
+    const QVector<Vec3> &curve,
+    double halfExtent,
+    QString &error)
+{
+    KnotDiagram diagram;
+
+    QVector<Vec3> projected;
+    QVector<CrossingInfo> crossings;
+
+    if (!cleanestProjection(curve, projected, crossings, error))
+        return diagram;
+
+    double minX = 1e300, maxX = -1e300, minY = 1e300, maxY = -1e300;
+
+    for (const Vec3 &p : projected)
+    {
+        minX = std::min(minX, p.x);
+        maxX = std::max(maxX, p.x);
+        minY = std::min(minY, p.y);
+        maxY = std::max(maxY, p.y);
+    }
+
+    const double half = std::max(0.5 * (maxX - minX), 0.5 * (maxY - minY));
+
+    if (half < 1e-12)
+    {
+        error = QCoreApplication::translate("KnotMath", "The curve is degenerate.");
+        return diagram;
+    }
+
+    const double cx = 0.5 * (minX + maxX);
+    const double cy = 0.5 * (minY + maxY);
+    const double scale = halfExtent / half;
+
+    for (const Vec3 &p : projected)
+        diagram.points.push_back(Vec3((p.x - cx) * scale, (p.y - cy) * scale, 0.0));
+
+    const int n = diagram.points.size();
+
+    for (const CrossingInfo &info : crossings)
+    {
+        DiagramCrossing c;
+        c.segA = info.segmentA;
+        c.tA = info.parameterA;
+        c.segB = info.segmentB;
+        c.tB = info.parameterB;
+        c.aOver = info.aIsOver;
+
+        const Vec3 &a = diagram.points[c.segA];
+        const Vec3 &b = diagram.points[(c.segA + 1) % n];
+
+        c.position = Vec3(a.x + (b.x - a.x) * c.tA, a.y + (b.y - a.y) * c.tA, 0.0);
+
+        diagram.crossings.push_back(c);
+    }
 
     return diagram;
 }

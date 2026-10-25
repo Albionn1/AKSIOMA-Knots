@@ -6004,10 +6004,12 @@ bool normalizeAlexander(IntPolynomial p, AlexanderPolynomial &result)
 
 // Clean (regular) projections of a closed curve from several viewing
 // directions, fewest crossings first. Empty (with `error` set) if there is
-// none.
+// none. `projectedCurves` (if given) receives the curve of every diagram,
+// centred and turned so that the viewer looks down the z axis.
 QVector<QVector<CrossingInfo>> cleanDiagrams(
     const QVector<Vec3> &curve,
-    QString &error)
+    QString &error,
+    QVector<QVector<Vec3>> *projectedCurves = nullptr)
 {
     QVector<QVector<CrossingInfo>> diagrams;
 
@@ -6048,6 +6050,8 @@ QVector<QVector<CrossingInfo>> cleanDiagrams(
         return diagrams;
     }
 
+    QVector<QVector<Vec3>> curves;
+
     for (const Vec3 &direction : candidateViewDirections())
     {
         const AlignRotation rotation = rotationToZ(direction);
@@ -6062,7 +6066,10 @@ QVector<QVector<CrossingInfo>> cleanDiagrams(
             detectProjectionCrossings(rotated, 2, n);
 
         if (diagramIsRobust(crossings, extent))
+        {
             diagrams.push_back(crossings);
+            curves.push_back(rotated);
+        }
     }
 
     if (diagrams.isEmpty())
@@ -6072,18 +6079,58 @@ QVector<QVector<CrossingInfo>> cleanDiagrams(
         return diagrams;
     }
 
+    QVector<int> order(diagrams.size());
+
+    for (int i = 0; i < order.size(); ++i)
+        order[i] = i;
+
     std::stable_sort(
-        diagrams.begin(),
-        diagrams.end(),
-        [](const QVector<CrossingInfo> &a, const QVector<CrossingInfo> &b)
+        order.begin(),
+        order.end(),
+        [&diagrams](int a, int b)
         {
-            return a.size() < b.size();
+            return diagrams.at(a).size() < diagrams.at(b).size();
         });
 
-    return diagrams;
+    QVector<QVector<CrossingInfo>> sorted;
+
+    sorted.reserve(order.size());
+
+    for (int i : order)
+        sorted.push_back(diagrams.at(i));
+
+    if (projectedCurves != nullptr)
+    {
+        projectedCurves->clear();
+
+        for (int i : order)
+            projectedCurves->push_back(curves.at(i));
+    }
+
+    return sorted;
 }
 
 } // namespace
+
+bool cleanestProjection(
+    const QVector<Vec3> &curve,
+    QVector<Vec3> &projected,
+    QVector<CrossingInfo> &crossings,
+    QString &error)
+{
+    QVector<QVector<Vec3>> curves;
+
+    const QVector<QVector<CrossingInfo>> diagrams =
+        cleanDiagrams(curve, error, &curves);
+
+    if (diagrams.isEmpty())
+        return false;
+
+    projected = curves.first();
+    crossings = diagrams.first();
+
+    return true;
+}
 
 AlexanderPolynomial computeAlexanderPolynomial(
     const QVector<Vec3> &curve,

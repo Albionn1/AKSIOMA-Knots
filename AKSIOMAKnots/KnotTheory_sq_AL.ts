@@ -884,20 +884,12 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>SHIKIMI</translation>
     </message>
     <message>
-        <source>AKSIOMA Knots</source>
-        <translation>AKSIOMA Knots</translation>
-    </message>
-    <message>
         <source>AKSIOMA</source>
         <translation>AKSIOMA</translation>
     </message>
     <message>
         <source>KNOTS</source>
         <translation>NYJET</translation>
-    </message>
-    <message>
-        <source>KNOT THEORY  /  3D ANALYSIS</source>
-        <translation>TEORIA E NYJEVE  /  ANALIZË 3D</translation>
     </message>
     <message>
         <source>DRAG  ORBIT      RIGHT-DRAG  PAN      SCROLL  ZOOM</source>
@@ -968,10 +960,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Tabela e nyjeve (12&#xa0;965 nyje)</translation>
     </message>
     <message>
-        <source>Browse all knots...</source>
-        <translation>Shfleto të gjitha nyjet...</translation>
-    </message>
-    <message>
         <source>All 12,965 prime knots with up to 13 crossings.</source>
         <translation>Të gjitha 12&#xa0;965 nyjet e thjeshta me deri në 13 kryqëzime.</translation>
     </message>
@@ -986,10 +974,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Formulas x=..., y=..., z=... in t, or one &apos;x, y, z&apos; point per line.</source>
         <translation>Formula x=..., y=..., z=... në t, ose një pikë &apos;x, y, z&apos; për rresht.</translation>
-    </message>
-    <message>
-        <source>Draw a knot...</source>
-        <translation>Vizato një nyjë...</translation>
     </message>
     <message>
         <source>Draw a loop with the mouse and choose over/under at each crossing.</source>
@@ -1076,6 +1060,18 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Rikthe</translation>
     </message>
     <message>
+        <source>AKSIOMA: Knots</source>
+        <translation>AKSIOMA: Nyjet</translation>
+    </message>
+    <message>
+        <source>Practice</source>
+        <translation>Ushtrime</translation>
+    </message>
+    <message>
+        <source>Exercises on the knot diagram: tricolouring, crossing signs</source>
+        <translation>Ushtrime mbi diagramin e nyjës: trengjyrësimi, shenjat e kryqëzimeve</translation>
+    </message>
+    <message>
         <source>RELAX</source>
         <translation>RELAKSIMI</translation>
     </message>
@@ -1134,10 +1130,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>LEARN</source>
         <translation>MËSO</translation>
-    </message>
-    <message>
-        <source>SETTINGS</source>
-        <translation>CILËSIMET</translation>
     </message>
     <message>
         <source>LANGUAGE</source>
@@ -1454,6 +1446,234 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>No strand passed through another, so this is still the same knot. Scramble it again, or press Reset to go back to the original.</source>
         <translation>Asnjë fije nuk kaloi nëpër një tjetër, kështu që kjo është ende e njëjta nyjë. Ngatërrojeni përsëri, ose shtypni Rikthe për t&apos;u kthyer te origjinali.</translation>
+    </message>
+</context>
+<context>
+    <name>PracticeDialog</name>
+    <message>
+        <source>Practice</source>
+        <translation>Ushtrime</translation>
+    </message>
+    <message>
+        <source>Tricolouring</source>
+        <translation>Trengjyrësimi</translation>
+    </message>
+    <message>
+        <source>Crossing signs</source>
+        <translation>Shenjat e kryqëzimeve</translation>
+    </message>
+    <message>
+        <source>Current knot</source>
+        <translation>Nyja aktuale</translation>
+    </message>
+    <message>
+        <source>The knot shown in the 3D view.</source>
+        <translation>Nyja që shfaqet në pamjen 3D.</translation>
+    </message>
+    <message>
+        <source>Mystery knot</source>
+        <translation>Nyjë misterioze</translation>
+    </message>
+    <message>
+        <source>A knot with 3 to 8 crossings from the knot table; its name is shown when you are done.</source>
+        <translation>Një nyjë me 3 deri në 8 kryqëzime nga tabela e nyjeve; emri i saj shfaqet kur të keni mbaruar.</translation>
+    </message>
+    <message>
+        <source>Draw...</source>
+        <translation>Vizato...</translation>
+    </message>
+    <message>
+        <source>Draw your own knot diagram.</source>
+        <translation>Vizatoni diagramin tuaj të nyjës.</translation>
+    </message>
+    <message>
+        <source>Red</source>
+        <translation>E kuqe</translation>
+    </message>
+    <message>
+        <source>Green</source>
+        <translation>E gjelbër</translation>
+    </message>
+    <message>
+        <source>Blue</source>
+        <translation>Blu</translation>
+    </message>
+    <message>
+        <source>Click an arc to give it this colour (key %1). Right-click an arc to remove its colour.</source>
+        <translation>Klikoni një hark për t&apos;i dhënë këtë ngjyrë (tasti %1). Klikoni me të djathtin mbi një hark për t&apos;ia hequr ngjyrën.</translation>
+    </message>
+    <message>
+        <source>Hint</source>
+        <translation>Ndihmë</translation>
+    </message>
+    <message>
+        <source>It can&apos;t be done</source>
+        <translation>Nuk mund të bëhet</translation>
+    </message>
+    <message>
+        <source>Claim that no colouring with two or more colours exists.</source>
+        <translation>Pohoni se nuk ekziston asnjë ngjyrosje me dy ose më shumë ngjyra.</translation>
+    </message>
+    <message>
+        <source>Show a solution</source>
+        <translation>Shfaq një zgjidhje</translation>
+    </message>
+    <message>
+        <source>Clear</source>
+        <translation>Pastro</translation>
+    </message>
+    <message>
+        <source>Check</source>
+        <translation>Kontrollo</translation>
+    </message>
+    <message>
+        <source>Show answers</source>
+        <translation>Shfaq përgjigjet</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>Mbyll</translation>
+    </message>
+    <message>
+        <source>Your drawing</source>
+        <translation>Vizatimi juaj</translation>
+    </message>
+    <message>
+        <source>This knot cannot be used for practice: %1</source>
+        <translation>Kjo nyjë nuk mund të përdoret për ushtrime: %1</translation>
+    </message>
+    <message>
+        <source>no clean picture of it was found.</source>
+        <translation>nuk u gjet asnjë pamje e pastër e saj.</translation>
+    </message>
+    <message>
+        <source>The cleanest picture of this knot has %1 crossings - too many to practise on. Choose a simpler knot, or let it relax in the 3D view first.</source>
+        <translation>Pamja më e pastër e kësaj nyjeje ka %1 kryqëzime – shumë për t&apos;u ushtruar. Zgjidhni një nyjë më të thjeshtë, ose relaksojeni më parë në pamjen 3D.</translation>
+    </message>
+    <message>
+        <source>The mystery knot was &lt;b&gt;%1&lt;/b&gt;. </source>
+        <translation>Nyja misterioze ishte &lt;b&gt;%1&lt;/b&gt;. </translation>
+    </message>
+    <message>
+        <source>%1  ·  %2 crossings, %3 arcs</source>
+        <translation>%1  ·  %2 kryqëzime, %3 harqe</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;Colour the arcs with three colours.&lt;/b&gt; An &lt;i&gt;arc&lt;/i&gt; runs from one under-crossing to the next. At every crossing the three arcs that meet must be &lt;b&gt;all the same&lt;/b&gt; colour or &lt;b&gt;all different&lt;/b&gt; colours, and you must use at least two colours. Pick a colour, then click arcs; a crossing that breaks the rule gets a highlighted ring.</source>
+        <translation>&lt;b&gt;Ngjyrosni harqet me tri ngjyra.&lt;/b&gt; Një &lt;i&gt;hark&lt;/i&gt; shkon nga një kalim poshtë te tjetri. Në çdo kryqëzim, tri harqet që takohen duhet të kenë &lt;b&gt;të gjitha të njëjtën&lt;/b&gt; ngjyrë ose &lt;b&gt;të gjitha ngjyra të ndryshme&lt;/b&gt;, dhe duhet të përdorni të paktën dy ngjyra. Zgjidhni një ngjyrë, pastaj klikoni harqet; një kryqëzim që e shkel rregullin merr një unazë të theksuar.</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;Find the sign of every crossing.&lt;/b&gt; The arrows show the direction of travel. Look along the over strand: if the under strand passes from your right to your left, the crossing is &lt;b&gt;+1&lt;/b&gt;, otherwise &lt;b&gt;−1&lt;/b&gt; (see the corner). Click a crossing to mark it, then press Check.</source>
+        <translation>&lt;b&gt;Gjeni shenjën e çdo kryqëzimi.&lt;/b&gt; Shigjetat tregojnë drejtimin e lëvizjes. Shikoni përgjatë fijes së sipërme: nëse fija e poshtme kalon nga e djathta juaj në të majtën, kryqëzimi është &lt;b&gt;+1&lt;/b&gt;, përndryshe &lt;b&gt;−1&lt;/b&gt; (shihni këndin). Klikoni një kryqëzim për ta shënuar, pastaj shtypni Kontrollo.</translation>
+    </message>
+    <message>
+        <source>The determinant of this knot is %1 (= |Δ(−1)|, the Alexander polynomial at t = −1). A knot can be tricoloured exactly when 3 divides its determinant.</source>
+        <translation>Përcaktori i kësaj nyjeje është %1 (= |Δ(−1)|, polinomi i Aleksandrit për t = −1). Një nyjë mund të trengjyrësohet atëherë dhe vetëm atëherë kur përcaktori i saj plotpjesëtohet me 3.</translation>
+    </message>
+    <message>
+        <source>%1 of %2 arcs coloured.</source>
+        <translation>%1 nga %2 harqe të ngjyrosura.</translation>
+    </message>
+    <message numerus="yes">
+        <source>&lt;b&gt;%n crossing(s) break the rule&lt;/b&gt; (highlighted rings).</source>
+        <translation>
+            <numerusform>&lt;b&gt;%n kryqëzim e shkel rregullin&lt;/b&gt; (unazat e theksuara).</numerusform>
+            <numerusform>&lt;b&gt;%n kryqëzime e shkelin rregullin&lt;/b&gt; (unazat e theksuara).</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <source>All arcs are coloured, but &lt;b&gt;%n crossing(s) break the rule&lt;/b&gt; (highlighted rings).</source>
+        <translation>
+            <numerusform>Të gjitha harqet janë ngjyrosur, por &lt;b&gt;%n kryqëzim e shkel rregullin&lt;/b&gt; (unazat e theksuara).</numerusform>
+            <numerusform>Të gjitha harqet janë ngjyrosur, por &lt;b&gt;%n kryqëzime e shkelin rregullin&lt;/b&gt; (unazat e theksuara).</numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Every crossing is fine, but you used only one colour. One colour always works - even for the unknot - so it proves nothing. Use at least two colours.</source>
+        <translation>Çdo kryqëzim është në rregull, por keni përdorur vetëm një ngjyrë. Një ngjyrë funksionon gjithmonë – edhe për nyjën triviale – prandaj nuk vërteton asgjë. Përdorni të paktën dy ngjyra.</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;Solved!&lt;/b&gt; </source>
+        <translation>&lt;b&gt;U zgjidh!&lt;/b&gt; </translation>
+    </message>
+    <message>
+        <source>A valid tricolouring proves that this knot is &lt;b&gt;not the unknot&lt;/b&gt;: Reidemeister moves never destroy a tricolouring, and the plain circle only has one-colour ones. </source>
+        <translation>Një trengjyrësim i vlefshëm vërteton se kjo nyjë &lt;b&gt;nuk është nyja triviale&lt;/b&gt;: lëvizjet e Reidemeister-it nuk e shkatërrojnë kurrë një trengjyrësim, ndërsa rrethi i thjeshtë ka vetëm ngjyrosje me një ngjyrë. </translation>
+    </message>
+    <message>
+        <source>Hint: change one arc to a different colour and follow the rule from there - one colour proves nothing.</source>
+        <translation>Ndihmë: ndryshojeni një hark në ngjyrë tjetër dhe ndiqni rregullin prej andej – një ngjyrë nuk vërteton asgjë.</translation>
+    </message>
+    <message>
+        <source>Hint: the glowing arc can be coloured like this. </source>
+        <translation>Ndihmë: harku që ndriçon mund të ngjyroset kështu. </translation>
+    </message>
+    <message>
+        <source>Hint: does every attempt end with all arcs forced to the same colour? Then perhaps it can&apos;t be done at all.</source>
+        <translation>Ndihmë: a përfundon çdo përpjekje me të gjitha harqet të detyruara në të njëjtën ngjyrë? Atëherë ndoshta nuk mund të bëhet fare.</translation>
+    </message>
+    <message>
+        <source>Hint: your colours can&apos;t all be kept. Try a different colour for the glowing arc.</source>
+        <translation>Ndihmë: ngjyrat tuaja nuk mund të mbahen të gjitha. Provoni një ngjyrë tjetër për harkun që ndriçon.</translation>
+    </message>
+    <message>
+        <source>Hint: your colours can&apos;t be completed. Clear them and start with three different colours at one crossing.</source>
+        <translation>Ndihmë: ngjyrat tuaja nuk mund të plotësohen. Pastrojini dhe filloni me tri ngjyra të ndryshme në një kryqëzim.</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;Not so fast&lt;/b&gt; - this knot &lt;i&gt;can&lt;/i&gt; be tricoloured. Keep trying, or ask for a hint.</source>
+        <translation>&lt;b&gt;Jo kaq shpejt&lt;/b&gt; – kjo nyjë &lt;i&gt;mund&lt;/i&gt; të trengjyrësohet. Vazhdoni të provoni, ose kërkoni ndihmë.</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;Right!&lt;/b&gt; </source>
+        <translation>&lt;b&gt;Saktë!&lt;/b&gt; </translation>
+    </message>
+    <message>
+        <source>No colouring with two or more colours exists, so this knot is &lt;b&gt;not tricolourable&lt;/b&gt;. </source>
+        <translation>Nuk ekziston asnjë ngjyrosje me dy ose më shumë ngjyra, prandaj kjo nyjë &lt;b&gt;nuk është e trengjyrësueshme&lt;/b&gt;. </translation>
+    </message>
+    <message>
+        <source>Careful: this does &lt;i&gt;not&lt;/i&gt; prove it is the unknot - the figure-eight knot can&apos;t be tricoloured either, and it is knotted.</source>
+        <translation>Kujdes: kjo &lt;i&gt;nuk&lt;/i&gt; vërteton se është nyja triviale – as nyja në formë tetëshi nuk mund të trengjyrësohet, e megjithatë është e nyjëzuar.</translation>
+    </message>
+    <message>
+        <source>There is no solution: this knot can&apos;t be tricoloured. </source>
+        <translation>Nuk ka zgjidhje: kjo nyjë nuk mund të trengjyrësohet. </translation>
+    </message>
+    <message>
+        <source>Here is a valid tricolouring. Check a few crossings yourself: all the same or all different. </source>
+        <translation>Ja një trengjyrësim i vlefshëm. Kontrolloni vetë disa kryqëzime: të gjitha njësoj ose të gjitha të ndryshme. </translation>
+    </message>
+    <message>
+        <source>This diagram has no crossings, so its writhe is 0.</source>
+        <translation>Ky diagram nuk ka kryqëzime, prandaj përdredhja e tij është 0.</translation>
+    </message>
+    <message>
+        <source>%1 of %2 crossings marked. Your sum so far (the writhe of the diagram): %3.</source>
+        <translation>%1 nga %2 kryqëzime të shënuara. Shuma juaj deri tani (përdredhja e diagramit): %3.</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;All %1 correct!&lt;/b&gt; </source>
+        <translation>&lt;b&gt;Të %1 të sakta!&lt;/b&gt; </translation>
+    </message>
+    <message>
+        <source>The writhe of this diagram is %1. The writhe is &lt;i&gt;not&lt;/i&gt; a knot invariant - a single twist (Reidemeister move I) changes it by ±1 - but it is the correction that turns the Kauffman bracket into the Jones polynomial. For two separate loops, half the sum of the signs where they cross is the linking number, which &lt;i&gt;is&lt;/i&gt; an invariant.</source>
+        <translation>Përdredhja e këtij diagrami është %1. Përdredhja &lt;i&gt;nuk&lt;/i&gt; është invariant i nyjeve – një përdredhje e vetme (lëvizja I e Reidemeister-it) e ndryshon me ±1 – por është korrigjimi që e kthen kllapën e Kauffmanit në polinomin e Jonesit. Për dy laqe të veçanta, gjysma e shumës së shenjave aty ku ato kryqëzohen është numri i lidhjes, i cili &lt;i&gt;është&lt;/i&gt; invariant.</translation>
+    </message>
+    <message>
+        <source>%1 of %2 correct.</source>
+        <translation>%1 nga %2 të sakta.</translation>
+    </message>
+    <message numerus="yes">
+        <source>%n crossing(s) not marked yet.</source>
+        <translation>
+            <numerusform>%n kryqëzim ende i pashënuar.</numerusform>
+            <numerusform>%n kryqëzime ende të pashënuara.</numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Wrong answers have a red ring - follow the arrows once more.</source>
+        <translation>Përgjigjet e gabuara kanë një unazë të kuqe – ndiqni shigjetat edhe një herë.</translation>
     </message>
 </context>
 <context>

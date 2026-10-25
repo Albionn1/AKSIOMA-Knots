@@ -6,6 +6,7 @@
 #include "knotbrowser.h"
 #include "knotdiagram.h"
 #include "knottable.h"
+#include "practicedialog.h"
 #include "theme.h"
 #include "timelineslider.h"
 #include "unknotsummarydialog.h"
@@ -48,8 +49,15 @@ MainWindow::MainWindow(
     QWidget *parent)
     : QMainWindow(parent)
 {
+    // Qt adds the display name to every window title unless the title is
+    // the display name itself, so both are set: the main window shows only
+    // "AKSIOMA: Knots" and dialogs "Settings - AKSIOMA: Knots". Set here and
+    // not in main.cpp because a new language builds a new window.
+    QGuiApplication::setApplicationDisplayName(
+        tr("AKSIOMA: Knots"));
+
     setWindowTitle(
-        tr("AKSIOMA Knots"));
+        QGuiApplication::applicationDisplayName());
 
     setMinimumSize(
         QSize(
@@ -97,6 +105,13 @@ MainWindow::MainWindow(
     settingsButton->setCursor(Qt::PointingHandCursor);
     settingsButton->setToolTip(tr("Language, theme, text size, window  (Ctrl+,)"));
 
+    QPushButton *practiceButton = new QPushButton(tr("Practice"), topBar);
+
+    practiceButton->setObjectName(QStringLiteral("TopBarButton"));
+    practiceButton->setCursor(Qt::PointingHandCursor);
+    practiceButton->setToolTip(
+        tr("Exercises on the knot diagram: tricolouring, crossing signs"));
+
     QPushButton *aboutButton = new QPushButton(tr("About"), topBar);
 
     aboutButton->setObjectName(QStringLiteral("TopBarButton"));
@@ -104,6 +119,7 @@ MainWindow::MainWindow(
 
     connect(settingsButton, &QPushButton::clicked, this, &MainWindow::showSettings);
     connect(aboutButton, &QPushButton::clicked, this, &MainWindow::showAbout);
+    connect(practiceButton, &QPushButton::clicked, this, &MainWindow::openPractice);
 
     topLayout->addWidget(brandLabel);
     topLayout->addWidget(brandSub);
@@ -111,6 +127,8 @@ MainWindow::MainWindow(
     topLayout->addWidget(brandDivider);
     topLayout->addSpacing(6);
     topLayout->addWidget(createKnotBar(topBar), 1);
+    topLayout->addWidget(practiceButton);
+    topLayout->addSpacing(4);
     topLayout->addWidget(settingsButton);
     topLayout->addSpacing(4);
     topLayout->addWidget(aboutButton);
@@ -1875,6 +1893,22 @@ void MainWindow::openKnotBrowser()
         updateLearnSection();
         generateMesh();
     }
+}
+
+void MainWindow::openPractice()
+{
+    // the exercises need a single closed curve
+    QVector<KnotMath::Vec3> curve;
+
+    if (hasData_ && !currentData_.multiStrand && currentData_.closed)
+        curve = currentData_.points;
+
+    PracticeDialog dialog(
+        curve,
+        currentData_.name,
+        this);
+
+    dialog.exec();
 }
 
 void MainWindow::showAbout()

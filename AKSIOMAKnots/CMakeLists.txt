@@ -31,6 +31,10 @@ qt_add_executable(AKSIOMAKnots
     knotdiagram.cpp
     diagrameditor.h
     diagrameditor.cpp
+    knotpractice.h
+    knotpractice.cpp
+    practicedialog.h
+    practicedialog.cpp
     timelineslider.h
     timelineslider.cpp
     knottable.h

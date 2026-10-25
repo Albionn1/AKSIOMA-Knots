@@ -133,6 +133,9 @@ private:
     // "Browse all knots" button: choose a knot and show it.
     void openKnotBrowser();
 
+    // Practice window (tricolouring, crossing signs) on the current knot.
+    void openPractice();
+
     void showAbout();
 
     void showSettings();

@@ -352,6 +352,17 @@ QString alexanderPolynomialForTorusKnot(int p, int q);
 // power first: "t² − t + 1 − t⁻¹ + t⁻²".
 QString formatPolynomial(const std::map<int, long long> &coefficients);
 
+// The regular projection of a closed curve with the fewest crossings among
+// the viewing directions the polynomials are computed from: `projected` is
+// the curve (centred, at most 400 points) turned so that the viewer looks
+// down the z axis, `crossings` its crossings. false (with `error`) if no
+// clean projection was found.
+bool cleanestProjection(
+    const QVector<Vec3> &curve,
+    QVector<Vec3> &projected,
+    QVector<CrossingInfo> &crossings,
+    QString &error);
+
 struct AlexanderPolynomial
 {
     bool valid = false;

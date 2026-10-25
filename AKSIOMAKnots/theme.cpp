@@ -432,6 +432,13 @@ const char *const StyleSheet = R"(
         color: #D99B42;
     }
 
+    /* colour choice in Practice */
+
+    QPushButton#BrushButton:checked {
+        border: 2px solid #D99B42;
+        color: #BAB9B4;
+    }
+
     /* ---------- slider ---------- */
 
     QSlider {
