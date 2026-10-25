@@ -10,3 +10,14 @@ Uses the Qt SVG module (Qt Svg, installed with Qt by default) for diagram export
 
 NOTE: resources.qrc and the icons/ folder must stay next to CMakeLists.txt
 (they hold the dropdown arrows and the checkbox tick used by the theme).
+
+Windows installer (Inno Setup 6.7 or newer: winget install JRSoftware.InnoSetup)
+
+  powershell -ExecutionPolicy Bypass -File installer\build_installer.ps1
+
+  Makes a Release build, collects the Qt files with windeployqt and writes
+  installer\output\AKSIOMA-Knots-<version>-Setup.exe (the version from
+  CMakeLists.txt). Change the Qt paths with -QtDir / -QtTools if needed.
+  The installer is in English and Albanian (installer\Albanian.isl), and
+  installs the program, the user manuals (..\Manual) and the .aknot file type.
+  Its pictures are made from icons\aksioma_logo.png by installer\make_images.py.

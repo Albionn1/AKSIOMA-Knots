@@ -6,3 +6,6 @@ build/
 .qtcreator/
 *.user
 *.user.*
+
+# Installer (AKSIOMAKnots/installer/build_installer.ps1)
+**/installer/output/
