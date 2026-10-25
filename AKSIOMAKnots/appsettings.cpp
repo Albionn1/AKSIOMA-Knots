@@ -1,0 +1,180 @@
+#include "appsettings.h"
+
+#include "theme.h"
+
+#include <QCoreApplication>
+#include <QLocale>
+#include <QSettings>
+#include <QTranslator>
+
+namespace
+{
+
+const QString LanguageKey = QStringLiteral("language");
+const QString ThemeKey = QStringLiteral("theme");
+const QString TextScaleKey = QStringLiteral("textScale");
+const QString StartFullScreenKey = QStringLiteral("startFullScreen");
+const QString RememberWindowKey = QStringLiteral("rememberWindow");
+const QString WindowGeometryKey = QStringLiteral("windowGeometry");
+
+QTranslator *installedTranslator = nullptr;
+
+// Texts of Qt's own buttons and colour dialog. Qt has no Albanian
+// translation, so they are listed here and lupdate adds them to our .ts.
+[[maybe_unused]] const char *const QtTexts[] =
+{
+    QT_TRANSLATE_NOOP("QPlatformTheme", "OK"),
+    QT_TRANSLATE_NOOP("QPlatformTheme", "Open"),
+    QT_TRANSLATE_NOOP("QPlatformTheme", "Save"),
+    QT_TRANSLATE_NOOP("QPlatformTheme", "Cancel"),
+    QT_TRANSLATE_NOOP("QPlatformTheme", "Close"),
+    QT_TRANSLATE_NOOP("QPlatformTheme", "Discard"),
+    QT_TRANSLATE_NOOP("QPlatformTheme", "Apply"),
+    QT_TRANSLATE_NOOP("QPlatformTheme", "Reset"),
+    QT_TRANSLATE_NOOP("QPlatformTheme", "Restore Defaults"),
+    QT_TRANSLATE_NOOP("QPlatformTheme", "Help"),
+    QT_TRANSLATE_NOOP("QPlatformTheme", "&Yes"),
+    QT_TRANSLATE_NOOP("QPlatformTheme", "&No"),
+
+    QT_TRANSLATE_NOOP("QColorDialog", "Select Color"),
+    QT_TRANSLATE_NOOP("QColorDialog", "&Basic colors"),
+    QT_TRANSLATE_NOOP("QColorDialog", "&Custom colors"),
+    QT_TRANSLATE_NOOP("QColorDialog", "&Add to Custom Colors"),
+    QT_TRANSLATE_NOOP("QColorDialog", "&Pick Screen Color"),
+    QT_TRANSLATE_NOOP("QColorDialog", "Hu&e:"),
+    QT_TRANSLATE_NOOP("QColorDialog", "&Sat:"),
+    QT_TRANSLATE_NOOP("QColorDialog", "&Val:"),
+    QT_TRANSLATE_NOOP("QColorDialog", "&Red:"),
+    QT_TRANSLATE_NOOP("QColorDialog", "&Green:"),
+    QT_TRANSLATE_NOOP("QColorDialog", "Bl&ue:"),
+    QT_TRANSLATE_NOOP("QColorDialog", "A&lpha channel:"),
+    QT_TRANSLATE_NOOP("QColorDialog", "&HTML:")
+};
+
+} // namespace
+
+namespace AppSettings
+{
+
+QString language()
+{
+    const QString fallback =
+        QLocale::system().language() == QLocale::Albanian
+            ? QStringLiteral("sq")
+            : QStringLiteral("en");
+
+    const QString code =
+        QSettings().value(LanguageKey, fallback).toString();
+
+    return code == QStringLiteral("sq")
+               ? code
+               : QStringLiteral("en");
+}
+
+void setLanguage(
+    const QString &code)
+{
+    QSettings().setValue(LanguageKey, code);
+}
+
+bool darkTheme()
+{
+    return QSettings().value(ThemeKey, QStringLiteral("dark")).toString() !=
+           QStringLiteral("light");
+}
+
+void setDarkTheme(
+    bool dark)
+{
+    QSettings().setValue(
+        ThemeKey,
+        dark ? QStringLiteral("dark") : QStringLiteral("light"));
+}
+
+int textScale()
+{
+    return QSettings().value(TextScaleKey, 100).toInt();
+}
+
+void setTextScale(
+    int percent)
+{
+    QSettings().setValue(TextScaleKey, percent);
+}
+
+bool startFullScreen()
+{
+    return QSettings().value(StartFullScreenKey, false).toBool();
+}
+
+void setStartFullScreen(
+    bool enabled)
+{
+    QSettings().setValue(StartFullScreenKey, enabled);
+}
+
+bool rememberWindow()
+{
+    return QSettings().value(RememberWindowKey, true).toBool();
+}
+
+void setRememberWindow(
+    bool enabled)
+{
+    QSettings().setValue(RememberWindowKey, enabled);
+}
+
+QByteArray windowGeometry()
+{
+    return QSettings().value(WindowGeometryKey).toByteArray();
+}
+
+void setWindowGeometry(
+    const QByteArray &geometry)
+{
+    QSettings().setValue(WindowGeometryKey, geometry);
+}
+
+void restoreDefaults()
+{
+    QSettings().clear();
+}
+
+void installLanguage(
+    const QString &code)
+{
+    if (installedTranslator != nullptr)
+    {
+        QCoreApplication::removeTranslator(installedTranslator);
+
+        delete installedTranslator;
+
+        installedTranslator = nullptr;
+    }
+
+    if (code != QStringLiteral("sq"))
+        return;
+
+    // compiled into the program from KnotTheory_sq_AL.ts
+    QTranslator *translator = new QTranslator();
+
+    if (translator->load(QStringLiteral(":/i18n/KnotTheory_sq_AL.qm")))
+    {
+        QCoreApplication::installTranslator(translator);
+
+        installedTranslator = translator;
+    }
+    else
+    {
+        delete translator;
+    }
+}
+
+void applyAll()
+{
+    installLanguage(language());
+
+    Theme::apply(darkTheme(), textScale());
+}
+
+} // namespace AppSettings

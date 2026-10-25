@@ -1,0 +1,11 @@
+Build (Qt 6.5+ recommended, with the "Qt Quick/OpenGL" modules installed)
+
+  cmake -S . -B build -DCMAKE_PREFIX_PATH=<path to Qt, e.g. C:/Qt/6.8.0/msvc2022_64>
+  cmake --build build --config Release
+  run build/AKSIOMAKnots   (Windows: build/Release/AKSIOMAKnots.exe, run windeployqt first)
+
+Or: open CMakeLists.txt in Qt Creator and pick a Qt 6 kit.
+Needs an OpenGL 3.3 core capable GPU/driver.
+
+NOTE: resources.qrc and the icons/ folder must stay next to CMakeLists.txt
+(they hold the dropdown arrows and the checkbox tick used by the theme).

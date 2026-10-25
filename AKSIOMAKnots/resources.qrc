@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/ui">
+        <file>icons/arrow_down.png</file>
+        <file>icons/arrow_up.png</file>
+        <file>icons/check.png</file>
+        <file>icons/light/arrow_down.png</file>
+        <file>icons/light/arrow_up.png</file>
+        <file>icons/light/check.png</file>
+        <file>icons/app_icon.png</file>
+        <file>icons/aksioma_logo.png</file>
+    </qresource>
+</RCC>
