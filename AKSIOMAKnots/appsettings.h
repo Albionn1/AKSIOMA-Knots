@@ -37,6 +37,12 @@ QByteArray windowGeometry();
 void setWindowGeometry(
     const QByteArray &geometry);
 
+// Folder of the last knot file opened, saved or exported (Documents at
+// first).
+QString lastFolder();
+void setLastFolder(
+    const QString &folder);
+
 // Removes every stored setting.
 void restoreDefaults();
 

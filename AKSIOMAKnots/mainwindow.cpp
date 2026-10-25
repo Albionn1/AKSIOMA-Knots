@@ -5,6 +5,7 @@
 #include "diagrameditor.h"
 #include "knotbrowser.h"
 #include "knotdiagram.h"
+#include "knotexport.h"
 #include "knottable.h"
 #include "practicedialog.h"
 #include "theme.h"
@@ -23,7 +24,12 @@
 #include <QFrame>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QLabel>
+#include <QMenu>
+#include <QRegularExpression>
+#include <QSaveFile>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
@@ -105,6 +111,46 @@ MainWindow::MainWindow(
     settingsButton->setCursor(Qt::PointingHandCursor);
     settingsButton->setToolTip(tr("Language, theme, text size, window  (Ctrl+,)"));
 
+    QPushButton *fileButton = new QPushButton(tr("File"), topBar);
+
+    fileButton->setObjectName(QStringLiteral("TopBarButton"));
+    fileButton->setCursor(Qt::PointingHandCursor);
+    fileButton->setToolTip(tr("Open and save knots, export pictures and data"));
+
+    {
+        QMenu *fileMenu = new QMenu(fileButton);
+
+        auto addFileAction = [this, fileMenu](const QString &text,
+                                              const QKeySequence &shortcut,
+                                              void (MainWindow::*slot)())
+        {
+            QAction *action = fileMenu->addAction(text);
+
+            action->setShortcut(shortcut);
+
+            // the shortcut works while the menu is closed too
+            addAction(action);
+
+            connect(action, &QAction::triggered, this, slot);
+        };
+
+        addFileAction(tr("Open knot..."), QKeySequence::Open, &MainWindow::openKnotFile);
+        addFileAction(tr("Save knot..."), QKeySequence::Save, &MainWindow::saveKnotFile);
+
+        fileMenu->addSeparator();
+
+        addFileAction(tr("Export 3D picture..."),
+                      QKeySequence(Qt::CTRL | Qt::Key_E),
+                      &MainWindow::exportViewImage);
+        addFileAction(tr("Export knot diagram..."),
+                      QKeySequence(Qt::CTRL | Qt::Key_D),
+                      &MainWindow::exportDiagram);
+        addFileAction(tr("Export coordinates..."), QKeySequence(), &MainWindow::exportCoordinates);
+        addFileAction(tr("Export analysis report..."), QKeySequence(), &MainWindow::exportReport);
+
+        fileButton->setMenu(fileMenu);
+    }
+
     QPushButton *practiceButton = new QPushButton(tr("Practice"), topBar);
 
     practiceButton->setObjectName(QStringLiteral("TopBarButton"));
@@ -127,6 +173,8 @@ MainWindow::MainWindow(
     topLayout->addWidget(brandDivider);
     topLayout->addSpacing(6);
     topLayout->addWidget(createKnotBar(topBar), 1);
+    topLayout->addWidget(fileButton);
+    topLayout->addSpacing(4);
     topLayout->addWidget(practiceButton);
     topLayout->addSpacing(4);
     topLayout->addWidget(settingsButton);
@@ -2288,6 +2336,9 @@ void MainWindow::rebuildMesh()
 void MainWindow::updateInvariantPanel(
     const KnotMath::Invariants &invariants)
 {
+    currentInvariants_ =
+        invariants;
+
     if (writheValueLabel_ != nullptr)
     {
         writheValueLabel_->setText(
@@ -2398,7 +2449,7 @@ void MainWindow::showError(
 {
     QMessageBox::critical(
         this,
-        tr("AKSIOMA — Knots"),
+        tr("AKSIOMA: Knots"),
         tr(
             "The requested curve could not be generated.\n\n%1")
             .arg(
@@ -3457,6 +3508,409 @@ void MainWindow::drawKnotDialog()
             curve));
 
     generateMesh();
+}
+
+/*
+ * =============================================================
+ * FILES AND EXPORTS
+ * =============================================================
+ */
+
+namespace
+{
+
+// Asks for a file name to write; adds the extension of the chosen filter
+// if the name has none. Empty if cancelled.
+QString askSavePath(
+    QWidget *parent,
+    const QString &caption,
+    const QString &baseName,
+    const QStringList &filters)
+{
+    QString selectedFilter =
+        filters.first();
+
+    QString path =
+        QFileDialog::getSaveFileName(
+            parent,
+            caption,
+            AppSettings::lastFolder() + QLatin1Char('/') +
+                KnotExport::safeFileName(baseName),
+            filters.join(QStringLiteral(";;")),
+            &selectedFilter);
+
+    if (path.isEmpty())
+        return path;
+
+    if (QFileInfo(path).suffix().isEmpty())
+    {
+        // "PNG image (*.png)" -> ".png"
+        static const QRegularExpression firstPattern(
+            QStringLiteral("\\*(\\.[A-Za-z0-9]+)"));
+
+        const QRegularExpressionMatch match =
+            firstPattern.match(selectedFilter);
+
+        if (match.hasMatch())
+            path += match.captured(1);
+    }
+
+    AppSettings::setLastFolder(
+        QFileInfo(path).absolutePath());
+
+    return path;
+}
+
+bool writeTextFile(
+    const QString &path,
+    const QString &text,
+    QString &error)
+{
+    QSaveFile file(path);
+
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    {
+        error = file.errorString();
+        return false;
+    }
+
+    file.write(text.toUtf8());
+
+    if (!file.commit())
+    {
+        error = file.errorString();
+        return false;
+    }
+
+    return true;
+}
+
+} // namespace
+
+void MainWindow::openKnotFile()
+{
+    const QString path =
+        QFileDialog::getOpenFileName(
+            this,
+            tr("Open knot"),
+            AppSettings::lastFolder(),
+            tr("Knots (*.aknot *.txt *.csv);;AKSIOMA knot files (*.aknot);;"
+               "Coordinate lists (*.txt *.csv);;All files (*)"));
+
+    if (path.isEmpty())
+        return;
+
+    AppSettings::setLastFolder(
+        QFileInfo(path).absolutePath());
+
+    KnotExport::KnotFile file;
+    QString error;
+
+    if (!KnotExport::readKnotFile(path, file, error))
+    {
+        QMessageBox::warning(
+            this,
+            tr("AKSIOMA: Knots"),
+            tr("The knot could not be opened.\n\n%1").arg(error));
+
+        return;
+    }
+
+    const int presetIndex =
+        presetCombo_->findData(
+            static_cast<int>(
+                file.preset));
+
+    if (presetIndex < 0)
+        return;
+
+    // appearance first; a new material also sets its own shine
+    if (file.hasAppearance)
+    {
+        if (file.thickness > 0)
+            thicknessSlider_->setValue(file.thickness);
+
+        if (file.samples > 0)
+            meshDensitySlider_->setValue(file.samples);
+
+        if (file.material >= 0 && file.material < materialCombo_->count())
+            materialCombo_->setCurrentIndex(file.material);
+
+        metallicSlider_->setValue(file.shine);
+
+        if (file.colorMode >= 0 && file.colorMode < colorModeCombo_->count())
+            colorModeCombo_->setCurrentIndex(file.colorMode);
+
+        if (file.color.isValid())
+        {
+            meshColor_ = file.color;
+
+            updateColorSwatch();
+
+            glWidget_->setMeshColor(meshColor_);
+        }
+    }
+
+    torusPSpin_->setValue(file.torusP);
+    torusQSpin_->setValue(file.torusQ);
+
+    if (file.preset == KnotMath::Preset::KnotTable)
+        tableKnotName_ = file.tableKnot;
+
+    if (file.preset == KnotMath::Preset::CustomCoordinates)
+        customInputEdit_->setPlainText(file.customText);
+
+    {
+        const QSignalBlocker blocker(presetCombo_);
+
+        presetCombo_->setCurrentIndex(presetIndex);
+    }
+
+    lastPresetIndex_ = presetIndex;
+
+    updateCustomInputVisibility();
+
+    // one rebuild instead of one for every value set above
+    rebuildTimer_->stop();
+    pendingFullRegenerate_ = false;
+
+    generateMesh();
+
+    updateLearnSection();
+
+    resetCamera();
+}
+
+void MainWindow::saveKnotFile()
+{
+    if (!hasData_)
+        return;
+
+    // a moving curve is kept where it is
+    pauseRelaxation();
+
+    const KnotMath::Preset preset =
+        currentPreset();
+
+    KnotExport::KnotFile file;
+
+    file.name = currentData_.name;
+    file.preset = preset;
+    file.torusP = torusPSpin_->value();
+    file.torusQ = torusQSpin_->value();
+
+    if (preset == KnotMath::Preset::KnotTable)
+        file.tableKnot = tableKnotName_;
+
+    if (preset == KnotMath::Preset::CustomCoordinates)
+        file.customText = customInputEdit_->toPlainText();
+
+    file.points = currentData_.points;
+    file.shapeChanged = relaxChanged_;
+
+    file.hasAppearance = true;
+    file.thickness = thicknessSlider_->value();
+    file.samples = meshDensitySlider_->value();
+    file.material = materialCombo_->currentIndex();
+    file.shine = metallicSlider_->value();
+    file.colorMode = colorModeCombo_->currentIndex();
+    file.color = meshColor_;
+
+    const QString path =
+        askSavePath(
+            this,
+            tr("Save knot"),
+            currentData_.name,
+            {tr("AKSIOMA knot file (*.aknot)")});
+
+    if (path.isEmpty())
+        return;
+
+    QString error;
+
+    if (!KnotExport::writeKnotFile(path, file, error))
+    {
+        QMessageBox::warning(
+            this,
+            tr("AKSIOMA: Knots"),
+            tr("The knot could not be saved.\n\n%1").arg(error));
+    }
+}
+
+void MainWindow::exportViewImage()
+{
+    if (glWidget_ == nullptr || !hasData_)
+        return;
+
+    // taken now, before the dialog covers the view
+    const QImage image =
+        glWidget_->grabFramebuffer();
+
+    const QString path =
+        askSavePath(
+            this,
+            tr("Export 3D picture"),
+            currentData_.name,
+            {tr("PNG image (*.png)"), tr("JPEG image (*.jpg)")});
+
+    if (path.isEmpty())
+        return;
+
+    // JPEG has no transparency
+    const bool jpeg =
+        QFileInfo(path).suffix().startsWith(QStringLiteral("jp"), Qt::CaseInsensitive);
+
+    const QImage output =
+        jpeg ? image.convertToFormat(QImage::Format_RGB32) : image;
+
+    if (!output.save(path, nullptr, jpeg ? 92 : -1))
+    {
+        QMessageBox::warning(
+            this,
+            tr("AKSIOMA: Knots"),
+            tr("The picture could not be saved."));
+    }
+}
+
+void MainWindow::exportDiagram()
+{
+    if (!hasData_)
+        return;
+
+    pauseRelaxation();
+
+    if (currentData_.multiStrand || !currentData_.closed)
+    {
+        QMessageBox::information(
+            this,
+            tr("AKSIOMA: Knots"),
+            tr("A knot diagram can only be drawn for a single closed curve."));
+
+        return;
+    }
+
+    QString error;
+
+    const KnotMath::KnotDiagram diagram =
+        KnotMath::diagramFromCurve(
+            currentData_.points,
+            2.0,
+            error);
+
+    if (!diagram.isValid())
+    {
+        QMessageBox::warning(
+            this,
+            tr("AKSIOMA: Knots"),
+            tr("No knot diagram could be made.\n\n%1").arg(error));
+
+        return;
+    }
+
+    const QString path =
+        askSavePath(
+            this,
+            tr("Export knot diagram"),
+            currentData_.name,
+            {tr("SVG drawing (*.svg)"), tr("PNG image (*.png)")});
+
+    if (path.isEmpty())
+        return;
+
+    if (!KnotExport::saveDiagram(diagram, path, currentData_.name, error))
+    {
+        QMessageBox::warning(
+            this,
+            tr("AKSIOMA: Knots"),
+            tr("The diagram could not be saved.\n\n%1").arg(error));
+    }
+}
+
+void MainWindow::exportCoordinates()
+{
+    if (!hasData_)
+        return;
+
+    pauseRelaxation();
+
+    const QString path =
+        askSavePath(
+            this,
+            tr("Export coordinates"),
+            currentData_.name,
+            {tr("Text, one point per line (*.txt)"), tr("CSV table (*.csv)")});
+
+    if (path.isEmpty())
+        return;
+
+    const bool csv =
+        QFileInfo(path).suffix().compare(QStringLiteral("csv"), Qt::CaseInsensitive) == 0;
+
+    QString error;
+
+    if (!writeTextFile(path, KnotExport::coordinatesText(currentData_, csv), error))
+    {
+        QMessageBox::warning(
+            this,
+            tr("AKSIOMA: Knots"),
+            tr("The coordinates could not be saved.\n\n%1").arg(error));
+    }
+}
+
+void MainWindow::exportReport()
+{
+    if (!hasData_)
+        return;
+
+    pauseRelaxation();
+
+    KnotExport::ReportData report;
+
+    report.name = currentData_.name;
+    report.invariants = currentInvariants_;
+    report.pointCount = currentData_.points.size();
+    report.shapeChanged = relaxChanged_;
+
+    if (!currentData_.multiStrand && currentData_.closed)
+    {
+        QString error;
+
+        const KnotMath::KnotDiagram diagram =
+            KnotMath::diagramFromCurve(
+                currentData_.points,
+                2.0,
+                error);
+
+        if (diagram.isValid())
+        {
+            const KnotMath::DiagramArcs arcs =
+                KnotMath::diagramArcs(diagram);
+
+            report.diagramCrossings = diagram.crossings.size();
+            report.determinant = KnotMath::diagramDeterminant(arcs);
+            report.tricolourable = KnotMath::coloringDimension(arcs) >= 2;
+        }
+    }
+
+    const QString path =
+        askSavePath(
+            this,
+            tr("Export analysis report"),
+            currentData_.name,
+            {tr("Text (*.txt)")});
+
+    if (path.isEmpty())
+        return;
+
+    QString error;
+
+    if (!writeTextFile(path, KnotExport::reportText(report), error))
+    {
+        QMessageBox::warning(
+            this,
+            tr("AKSIOMA: Knots"),
+            tr("The report could not be saved.\n\n%1").arg(error));
+    }
 }
 
 /*

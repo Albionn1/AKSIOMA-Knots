@@ -1,6 +1,7 @@
 #include "practicedialog.h"
 
 #include "diagrameditor.h"
+#include "knotexport.h"
 #include "knottable.h"
 #include "theme.h"
 
@@ -267,49 +268,12 @@ double PracticeCanvas::gapLength() const
 
 QPainterPath PracticeCanvas::arcPath(int arc) const
 {
-    QPainterPath path;
+    const double scale = widgetScale();
 
-    const int n = diagram_.points.size();
-    const int c = arcs_.underS.size();
+    // diagram -> widget, as toWidget()
+    const QTransform transform(scale, 0.0, 0.0, -scale, 0.5 * width(), 0.5 * height());
 
-    if (n < 3)
-        return path;
-
-    if (c == 0)
-    {
-        path.moveTo(pointAt(0.0));
-
-        for (int i = 1; i < n; ++i)
-            path.lineTo(pointAt(i));
-
-        path.closeSubpath();
-
-        return path;
-    }
-
-    const double s0 = arcs_.underS[arc];
-    double s1 = arcs_.underS[(arc + 1) % c];
-
-    if (s1 <= s0)
-        s1 += n;
-
-    const double l0 = lengthAt(s0);
-    const double l1 = lengthAt(s1);
-
-    // two under-passes close together: smaller gaps
-    const double gap = std::min(gapLength(), 0.3 * (l1 - l0));
-
-    const double from = sAtLength(l0 + gap);
-    const double to = sAtLength(l1 - gap);
-
-    path.moveTo(pointAt(from));
-
-    for (int i = static_cast<int>(std::floor(from)) + 1; i < to; ++i)
-        path.lineTo(pointAt(i));
-
-    path.lineTo(pointAt(to));
-
-    return path;
+    return KnotExport::diagramArcPath(diagram_, arcs_, arc, gapLength(), transform);
 }
 
 int PracticeCanvas::arcAtWidget(const QPointF &point) const

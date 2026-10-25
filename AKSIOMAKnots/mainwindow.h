@@ -136,6 +136,14 @@ private:
     // Practice window (tricolouring, crossing signs) on the current knot.
     void openPractice();
 
+    // File menu (knotexport.h): knot files and exports of the current knot.
+    void openKnotFile();
+    void saveKnotFile();
+    void exportViewImage();
+    void exportDiagram();
+    void exportCoordinates();
+    void exportReport();
+
     void showAbout();
 
     void showSettings();
@@ -455,6 +463,9 @@ private:
         false;
 
     KnotMath::CurveData currentData_;
+
+    // what the analysis panel shows (for the report)
+    KnotMath::Invariants currentInvariants_;
 
     QVector<KnotMath::CrossingInfo>
         currentCrossings_;

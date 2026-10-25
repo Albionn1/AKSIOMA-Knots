@@ -330,7 +330,15 @@ KnotDiagram diagramFromCurve(
     QVector<Vec3> projected;
     QVector<CrossingInfo> crossings;
 
-    if (!cleanestProjection(curve, projected, crossings, error))
+    // Coarse curves (the knot table stores about a hundred points) would
+    // be drawn with visible corners: a smooth spline through the points
+    // first.
+    QVector<Vec3> smooth = curve;
+
+    if (smooth.size() >= 8 && smooth.size() < 300)
+        smooth = refineCurve(smooth, (300 + smooth.size() - 1) / smooth.size(), true);
+
+    if (!cleanestProjection(smooth, projected, crossings, error))
         return diagram;
 
     double minX = 1e300, maxX = -1e300, minY = 1e300, maxY = -1e300;

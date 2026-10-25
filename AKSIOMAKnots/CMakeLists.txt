@@ -13,7 +13,7 @@ set(CMAKE_AUTOUIC ON)
 # Qt 6 with the OpenGL widget module. GuiPrivate is only used for one Windows
 # setting in main.cpp (pop-ups in full screen), so its warning is turned off.
 set(QT_NO_PRIVATE_MODULE_WARNING ON)
-find_package(Qt6 REQUIRED COMPONENTS Gui GuiPrivate Widgets OpenGL OpenGLWidgets LinguistTools)
+find_package(Qt6 REQUIRED COMPONENTS Gui GuiPrivate Widgets OpenGL OpenGLWidgets Svg LinguistTools)
 
 qt_standard_project_setup()
 
@@ -35,6 +35,8 @@ qt_add_executable(AKSIOMAKnots
     knotpractice.cpp
     practicedialog.h
     practicedialog.cpp
+    knotexport.h
+    knotexport.cpp
     timelineslider.h
     timelineslider.cpp
     knottable.h
@@ -71,6 +73,8 @@ target_link_libraries(AKSIOMAKnots PRIVATE
     Qt6::GuiPrivate
     Qt6::OpenGL
     Qt6::OpenGLWidgets
+    # SVG export of knot diagrams
+    Qt6::Svg
 )
 
 if(MSVC)
@@ -91,5 +95,5 @@ endif()
 qt_add_translations(AKSIOMAKnots
     TS_FILES KnotTheory_sq_AL.ts
     RESOURCE_PREFIX /i18n
-    LUPDATE_OPTIONS -no-obsolete -locations none -tr-function-alias tr+=knotTr
+    LUPDATE_OPTIONS -no-obsolete -locations none -tr-function-alias tr+=knotTr,tr+=exportTr
 )

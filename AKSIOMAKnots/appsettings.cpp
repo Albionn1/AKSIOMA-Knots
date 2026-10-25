@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QLocale>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QTranslator>
 
 namespace
@@ -16,6 +17,7 @@ const QString TextScaleKey = QStringLiteral("textScale");
 const QString StartFullScreenKey = QStringLiteral("startFullScreen");
 const QString RememberWindowKey = QStringLiteral("rememberWindow");
 const QString WindowGeometryKey = QStringLiteral("windowGeometry");
+const QString LastFolderKey = QStringLiteral("lastFolder");
 
 QTranslator *installedTranslator = nullptr;
 
@@ -122,6 +124,20 @@ void setRememberWindow(
     bool enabled)
 {
     QSettings().setValue(RememberWindowKey, enabled);
+}
+
+QString lastFolder()
+{
+    return QSettings()
+        .value(LastFolderKey,
+               QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
+        .toString();
+}
+
+void setLastFolder(
+    const QString &folder)
+{
+    QSettings().setValue(LastFolderKey, folder);
 }
 
 QByteArray windowGeometry()

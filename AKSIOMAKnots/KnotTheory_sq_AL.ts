@@ -264,6 +264,101 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
 </context>
 <context>
+    <name>KnotExport</name>
+    <message>
+        <source>The file contains no coordinates (one &quot;x, y, z&quot; point per line).</source>
+        <translation>Skedari nuk përmban koordinata (një pikë &quot;x, y, z&quot; për rresht).</translation>
+    </message>
+    <message>
+        <source>The file is damaged (%1).</source>
+        <translation>Skedari është i dëmtuar (%1).</translation>
+    </message>
+    <message>
+        <source>This is not an AKSIOMA Knots file.</source>
+        <translation>Ky nuk është skedar i AKSIOMA Knots.</translation>
+    </message>
+    <message>
+        <source>The file was saved by a newer version of AKSIOMA Knots.</source>
+        <translation>Skedari është ruajtur nga një version më i ri i AKSIOMA Knots.</translation>
+    </message>
+    <message>
+        <source>The file contains no curve.</source>
+        <translation>Skedari nuk përmban kurbë.</translation>
+    </message>
+    <message>
+        <source>Knot diagram made with AKSIOMA Knots</source>
+        <translation>Diagram nyjeje i krijuar me AKSIOMA Knots</translation>
+    </message>
+    <message>
+        <source>The file could not be written.</source>
+        <translation>Skedari nuk mund të shkruhej.</translation>
+    </message>
+    <message>
+        <source>AKSIOMA: Knots - analysis report</source>
+        <translation>AKSIOMA: Nyjet – raport analize</translation>
+    </message>
+    <message>
+        <source>Knot</source>
+        <translation>Nyja</translation>
+    </message>
+    <message>
+        <source>(shape changed by relaxing or scrambling - still the same knot)</source>
+        <translation>(forma u ndryshua me relaksim ose ngatërrim – është ende e njëjta nyjë)</translation>
+    </message>
+    <message>
+        <source>Classification</source>
+        <translation>Klasifikimi</translation>
+    </message>
+    <message>
+        <source>Alexander polynomial</source>
+        <translation>Polinomi i Aleksandrit</translation>
+    </message>
+    <message>
+        <source>Jones polynomial</source>
+        <translation>Polinomi i Jonesit</translation>
+    </message>
+    <message>
+        <source>Determinant |Δ(−1)|</source>
+        <translation>Përcaktori |Δ(−1)|</translation>
+    </message>
+    <message>
+        <source>Tricolourable</source>
+        <translation>E trengjyrësueshme</translation>
+    </message>
+    <message>
+        <source>yes</source>
+        <translation>po</translation>
+    </message>
+    <message>
+        <source>no</source>
+        <translation>jo</translation>
+    </message>
+    <message>
+        <source>Crossing number</source>
+        <translation>Numri i kryqëzimeve</translation>
+    </message>
+    <message>
+        <source>Writhe of the 3D curve</source>
+        <translation>Përdredhja e kurbës 3D</translation>
+    </message>
+    <message>
+        <source>Crossings in the XY projection</source>
+        <translation>Kryqëzimet në projeksionin XY</translation>
+    </message>
+    <message>
+        <source>Crossings in the cleanest projection</source>
+        <translation>Kryqëzimet në projeksionin më të pastër</translation>
+    </message>
+    <message>
+        <source>Points of the curve</source>
+        <translation>Pikat e kurbës</translation>
+    </message>
+    <message>
+        <source>Method</source>
+        <translation>Metoda</translation>
+    </message>
+</context>
+<context>
     <name>KnotGLWidget</name>
     <message>
         <source>KNOT DIAGRAM</source>
@@ -1064,6 +1159,38 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>AKSIOMA: Nyjet</translation>
     </message>
     <message>
+        <source>File</source>
+        <translation>Skedari</translation>
+    </message>
+    <message>
+        <source>Open and save knots, export pictures and data</source>
+        <translation>Hapni dhe ruani nyje, eksportoni figura dhe të dhëna</translation>
+    </message>
+    <message>
+        <source>Open knot...</source>
+        <translation>Hap nyjë...</translation>
+    </message>
+    <message>
+        <source>Save knot...</source>
+        <translation>Ruaj nyjën...</translation>
+    </message>
+    <message>
+        <source>Export 3D picture...</source>
+        <translation>Eksporto figurën 3D...</translation>
+    </message>
+    <message>
+        <source>Export knot diagram...</source>
+        <translation>Eksporto diagramin e nyjës...</translation>
+    </message>
+    <message>
+        <source>Export coordinates...</source>
+        <translation>Eksporto koordinatat...</translation>
+    </message>
+    <message>
+        <source>Export analysis report...</source>
+        <translation>Eksporto raportin e analizës...</translation>
+    </message>
+    <message>
         <source>Practice</source>
         <translation>Ushtrime</translation>
     </message>
@@ -1288,10 +1415,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Zgjidh ngjyrën e tubit</translation>
     </message>
     <message>
-        <source>AKSIOMA — Knots</source>
-        <translation>AKSIOMA — Nyjet</translation>
-    </message>
-    <message>
         <source>The requested curve could not be generated.
 
 %1</source>
@@ -1402,6 +1525,118 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>KNOT DIAGRAM</source>
         <translation>DIAGRAMI I NYJËS</translation>
+    </message>
+    <message>
+        <source>Open knot</source>
+        <translation>Hap nyjë</translation>
+    </message>
+    <message>
+        <source>Knots (*.aknot *.txt *.csv);;AKSIOMA knot files (*.aknot);;Coordinate lists (*.txt *.csv);;All files (*)</source>
+        <translation>Nyje (*.aknot *.txt *.csv);;Skedarë nyjesh AKSIOMA (*.aknot);;Lista koordinatash (*.txt *.csv);;Të gjithë skedarët (*)</translation>
+    </message>
+    <message>
+        <source>The knot could not be opened.
+
+%1</source>
+        <translation>Nyja nuk mund të hapej.
+
+%1</translation>
+    </message>
+    <message>
+        <source>Save knot</source>
+        <translation>Ruaj nyjën</translation>
+    </message>
+    <message>
+        <source>AKSIOMA knot file (*.aknot)</source>
+        <translation>Skedar nyjeje AKSIOMA (*.aknot)</translation>
+    </message>
+    <message>
+        <source>The knot could not be saved.
+
+%1</source>
+        <translation>Nyja nuk mund të ruhej.
+
+%1</translation>
+    </message>
+    <message>
+        <source>Export 3D picture</source>
+        <translation>Eksporto figurën 3D</translation>
+    </message>
+    <message>
+        <source>PNG image (*.png)</source>
+        <translation>Imazh PNG (*.png)</translation>
+    </message>
+    <message>
+        <source>JPEG image (*.jpg)</source>
+        <translation>Imazh JPEG (*.jpg)</translation>
+    </message>
+    <message>
+        <source>The picture could not be saved.</source>
+        <translation>Figura nuk mund të ruhej.</translation>
+    </message>
+    <message>
+        <source>A knot diagram can only be drawn for a single closed curve.</source>
+        <translation>Diagrami i nyjës mund të vizatohet vetëm për një kurbë të vetme të mbyllur.</translation>
+    </message>
+    <message>
+        <source>No knot diagram could be made.
+
+%1</source>
+        <translation>Nuk mund të krijohej diagrami i nyjës.
+
+%1</translation>
+    </message>
+    <message>
+        <source>Export knot diagram</source>
+        <translation>Eksporto diagramin e nyjës</translation>
+    </message>
+    <message>
+        <source>SVG drawing (*.svg)</source>
+        <translation>Vizatim SVG (*.svg)</translation>
+    </message>
+    <message>
+        <source>The diagram could not be saved.
+
+%1</source>
+        <translation>Diagrami nuk mund të ruhej.
+
+%1</translation>
+    </message>
+    <message>
+        <source>Export coordinates</source>
+        <translation>Eksporto koordinatat</translation>
+    </message>
+    <message>
+        <source>Text, one point per line (*.txt)</source>
+        <translation>Tekst, një pikë për rresht (*.txt)</translation>
+    </message>
+    <message>
+        <source>CSV table (*.csv)</source>
+        <translation>Tabelë CSV (*.csv)</translation>
+    </message>
+    <message>
+        <source>The coordinates could not be saved.
+
+%1</source>
+        <translation>Koordinatat nuk mund të ruheshin.
+
+%1</translation>
+    </message>
+    <message>
+        <source>Export analysis report</source>
+        <translation>Eksporto raportin e analizës</translation>
+    </message>
+    <message>
+        <source>Text (*.txt)</source>
+        <translation>Tekst (*.txt)</translation>
+    </message>
+    <message>
+        <source>The report could not be saved.
+
+%1</source>
+        <translation>Raporti nuk mund të ruhej.
+
+%1</translation>
     </message>
     <message>
         <source>Relaxing needs a single closed curve. Choose a knot preset or a custom curve.</source>

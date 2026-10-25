@@ -6,6 +6,7 @@ Build (Qt 6.5+ recommended, with the "Qt Quick/OpenGL" modules installed)
 
 Or: open CMakeLists.txt in Qt Creator and pick a Qt 6 kit.
 Needs an OpenGL 3.3 core capable GPU/driver.
+Uses the Qt SVG module (Qt Svg, installed with Qt by default) for diagram export.
 
 NOTE: resources.qrc and the icons/ folder must stay next to CMakeLists.txt
 (they hold the dropdown arrows and the checkbox tick used by the theme).

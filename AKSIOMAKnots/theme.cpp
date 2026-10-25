@@ -432,6 +432,39 @@ const char *const StyleSheet = R"(
         color: #D99B42;
     }
 
+    /* File menu in the top bar */
+
+    QPushButton#TopBarButton::menu-indicator {
+        image: none;
+        width: 0px;
+    }
+
+    QMenu {
+        background: #0D0D0D;
+        color: #BAB9B4;
+        border: 1px solid #53514C;
+        padding: 4px;
+    }
+
+    QMenu::item {
+        padding: 6px 28px 6px 14px;
+    }
+
+    QMenu::item:selected {
+        background: #BAB9B4;
+        color: #060606;
+    }
+
+    QMenu::item:disabled {
+        color: #53514C;
+    }
+
+    QMenu::separator {
+        height: 1px;
+        background: #53514C;
+        margin: 4px 8px;
+    }
+
     /* colour choice in Practice */
 
     QPushButton#BrushButton:checked {
