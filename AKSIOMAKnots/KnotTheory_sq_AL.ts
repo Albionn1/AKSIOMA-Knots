@@ -69,6 +69,13 @@
     </message>
 </context>
 <context>
+    <name>AppSettings</name>
+    <message>
+        <source>AKSIOMA knot file</source>
+        <translation>Skedar nyjeje AKSIOMA</translation>
+    </message>
+</context>
+<context>
     <name>DiagramCanvas</name>
     <message>
         <source>That was too short - draw a bigger loop.</source>

@@ -8,6 +8,12 @@
 #include <QStandardPaths>
 #include <QTranslator>
 
+#ifdef Q_OS_WIN
+#include <QDir>
+
+#include <shlobj.h>
+#endif
+
 namespace
 {
 
@@ -191,6 +197,43 @@ void applyAll()
     installLanguage(language());
 
     Theme::apply(darkTheme(), textScale());
+}
+
+void registerFileType()
+{
+#ifdef Q_OS_WIN
+    const QString classes = QStringLiteral("HKEY_CURRENT_USER\\Software\\Classes\\");
+    const QString progId = QStringLiteral("AKSIOMA.Knot");
+    const QString program = QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+
+    // registry key -> its default value
+    const QList<QPair<QString, QString>> entries =
+    {
+        {QStringLiteral(".aknot"), progId},
+        // the "Type" column in Explorer
+        {progId, QCoreApplication::translate("AppSettings", "AKSIOMA knot file")},
+        // the first icon of the .exe (app.rc), the program's own icon
+        {progId + QStringLiteral("\\DefaultIcon"), QStringLiteral("\"%1\",0").arg(program)},
+        {progId + QStringLiteral("\\shell\\open\\command"), QStringLiteral("\"%1\" \"%2\"").arg(program, QStringLiteral("%1"))}
+    };
+
+    bool changed = false;
+
+    for (const auto &entry : entries)
+    {
+        QSettings key(classes + entry.first, QSettings::NativeFormat);
+
+        if (key.value(QStringLiteral("Default")).toString() != entry.second)
+        {
+            key.setValue(QStringLiteral("Default"), entry.second);
+            changed = true;
+        }
+    }
+
+    // Explorer shows the new icon straight away
+    if (changed)
+        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+#endif
 }
 
 } // namespace AppSettings

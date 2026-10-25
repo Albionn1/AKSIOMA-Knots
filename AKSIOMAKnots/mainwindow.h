@@ -43,6 +43,11 @@ public:
     // Shows the window with the saved size and position, or full screen.
     void showInitially();
 
+    // Opens a knot file (.aknot or a coordinate list), e.g. one given on
+    // the command line by a double click in Explorer.
+    void openKnotFilePath(
+        const QString &path);
+
 protected:
     void closeEvent(
         QCloseEvent *event) override;

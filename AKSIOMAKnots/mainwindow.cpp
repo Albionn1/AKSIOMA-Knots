@@ -3741,6 +3741,13 @@ void MainWindow::openKnotFile()
     if (path.isEmpty())
         return;
 
+    openKnotFilePath(
+        path);
+}
+
+void MainWindow::openKnotFilePath(
+    const QString &path)
+{
     AppSettings::setLastFolder(
         QFileInfo(path).absolutePath());
 

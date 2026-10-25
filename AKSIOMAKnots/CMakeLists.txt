@@ -59,6 +59,8 @@ qt_add_executable(AKSIOMAKnots
 # Icon of the .exe in Windows Explorer (the window icon is set in main.cpp).
 if(WIN32)
     target_sources(AKSIOMAKnots PRIVATE app.rc)
+    # SHChangeNotify: Explorer shows the icon of .aknot files (appsettings.cpp)
+    target_link_libraries(AKSIOMAKnots PRIVATE shell32)
 endif()
 
 # Knot table (KnotInfo, built by tools/make_knot_table.cpp). About 9 MB, so it

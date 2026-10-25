@@ -4,6 +4,7 @@
 #include <QApplication>
 #include <QIcon>
 #include <QSurfaceFormat>
+#include <QTimer>
 
 #ifdef Q_OS_WIN
 #include <QtGui/private/qguiapplication_p.h>
@@ -85,6 +86,9 @@ int main(
 
     AppSettings::applyAll();
 
+    // .aknot files: the program's icon, and a double click opens them here
+    AppSettings::registerFileType();
+
     /*
      * =========================================================
      * MAIN WINDOW
@@ -100,6 +104,25 @@ int main(
         Qt::WA_DeleteOnClose);
 
     window->showInitially();
+
+    // a knot file to open (double click in Explorer), once the window is up
+    const QStringList arguments =
+        app.arguments();
+
+    if (arguments.size() > 1)
+    {
+        const QString path =
+            arguments.at(1);
+
+        QTimer::singleShot(
+            0,
+            window,
+            [window, path]()
+            {
+                window->openKnotFilePath(
+                    path);
+            });
+    }
 
     return app.exec();
 }

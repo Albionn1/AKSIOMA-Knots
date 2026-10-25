@@ -54,6 +54,12 @@ void installLanguage(
 // Language, theme and text size from the settings.
 void applyAll();
 
+// Windows: makes .aknot files show the program's icon in Explorer and open
+// in this program on a double click (for the current user, in
+// HKEY_CURRENT_USER\Software\Classes). The copy started last owns them.
+// Elsewhere it does nothing.
+void registerFileType();
+
 } // namespace AppSettings
 
 #endif // APPSETTINGS_H
