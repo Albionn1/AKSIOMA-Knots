@@ -114,6 +114,8 @@ public:
 
     bool autoRotation() const;
 
+    // Turns to the clearest view of the current knot and fits it into
+    // the window, with a short camera flight.
     void resetCamera();
 
     QSize minimumSizeHint() const override;
@@ -210,6 +212,17 @@ private:
 
     void computeMeshBounds();
 
+    void flyCameraTo(
+        float yaw,
+        float pitch,
+        float distance,
+        const QVector3D &target);
+
+    void advanceCameraFlight(
+        float dt);
+
+    void stopCameraFlight();
+
     QMatrix4x4 projectionMatrix() const;
     QMatrix4x4 viewMatrix() const;
     QMatrix4x4 modelMatrix() const;
@@ -289,6 +302,18 @@ private:
     float distance_ = 8.0f;
 
     QVector3D panOffset_ = QVector3D(0.0f, 0.0f, 0.0f);
+
+    // camera flight of Reset view
+    bool cameraFlight_ = false;
+    float flightProgress_ = 0.0f;
+    float flightFromYaw_ = 0.0f;
+    float flightFromPitch_ = 0.0f;
+    float flightFromDistance_ = 0.0f;
+    QVector3D flightFromPan_;
+    float flightToYaw_ = 0.0f;
+    float flightToPitch_ = 0.0f;
+    float flightToDistance_ = 0.0f;
+    QVector3D flightToPan_;
 
     QPoint lastMousePosition_;
 

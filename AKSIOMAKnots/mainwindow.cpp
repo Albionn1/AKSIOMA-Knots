@@ -14,6 +14,7 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QColorDialog>
+#include <QDialog>
 #include <QEvent>
 #include <QKeySequence>
 #include <QShortcut>
@@ -63,18 +64,18 @@ MainWindow::MainWindow(
     rootLayout->setSpacing(0);
 
     /*
-     * TOP BAR: brand on the left, one quiet line on the right.
+     * TOP BAR: brand | which knot is shown | Settings, About
      */
 
     QWidget *topBar = new QWidget(central);
 
     topBar->setObjectName(QStringLiteral("TopBar"));
     topBar->setAttribute(Qt::WA_StyledBackground, true);
-    topBar->setFixedHeight(52);
+    topBar->setFixedHeight(60);
 
     QHBoxLayout *topLayout = new QHBoxLayout(topBar);
 
-    topLayout->setContentsMargins(24, 0, 24, 0);
+    topLayout->setContentsMargins(24, 0, 20, 0);
     topLayout->setSpacing(14);
 
     QLabel *brandLabel = new QLabel(tr("AKSIOMA"), topBar);
@@ -85,14 +86,34 @@ MainWindow::MainWindow(
 
     brandSub->setObjectName(QStringLiteral("BrandSub"));
 
-    QLabel *topHint = new QLabel(tr("KNOT THEORY  /  3D ANALYSIS"), topBar);
+    QFrame *brandDivider = new QFrame(topBar);
 
-    topHint->setObjectName(QStringLiteral("Caption"));
+    brandDivider->setObjectName(QStringLiteral("VRule"));
+    brandDivider->setFixedSize(1, 28);
+
+    QPushButton *settingsButton = new QPushButton(tr("Settings"), topBar);
+
+    settingsButton->setObjectName(QStringLiteral("TopBarButton"));
+    settingsButton->setCursor(Qt::PointingHandCursor);
+    settingsButton->setToolTip(tr("Language, theme, text size, window  (Ctrl+,)"));
+
+    QPushButton *aboutButton = new QPushButton(tr("About"), topBar);
+
+    aboutButton->setObjectName(QStringLiteral("TopBarButton"));
+    aboutButton->setCursor(Qt::PointingHandCursor);
+
+    connect(settingsButton, &QPushButton::clicked, this, &MainWindow::showSettings);
+    connect(aboutButton, &QPushButton::clicked, this, &MainWindow::showAbout);
 
     topLayout->addWidget(brandLabel);
     topLayout->addWidget(brandSub);
-    topLayout->addStretch(1);
-    topLayout->addWidget(topHint);
+    topLayout->addSpacing(6);
+    topLayout->addWidget(brandDivider);
+    topLayout->addSpacing(6);
+    topLayout->addWidget(createKnotBar(topBar), 1);
+    topLayout->addWidget(settingsButton);
+    topLayout->addSpacing(4);
+    topLayout->addWidget(aboutButton);
 
     rootLayout->addWidget(topBar);
 
@@ -141,17 +162,12 @@ MainWindow::MainWindow(
 
     resetCameraButton_ = new QPushButton(tr("Reset view"), viewBar);
 
-    colorButton_ = new QPushButton(tr("Tube color"), viewBar);
-
-    QPushButton *aboutButton = new QPushButton(tr("About"), viewBar);
-
-    connect(aboutButton, &QPushButton::clicked, this, &MainWindow::showAbout);
+    resetCameraButton_->setToolTip(
+        tr("Turn to the clearest view of the knot and fit it in the window."));
 
     viewBarLayout->addWidget(navigationHint);
     viewBarLayout->addStretch(1);
     viewBarLayout->addWidget(resetCameraButton_);
-    viewBarLayout->addWidget(colorButton_);
-    viewBarLayout->addWidget(aboutButton);
 
     viewportLayout->addWidget(viewBar);
 
@@ -168,6 +184,28 @@ MainWindow::MainWindow(
     rootLayout->addWidget(mainSplitter_, 1);
 
     setCentralWidget(central);
+
+    // Settings live in their own window, opened from the top bar.
+    settingsDialog_ = new QDialog(this);
+
+    settingsDialog_->setWindowTitle(tr("Settings"));
+    settingsDialog_->resize(380, 560);
+
+    QVBoxLayout *settingsLayout = new QVBoxLayout(settingsDialog_);
+
+    settingsLayout->setContentsMargins(0, 0, 0, 0);
+    settingsLayout->addWidget(createSettingsPanel());
+
+    QShortcut *settingsShortcut =
+        new QShortcut(
+            QKeySequence(Qt::CTRL | Qt::Key_Comma),
+            this);
+
+    connect(
+        settingsShortcut,
+        &QShortcut::activated,
+        this,
+        &MainWindow::showSettings);
 
     /*
      * =========================================================
@@ -475,6 +513,8 @@ MainWindow::MainWindow(
     glWidget_->setMeshColor(
         meshColor_);
 
+    updateColorSwatch();
+
     applySurface();
 
     presetCombo_->setCurrentIndex(
@@ -506,9 +546,15 @@ void addSectionHeader(
     rowLayout->setContentsMargins(0, 0, 0, 0);
     rowLayout->setSpacing(10);
 
-    QLabel *indexLabel = new QLabel(index, row);
+    // no index: just the title and the rule
+    if (!index.isEmpty())
+    {
+        QLabel *indexLabel = new QLabel(index, row);
 
-    indexLabel->setObjectName(QStringLiteral("SectionIndex"));
+        indexLabel->setObjectName(QStringLiteral("SectionIndex"));
+
+        rowLayout->addWidget(indexLabel);
+    }
 
     QLabel *titleLabel = new QLabel(title, row);
 
@@ -520,7 +566,6 @@ void addSectionHeader(
     rule->setFixedHeight(1);
     rule->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
-    rowLayout->addWidget(indexLabel);
     rowLayout->addWidget(titleLabel);
     rowLayout->addWidget(rule, 1, Qt::AlignVCenter);
 
@@ -587,65 +632,49 @@ QLabel *makeFieldLabel(
 
 } // namespace
 
-QWidget *MainWindow::createLeftPanel()
+QWidget *MainWindow::createKnotBar(
+    QWidget *parent)
 {
-    QScrollArea *scroll = new QScrollArea(this);
+    QWidget *bar = new QWidget(parent);
 
-    scroll->setObjectName(QStringLiteral("PanelScroll"));
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    scroll->setMinimumWidth(300);
-    scroll->setMaximumWidth(380);
+    QHBoxLayout *layout = new QHBoxLayout(bar);
 
-    QWidget *panel = new QWidget(scroll);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(10);
 
-    panel->setObjectName(QStringLiteral("Panel"));
-    panel->setAttribute(Qt::WA_StyledBackground, true);
+    QLabel *caption = new QLabel(tr("KNOT"), bar);
 
-    QVBoxLayout *layout = new QVBoxLayout(panel);
+    caption->setObjectName(QStringLiteral("Caption"));
 
-    layout->setContentsMargins(24, 24, 24, 24);
-    layout->setSpacing(14);
+    layout->addWidget(caption);
 
-    /*
-     * 01  KNOT
-     */
-
-    addSectionHeader(layout, panel, QStringLiteral("01"), tr("KNOT"));
-
-    presetCombo_ = new QComboBox(panel);
+    presetCombo_ = new QComboBox(bar);
 
     presetCombo_->setMinimumHeight(36);
+    presetCombo_->setMinimumWidth(230);
+    presetCombo_->setMaximumWidth(320);
+    presetCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     presetCombo_->addItem(tr("Unknot"), static_cast<int>(KnotMath::Preset::Unknot));
-    presetCombo_->addItem(tr("Trefoil Knot (3\u2081)"), static_cast<int>(KnotMath::Preset::Trefoil));
-    presetCombo_->addItem(tr("Figure-Eight Knot (4\u2081)"), static_cast<int>(KnotMath::Preset::FigureEight));
-    presetCombo_->addItem(tr("Cinquefoil (5\u2081)"), static_cast<int>(KnotMath::Preset::Cinquefoil));
-    presetCombo_->addItem(tr("Stevedore Knot (6\u2081)"), static_cast<int>(KnotMath::Preset::Stevedore));
+    presetCombo_->addItem(tr("Trefoil Knot (3₁)"), static_cast<int>(KnotMath::Preset::Trefoil));
+    presetCombo_->addItem(tr("Figure-Eight Knot (4₁)"), static_cast<int>(KnotMath::Preset::FigureEight));
+    presetCombo_->addItem(tr("Cinquefoil (5₁)"), static_cast<int>(KnotMath::Preset::Cinquefoil));
+    presetCombo_->addItem(tr("Stevedore Knot (6₁)"), static_cast<int>(KnotMath::Preset::Stevedore));
     presetCombo_->addItem(tr("DNA Double Helix (Multi-strand)"), static_cast<int>(KnotMath::Preset::DNAHelix));
     presetCombo_->addItem(tr("Celtic Armor (Multi-strand)"), static_cast<int>(KnotMath::Preset::CelticKnot));
     presetCombo_->addItem(tr("Custom Torus T(p,q)"), static_cast<int>(KnotMath::Preset::CustomTorus));
     presetCombo_->addItem(tr("Custom Curve"), static_cast<int>(KnotMath::Preset::CustomCoordinates));
     presetCombo_->addItem(tr("Knot Table (12,965 knots)"), static_cast<int>(KnotMath::Preset::KnotTable));
 
-    layout->addWidget(presetCombo_);
+    layout->addWidget(presetCombo_, 1);
 
-    browseKnotsButton_ = new QPushButton(tr("Browse all knots..."), panel);
-
-    browseKnotsButton_->setMinimumHeight(34);
-    browseKnotsButton_->setToolTip(
-        tr("All 12,965 prime knots with up to 13 crossings."));
-
-    layout->addWidget(browseKnotsButton_);
-
-    // torus parameters (only for T(p,q))
-    torusRow_ = new QWidget(panel);
+    // torus parameters (only for T(p,q)), right next to the choice
+    torusRow_ = new QWidget(bar);
 
     QHBoxLayout *torusLayout = new QHBoxLayout(torusRow_);
 
     torusLayout->setContentsMargins(0, 0, 0, 0);
-    torusLayout->setSpacing(10);
+    torusLayout->setSpacing(6);
 
     torusPSpin_ = new QSpinBox(torusRow_);
     torusQSpin_ = new QSpinBox(torusRow_);
@@ -654,24 +683,101 @@ QWidget *MainWindow::createLeftPanel()
     torusQSpin_->setRange(1, 20);
     torusPSpin_->setValue(3);
     torusQSpin_->setValue(2);
-    torusPSpin_->setMinimumHeight(36);
-    torusQSpin_->setMinimumHeight(36);
+
+    for (QSpinBox *spin : {torusPSpin_, torusQSpin_})
+    {
+        spin->setMinimumHeight(36);
+        spin->setFixedWidth(68);
+    }
 
     torusLayout->addWidget(makeFieldLabel(tr("p"), torusRow_));
-    torusLayout->addWidget(torusPSpin_, 1);
-    torusLayout->addSpacing(8);
+    torusLayout->addWidget(torusPSpin_);
+    torusLayout->addSpacing(6);
     torusLayout->addWidget(makeFieldLabel(tr("q"), torusRow_));
-    torusLayout->addWidget(torusQSpin_, 1);
+    torusLayout->addWidget(torusQSpin_);
 
     layout->addWidget(torusRow_);
+
+    layout->addSpacing(4);
+
+    browseKnotsButton_ = new QPushButton(tr("Browse..."), bar);
+
+    browseKnotsButton_->setMinimumHeight(36);
+    browseKnotsButton_->setToolTip(
+        tr("All 12,965 prime knots with up to 13 crossings."));
+
+    QPushButton *drawKnotButton = new QPushButton(tr("Draw..."), bar);
+
+    drawKnotButton->setMinimumHeight(36);
+    drawKnotButton->setToolTip(
+        tr("Draw a loop with the mouse and choose over/under at each crossing."));
+
+    connect(drawKnotButton, &QPushButton::clicked,
+            this, &MainWindow::drawKnotDialog);
+
+    layout->addWidget(browseKnotsButton_);
+    layout->addWidget(drawKnotButton);
+
+    layout->addStretch(1);
+
+    return bar;
+}
+
+QWidget *MainWindow::createLeftPanel()
+{
+    QTabWidget *tabs = new QTabWidget(this);
+
+    leftTabs_ = tabs;
+
+    tabs->setObjectName(QStringLiteral("LeftTabs"));
+    tabs->setDocumentMode(true);
+    tabs->setMinimumWidth(300);
+    tabs->setMaximumWidth(380);
+
+    // one scrolling page per tab
+    auto makePage = [this, tabs](QVBoxLayout *&layout) -> QScrollArea *
+    {
+        QScrollArea *scroll = new QScrollArea(tabs);
+
+        scroll->setObjectName(QStringLiteral("PanelScroll"));
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+        QWidget *panel = new QWidget(scroll);
+
+        panel->setObjectName(QStringLiteral("Panel"));
+        panel->setAttribute(Qt::WA_StyledBackground, true);
+
+        layout = new QVBoxLayout(panel);
+
+        layout->setContentsMargins(24, 22, 24, 24);
+        layout->setSpacing(14);
+
+        scroll->setWidget(panel);
+
+        return scroll;
+    };
+
+    /*
+     * STYLE
+     */
+
+    QVBoxLayout *layout = nullptr;
+
+    QScrollArea *stylePage = makePage(layout);
+
+    QWidget *panel = stylePage->widget();
 
     // custom curve (only for Custom Curve)
     customBox_ = new QWidget(panel);
 
     QVBoxLayout *customLayout = new QVBoxLayout(customBox_);
 
-    customLayout->setContentsMargins(0, 0, 0, 0);
-    customLayout->setSpacing(8);
+    customLayout->setContentsMargins(0, 0, 0, 10);
+    customLayout->setSpacing(10);
+
+    addSectionHeader(customLayout, customBox_, QString(), tr("CURVE"));
 
     customInputEdit_ = new QTextEdit(customBox_);
 
@@ -695,46 +801,20 @@ QWidget *MainWindow::createLeftPanel()
 
     customLayout->addWidget(syntaxLabel);
 
-    QHBoxLayout *customButtons = new QHBoxLayout();
-
-    customButtons->setSpacing(8);
-
-    QPushButton *drawKnotButton = new QPushButton(tr("Draw a knot..."), customBox_);
-
-    drawKnotButton->setMinimumHeight(36);
-    drawKnotButton->setToolTip(
-        tr("Draw a loop with the mouse and choose over/under at each crossing."));
-
     generateButton_ = new QPushButton(tr("APPLY"), customBox_);
 
     generateButton_->setObjectName(QStringLiteral("GenerateButton"));
     generateButton_->setMinimumHeight(36);
 
-    customButtons->addWidget(drawKnotButton, 1);
-    customButtons->addWidget(generateButton_, 1);
-
-    customLayout->addLayout(customButtons);
+    customLayout->addWidget(generateButton_);
 
     layout->addWidget(customBox_);
 
-    connect(drawKnotButton, &QPushButton::clicked,
-            this, &MainWindow::drawKnotDialog);
-
-    layout->addSpacing(10);
-
-    /*
-     * 02  APPEARANCE
-     */
-
-    addSectionHeader(layout, panel, QStringLiteral("02"), tr("APPEARANCE"));
+    addSectionHeader(layout, panel, QString(), tr("TUBE"));
 
     addSliderRow(layout, panel, tr("Tube thickness"),
                  thicknessSlider_, thicknessValueLabel_,
                  2, 60, 16, QStringLiteral("0.16"));
-
-    addSliderRow(layout, panel, tr("Curve density"),
-                 meshDensitySlider_, meshDensityValueLabel_,
-                 48, 320, 160, QStringLiteral("160"));
 
     layout->addWidget(makeFieldLabel(tr("Material"), panel));
 
@@ -748,11 +828,11 @@ QWidget *MainWindow::createLeftPanel()
 
     layout->addWidget(materialCombo_);
 
-    addSliderRow(layout, panel, tr("Material shine"),
-                 metallicSlider_, metallicValueLabel_,
-                 0, 100, 70, QStringLiteral("0.70"));
-
     layout->addWidget(makeFieldLabel(tr("Color mode"), panel));
+
+    QHBoxLayout *colorRow = new QHBoxLayout();
+
+    colorRow->setSpacing(8);
 
     colorModeCombo_ = new QComboBox(panel);
 
@@ -763,7 +843,21 @@ QWidget *MainWindow::createLeftPanel()
     colorModeCombo_->setCurrentIndex(
         static_cast<int>(KnotMath::ColorMode::SingleColor));
 
-    layout->addWidget(colorModeCombo_);
+    // a swatch of the current tube colour; click to change it
+    colorButton_ = new QPushButton(panel);
+
+    colorButton_->setFixedSize(36, 36);
+    colorButton_->setCursor(Qt::PointingHandCursor);
+    colorButton_->setToolTip(tr("Tube color"));
+
+    colorRow->addWidget(colorModeCombo_, 1);
+    colorRow->addWidget(colorButton_);
+
+    layout->addLayout(colorRow);
+
+    layout->addSpacing(10);
+
+    addSectionHeader(layout, panel, QString(), tr("VIEW"));
 
     showCrossingNumbersCheck_ = new QCheckBox(tr("Show crossing numbers"), panel);
     autoRotationCheck_ = new QCheckBox(tr("Auto-rotate"), panel);
@@ -774,13 +868,58 @@ QWidget *MainWindow::createLeftPanel()
     layout->addWidget(showCrossingNumbersCheck_);
     layout->addWidget(autoRotationCheck_);
 
-    layout->addSpacing(10);
+    layout->addSpacing(6);
+
+    // fine tuning most people never touch, folded away by default
+    QPushButton *moreOptionsButton = new QPushButton(panel);
+
+    moreOptionsButton->setObjectName(QStringLiteral("DisclosureButton"));
+    moreOptionsButton->setCheckable(true);
+    moreOptionsButton->setCursor(Qt::PointingHandCursor);
+
+    QWidget *moreOptions = new QWidget(panel);
+
+    QVBoxLayout *moreLayout = new QVBoxLayout(moreOptions);
+
+    moreLayout->setContentsMargins(0, 0, 0, 0);
+    moreLayout->setSpacing(14);
+
+    addSliderRow(moreLayout, moreOptions, tr("Curve density"),
+                 meshDensitySlider_, meshDensityValueLabel_,
+                 48, 320, 160, QStringLiteral("160"));
+
+    addSliderRow(moreLayout, moreOptions, tr("Material shine"),
+                 metallicSlider_, metallicValueLabel_,
+                 0, 100, 70, QStringLiteral("0.70"));
+
+    auto showMoreOptions = [moreOptionsButton, moreOptions](bool shown)
+    {
+        moreOptions->setVisible(shown);
+
+        moreOptionsButton->setText(
+            shown ? tr("▾  Fewer options") : tr("▸  More options"));
+    };
+
+    showMoreOptions(false);
+
+    connect(moreOptionsButton, &QPushButton::toggled, this, showMoreOptions);
+
+    layout->addWidget(moreOptionsButton, 0, Qt::AlignLeft);
+    layout->addWidget(moreOptions);
+
+    layout->addStretch(1);
+
+    tabs->addTab(stylePage, tr("STYLE"));
 
     /*
-     * 03  UNKNOT
+     * ANIMATE: relax (same knot) and unknot (crossing changes)
      */
 
-    addSectionHeader(layout, panel, QStringLiteral("03"), tr("RELAX"));
+    QScrollArea *animatePage = makePage(layout);
+
+    panel = animatePage->widget();
+
+    addSectionHeader(layout, panel, QStringLiteral("01"), tr("RELAX"));
 
     QWidget *relaxGroup = new QWidget(panel);
 
@@ -829,14 +968,15 @@ QWidget *MainWindow::createLeftPanel()
 
     relaxStatusLabel_->setObjectName(QStringLiteral("Status"));
     relaxStatusLabel_->setWordWrap(true);
-    relaxStatusLabel_->setMinimumHeight(40);
     relaxStatusLabel_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 
     relaxLayout->addWidget(relaxStatusLabel_);
 
     layout->addWidget(relaxGroup);
 
-    addSectionHeader(layout, panel, QStringLiteral("04"), tr("UNKNOT"));
+    layout->addSpacing(14);
+
+    addSectionHeader(layout, panel, QStringLiteral("02"), tr("UNKNOT"));
 
     unknotGroup_ = new QWidget(panel);
 
@@ -860,7 +1000,7 @@ QWidget *MainWindow::createLeftPanel()
 
     unknotButtons->setSpacing(8);
 
-    unknotPlayButton_ = new QPushButton(tr("\u25B6  UNKNOT"), unknotGroup_);
+    unknotPlayButton_ = new QPushButton(tr("▶  UNKNOT"), unknotGroup_);
 
     unknotPlayButton_->setObjectName(QStringLiteral("GenerateButton"));
     unknotPlayButton_->setMinimumHeight(40);
@@ -920,7 +1060,6 @@ QWidget *MainWindow::createLeftPanel()
 
     unknotStatusLabel_->setObjectName(QStringLiteral("Status"));
     unknotStatusLabel_->setWordWrap(true);
-    unknotStatusLabel_->setMinimumHeight(40);
     unknotStatusLabel_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 
     unknotLayout->addWidget(unknotStatusLabel_);
@@ -929,9 +1068,9 @@ QWidget *MainWindow::createLeftPanel()
 
     layout->addStretch(1);
 
-    scroll->setWidget(panel);
+    tabs->addTab(animatePage, tr("ANIMATE"));
 
-    return scroll;
+    return tabs;
 }
 
 QWidget *MainWindow::createRightPanel()
@@ -1077,8 +1216,6 @@ QWidget *MainWindow::createRightPanel()
     learnLayout->addWidget(educationalBrowser_, 1);
 
     tabs->addTab(learn, tr("LEARN"));
-
-    tabs->addTab(createSettingsPanel(), tr("SETTINGS"));
 
     return tabs;
 }
@@ -1406,13 +1543,29 @@ void MainWindow::showInitially()
             1000);
     }
 
-    // full screen only when asked for, even if the window was closed so
-    if (AppSettings::startFullScreen())
-        setWindowState(windowState() | Qt::WindowFullScreen);
-    else
-        setWindowState(windowState() & ~Qt::WindowFullScreen);
+    // full screen only when asked for, even if the window was closed so,
+    // and never straight away (see showFullScreenLater)
+    setWindowState(windowState() & ~Qt::WindowFullScreen);
 
     show();
+
+    if (AppSettings::startFullScreen())
+        showFullScreenLater();
+}
+
+void MainWindow::showFullScreenLater()
+{
+    // A window that is already full screen when it first appears skips the
+    // 1 px border of main.cpp: Windows puts the OpenGL window into direct
+    // mode and it takes no clicks until F11 is pressed twice. Shown first
+    // and switched a moment later, it goes the same way as F11.
+    QTimer::singleShot(
+        0,
+        this,
+        [this]()
+        {
+            setWindowState(windowState() | Qt::WindowFullScreen);
+        });
 }
 
 void MainWindow::closeEvent(
@@ -1427,6 +1580,13 @@ void MainWindow::closeEvent(
 
 void MainWindow::rebuildWindow()
 {
+    // a language is chosen in Settings, so they stay open in the new one
+    const bool settingsOpen =
+        settingsDialog_->isVisible();
+
+    const bool fullScreen =
+        isFullScreen();
+
     MainWindow *replacement = new MainWindow();
 
     replacement->setAttribute(
@@ -1435,9 +1595,28 @@ void MainWindow::rebuildWindow()
     replacement->takeOverFrom(
         *this);
 
+    replacement->setWindowState(
+        replacement->windowState() & ~Qt::WindowFullScreen);
+
     replacement->show();
 
+    if (fullScreen)
+        replacement->showFullScreenLater();
+
+    if (settingsOpen)
+    {
+        replacement->settingsDialog_->move(settingsDialog_->pos());
+        replacement->showSettings();
+    }
+
     close();
+}
+
+void MainWindow::showSettings()
+{
+    settingsDialog_->show();
+    settingsDialog_->raise();
+    settingsDialog_->activateWindow();
 }
 
 void MainWindow::takeOverFrom(
@@ -1451,6 +1630,9 @@ void MainWindow::takeOverFrom(
 
     mainSplitter_->setSizes(
         previous.mainSplitter_->sizes());
+
+    leftTabs_->setCurrentIndex(
+        previous.leftTabs_->currentIndex());
 
     rightTabs_->setCurrentIndex(
         previous.rightTabs_->currentIndex());
@@ -1476,7 +1658,7 @@ void MainWindow::takeOverFrom(
 
     meshColor_ = previous.meshColor_;
 
-    colorButton_->setStyleSheet(previous.colorButton_->styleSheet());
+    updateColorSwatch();
 
     glWidget_->setMeshColor(meshColor_);
 
@@ -2150,21 +2332,25 @@ void MainWindow::chooseColor()
 
     applySurface();
 
+    updateColorSwatch();
+
+    rebuildMesh();
+}
+
+void MainWindow::updateColorSwatch()
+{
     colorButton_->setStyleSheet(
         QStringLiteral(
             "QPushButton {"
             " background:%1;"
-            " color:#060606;"
-            " border:1px solid #BAB9B4;"
-            " font-weight:700;"
+            " border:1px solid #53514C;"
+            " padding:0px;"
             "}"
             "QPushButton:hover {"
             " border:1px solid #BAB9B4;"
             "}")
             .arg(
                 meshColor_.name()));
-
-    rebuildMesh();
 }
 
 void MainWindow::resetCamera()

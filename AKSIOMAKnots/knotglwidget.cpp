@@ -2008,7 +2008,11 @@ void KnotGLWidget::onAnimationTick()
 
     updateParticles(dt);
 
-    if (autoRotation_)
+    if (cameraFlight_)
+    {
+        advanceCameraFlight(dt);
+    }
+    else if (autoRotation_)
     {
         // 18 degrees per second (the old code advanced 0.3 degrees per frame)
         yaw_ += 18.0f * dt;
@@ -2040,7 +2044,7 @@ void KnotGLWidget::setAutoRotation(bool enabled)
 {
     autoRotation_ = enabled;
 
-    animationTimer_.setInterval(enabled ? 16 : 33);
+    animationTimer_.setInterval(enabled || cameraFlight_ ? 16 : 33);
 
     update();
 }
@@ -2059,6 +2063,9 @@ bool KnotGLWidget::autoRotation() const
 void KnotGLWidget::mousePressEvent(QMouseEvent *event)
 {
     lastMousePosition_ = event->position().toPoint();
+
+    // the user takes over the camera
+    stopCameraFlight();
 
     leftMouseDown_ = event->button() == Qt::LeftButton;
     rightMouseDown_ = event->button() == Qt::RightButton;
@@ -2141,6 +2148,8 @@ void KnotGLWidget::wheelEvent(QWheelEvent *event)
     const double delta =
         static_cast<double>(event->angleDelta().y()) / 120.0;
 
+    stopCameraFlight();
+
     distance_ *= static_cast<float>(std::pow(0.88, delta));
 
     distance_ = std::clamp(distance_, 2.2f, 30.0f);
@@ -2154,13 +2163,310 @@ void KnotGLWidget::wheelEvent(QWheelEvent *event)
 
 void KnotGLWidget::resetCamera()
 {
-    yaw_ = 35.0f;
-    pitch_ = 18.0f;
-    distance_ = 8.0f;
+    /*
+     * Best view of the current knot: the direction in which the curve
+     * spreads out most while its strands overlap least, then the
+     * distance at which the whole tube fills about 70% of the view.
+     */
 
-    panOffset_ = QVector3D(0.0f, 0.0f, 0.0f);
+    const int samples = mesh_.centerline.size() / 4;
 
-    emit cameraChanged(yaw_, pitch_, distance_);
+    if (samples < 3)
+    {
+        flyCameraTo(35.0f, 18.0f, 8.0f, QVector3D(0.0f, 0.0f, 0.0f));
+
+        return;
+    }
+
+    const bool hasStrands = mesh_.centerlineStrand.size() == samples;
+
+    // about 160 evenly spread points of the centre line
+    const int stride = std::max(1, samples / 160);
+
+    QVector<QVector3D> curve;
+    QVector<int> strand;
+
+    float tube = 0.0f;
+
+    for (int s = 0; s < samples; s += stride)
+    {
+        curve.append(QVector3D(
+            mesh_.centerline.at(4 * s),
+            mesh_.centerline.at(4 * s + 1),
+            mesh_.centerline.at(4 * s + 2)));
+
+        strand.append(hasStrands ? mesh_.centerlineStrand.at(s) : 0);
+
+        tube = std::max(tube, mesh_.centerline.at(4 * s + 3));
+    }
+
+    const int n = curve.size();
+
+    QVector3D low = curve.first();
+    QVector3D high = curve.first();
+
+    for (const QVector3D &p : curve)
+    {
+        low = QVector3D(std::min(low.x(), p.x()), std::min(low.y(), p.y()), std::min(low.z(), p.z()));
+        high = QVector3D(std::max(high.x(), p.x()), std::max(high.y(), p.y()), std::max(high.z(), p.z()));
+    }
+
+    QVector3D center = 0.5f * (low + high);
+
+    // where each strand starts and how many points it has (strands are
+    // stored one after the other and are closed loops)
+    QVector<int> strandStart(n), strandLength(n);
+
+    float length = 0.0f;
+
+    for (int i = 0; i < n;)
+    {
+        int j = i;
+
+        while (j < n && strand.at(j) == strand.at(i))
+            ++j;
+
+        for (int k = i; k < j; ++k)
+        {
+            strandStart[k] = i;
+            strandLength[k] = j - i;
+
+            if (k + 1 < j)
+                length += (curve.at(k + 1) - curve.at(k)).length();
+        }
+
+        i = j;
+    }
+
+    const float spacing = std::max(length / n, 1e-4f);
+    const float extent = std::max((high - low).length(), 1e-3f);
+
+    // two strands closer than this on screen look like one
+    const float closeDistance = std::max(2.4f * tube, 0.03f * extent);
+
+    // neighbours along the curve are always close, so they do not count
+    const int neighbourGap =
+        static_cast<int>(std::ceil(3.0f * closeDistance / spacing)) + 1;
+
+    float bestScore = -1.0f;
+    float bestYaw = 35.0f;
+    float bestPitch = 18.0f;
+
+    QVector<QVector2D> flat(n);
+
+    // from slightly above to well above: never from below the floor
+    for (float pitch = 5.0f; pitch <= 75.0f; pitch += 5.0f)
+    {
+        for (float yaw = 0.0f; yaw < 360.0f; yaw += 15.0f)
+        {
+            const float pr = qDegreesToRadians(pitch);
+            const float yr = qDegreesToRadians(yaw);
+
+            const QVector3D toCamera(
+                std::cos(pr) * std::sin(yr),
+                std::sin(pr),
+                std::cos(pr) * std::cos(yr));
+
+            const QVector3D u =
+                QVector3D::crossProduct(QVector3D(0.0f, 1.0f, 0.0f), toCamera).normalized();
+            const QVector3D v =
+                QVector3D::crossProduct(toCamera, u);
+
+            double sx = 0.0, sy = 0.0, sxx = 0.0, syy = 0.0, sxy = 0.0;
+
+            for (int i = 0; i < n; ++i)
+            {
+                const QVector3D d = curve.at(i) - center;
+
+                flat[i] = QVector2D(QVector3D::dotProduct(d, u), QVector3D::dotProduct(d, v));
+
+                sx += flat[i].x();
+                sy += flat[i].y();
+                sxx += flat[i].x() * flat[i].x();
+                syy += flat[i].y() * flat[i].y();
+                sxy += flat[i].x() * flat[i].y();
+            }
+
+            sx /= n;
+            sy /= n;
+
+            const double cxx = sxx / n - sx * sx;
+            const double cyy = syy / n - sy * sy;
+            const double cxy = sxy / n - sx * sy;
+
+            // area the curve covers on screen
+            const double spread =
+                std::sqrt(std::max(0.0, cxx * cyy - cxy * cxy));
+
+            // pairs of far-apart points that land on top of each other
+            int close = 0;
+
+            const float close2 = closeDistance * closeDistance;
+
+            for (int i = 0; i < n; ++i)
+            {
+                for (int j = i + 1; j < n; ++j)
+                {
+                    if (strandStart.at(i) == strandStart.at(j))
+                    {
+                        const int gap = j - i;
+
+                        if (std::min(gap, strandLength.at(i) - gap) <= neighbourGap)
+                            continue;
+                    }
+
+                    if ((flat.at(i) - flat.at(j)).lengthSquared() < close2)
+                        ++close;
+                }
+            }
+
+            // a little depth reads better than looking straight down
+            const float tilt =
+                1.0f + 0.08f * std::cos(qDegreesToRadians(pitch - 25.0f));
+
+            const float score =
+                static_cast<float>(spread) * tilt /
+                (1.0f + static_cast<float>(close) / n);
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestYaw = yaw;
+                bestPitch = pitch;
+            }
+        }
+    }
+
+    /*
+     * Fit the whole tube (its surface vertices) into the view.
+     */
+
+    const float pr = qDegreesToRadians(bestPitch);
+    const float yr = qDegreesToRadians(bestYaw);
+
+    const QVector3D toCamera(
+        std::cos(pr) * std::sin(yr),
+        std::sin(pr),
+        std::cos(pr) * std::cos(yr));
+
+    const QVector3D right =
+        QVector3D::crossProduct(-toCamera, QVector3D(0.0f, 1.0f, 0.0f)).normalized();
+    const QVector3D up =
+        QVector3D::crossProduct(right, -toCamera);
+
+    const int vertexCount = mesh_.positions.size() / 3;
+    const int vertexStride = std::max(1, vertexCount / 4000);
+
+    QVector<QVector3D> surface;
+
+    for (int i = 0; i < vertexCount; i += vertexStride)
+    {
+        surface.append(QVector3D(
+            mesh_.positions.at(3 * i),
+            mesh_.positions.at(3 * i + 1),
+            mesh_.positions.at(3 * i + 2)));
+    }
+
+    if (surface.isEmpty())
+        surface = curve;
+
+    // centre the picture, not the box
+    float minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f;
+
+    for (const QVector3D &p : surface)
+    {
+        const QVector3D d = p - center;
+
+        minX = std::min(minX, QVector3D::dotProduct(d, right));
+        maxX = std::max(maxX, QVector3D::dotProduct(d, right));
+        minY = std::min(minY, QVector3D::dotProduct(d, up));
+        maxY = std::max(maxY, QVector3D::dotProduct(d, up));
+    }
+
+    center += right * (0.5f * (minX + maxX)) + up * (0.5f * (minY + maxY));
+
+    // the knot fills this much of the shorter side, with room around it
+    constexpr float Fill = 0.70f;
+
+    const float aspect =
+        height() > 0
+            ? static_cast<float>(width()) / static_cast<float>(height())
+            : 1.0f;
+
+    const float tanY = std::tan(qDegreesToRadians(FieldOfView * 0.5f)) * Fill;
+    const float tanX = tanY * aspect;
+
+    float distance = 0.0f;
+
+    for (const QVector3D &p : surface)
+    {
+        const QVector3D d = p - center;
+
+        const float depth = QVector3D::dotProduct(d, toCamera);
+
+        distance = std::max(distance, depth + std::abs(QVector3D::dotProduct(d, right)) / tanX);
+        distance = std::max(distance, depth + std::abs(QVector3D::dotProduct(d, up)) / tanY);
+    }
+
+    flyCameraTo(bestYaw, bestPitch, std::clamp(distance, 2.2f, 30.0f), center);
+}
+
+void KnotGLWidget::flyCameraTo(
+    float yaw,
+    float pitch,
+    float distance,
+    const QVector3D &target)
+{
+    flightFromYaw_ = yaw_;
+    flightFromPitch_ = pitch_;
+    flightFromDistance_ = distance_;
+    flightFromPan_ = panOffset_;
+
+    // the short way round
+    flightToYaw_ =
+        yaw_ + std::fmod(std::fmod(yaw - yaw_, 360.0f) + 540.0f, 360.0f) - 180.0f;
+    flightToPitch_ = pitch;
+    flightToDistance_ = distance;
+    flightToPan_ = target;
+
+    flightProgress_ = 0.0f;
+    cameraFlight_ = true;
+
+    animationTimer_.setInterval(16);
 
     update();
+}
+
+void KnotGLWidget::stopCameraFlight()
+{
+    if (!cameraFlight_)
+        return;
+
+    cameraFlight_ = false;
+
+    animationTimer_.setInterval(autoRotation_ ? 16 : 33);
+}
+
+void KnotGLWidget::advanceCameraFlight(
+    float dt)
+{
+    // 0.6 s, easing in and out
+    flightProgress_ = std::min(1.0f, flightProgress_ + dt / 0.6f);
+
+    const float t = flightProgress_;
+    const float e = t * t * (3.0f - 2.0f * t);
+
+    yaw_ = flightFromYaw_ + (flightToYaw_ - flightFromYaw_) * e;
+    pitch_ = flightFromPitch_ + (flightToPitch_ - flightFromPitch_) * e;
+    distance_ = flightFromDistance_ + (flightToDistance_ - flightFromDistance_) * e;
+    panOffset_ = flightFromPan_ + (flightToPan_ - flightFromPan_) * e;
+
+    if (flightProgress_ >= 1.0f)
+    {
+        yaw_ = std::fmod(yaw_ + 360.0f, 360.0f);
+
+        stopCameraFlight();
+    }
+
+    emit cameraChanged(yaw_, pitch_, distance_);
 }

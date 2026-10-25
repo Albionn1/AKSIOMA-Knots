@@ -171,6 +171,11 @@ const char *const StyleSheet = R"(
         min-height: 1px;
     }
 
+    QFrame#VRule {
+        background: #53514C;
+        border: none;
+    }
+
     QFrame#Tile {
         background: #060606;
         border: 1px solid #53514C;
@@ -393,6 +398,38 @@ const char *const StyleSheet = R"(
         background: #060606;
         color: #53514C;
         border-color: #53514C;
+    }
+
+    /* text-only buttons: About in the top bar, "More options" */
+
+    QPushButton#TopBarButton,
+    QPushButton#DisclosureButton {
+        background: transparent;
+        border: none;
+        padding: 4px 0px;
+        color: #8A8780;
+    }
+
+    QPushButton#TopBarButton {
+        font-size: 9pt;
+        letter-spacing: 1px;
+    }
+
+    QPushButton#DisclosureButton {
+        font-size: 9pt;
+        font-weight: 600;
+    }
+
+    QPushButton#TopBarButton:hover,
+    QPushButton#DisclosureButton:hover,
+    QPushButton#DisclosureButton:checked {
+        color: #BAB9B4;
+    }
+
+    QPushButton#TopBarButton:pressed,
+    QPushButton#DisclosureButton:pressed {
+        background: transparent;
+        color: #D99B42;
     }
 
     /* ---------- slider ---------- */

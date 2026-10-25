@@ -844,6 +844,46 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
 <context>
     <name>MainWindow</name>
     <message>
+        <source>Turn to the clearest view of the knot and fit it in the window.</source>
+        <translation>Kthehu te pamja më e qartë e nyjës dhe përshtate në dritare.</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>Cilësimet</translation>
+    </message>
+    <message>
+        <source>Language, theme, text size, window  (Ctrl+,)</source>
+        <translation>Gjuha, tema, madhësia e tekstit, dritarja  (Ctrl+,)</translation>
+    </message>
+    <message>
+        <source>Browse...</source>
+        <translation>Shfleto...</translation>
+    </message>
+    <message>
+        <source>Draw...</source>
+        <translation>Vizato...</translation>
+    </message>
+    <message>
+        <source>STYLE</source>
+        <translation>STILI</translation>
+    </message>
+    <message>
+        <source>ANIMATE</source>
+        <translation>ANIMIMI</translation>
+    </message>
+    <message>
+        <source>CURVE</source>
+        <translation>KURBA</translation>
+    </message>
+    <message>
+        <source>TUBE</source>
+        <translation>TUBI</translation>
+    </message>
+    <message>
+        <source>VIEW</source>
+        <translation>SHIKIMI</translation>
+    </message>
+    <message>
         <source>AKSIOMA Knots</source>
         <translation>AKSIOMA Knots</translation>
     </message>
@@ -874,6 +914,14 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>About</source>
         <translation>Rreth</translation>
+    </message>
+    <message>
+        <source>▸  More options</source>
+        <translation>▸  Më shumë opsione</translation>
+    </message>
+    <message>
+        <source>▾  Fewer options</source>
+        <translation>▾  Më pak opsione</translation>
     </message>
     <message>
         <source>KNOT</source>

@@ -20,6 +20,7 @@
 #include <QElapsedTimer>
 
 class QCheckBox;
+class QDialog;
 class QGroupBox;
 class QShortcut;
 class QTabWidget;
@@ -76,6 +77,10 @@ private slots:
         int value);
 
 private:
+    // knot choice in the top bar: preset, T(p,q), Browse, Draw
+    QWidget *createKnotBar(
+        QWidget *parent);
+
     QWidget *createLeftPanel();
 
     QWidget *createRightPanel();
@@ -85,7 +90,10 @@ private:
     // F11; Esc leaves full screen
     void toggleFullScreen();
 
-    // Settings tab: theme and text size apply at once, a new language
+    // Full screen once the window is on screen (start, new language).
+    void showFullScreenLater();
+
+    // Settings window: theme and text size apply at once, a new language
     // needs a new window (all texts are set during construction).
     void applyThemeSettings();
     void rebuildWindow();
@@ -126,6 +134,11 @@ private:
     void openKnotBrowser();
 
     void showAbout();
+
+    void showSettings();
+
+    // Tube colour button shows the current colour.
+    void updateColorSwatch();
 
     // Debounced update after slider changes.
     void scheduleUpdate(
@@ -174,7 +187,13 @@ private:
     QSplitter *mainSplitter_ =
         nullptr;
 
+    QTabWidget *leftTabs_ =
+        nullptr;
+
     QTabWidget *rightTabs_ =
+        nullptr;
+
+    QDialog *settingsDialog_ =
         nullptr;
 
     QComboBox *languageCombo_ =
