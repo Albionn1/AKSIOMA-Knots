@@ -139,6 +139,18 @@ public:
 
     void setAutoRotation(bool enabled);
 
+    // Grab and pull the rope. While it is on, a left press on the tube
+    // around `curve` (drawn with tubes of `radius`) grabs the rope:
+    // ropeGrabbed gives the point of the curve under the mouse,
+    // ropeDragged where that point should go (it moves in the plane that
+    // faces the camera) and ropeReleased the end of the pull. A press next
+    // to the rope turns the view as usual.
+    void setRopeGrab(bool enabled);
+    void setGrabCurve(const QVector<KnotMath::Vec3> &curve, double radius);
+
+    // ends a pull without ropeReleased (the caller has stopped it)
+    void cancelRopeGrab();
+
     bool autoRotation() const;
 
     // Turns to the clearest view of the current knot and fits it into
@@ -166,6 +178,10 @@ public:
 
 signals:
     void cameraChanged(double yaw, double pitch, double distance);
+
+    void ropeGrabbed(const QVector3D &point);
+    void ropeDragged(const QVector3D &point);
+    void ropeReleased();
 
 protected:
     void initializeGL() override;
@@ -289,6 +305,14 @@ private:
 
     QPointF projectPointToScreen(const KnotMath::Vec3 &point) const;
 
+    // The point of the grab curve under `position` (on the strand nearest
+    // to the camera there); false if the mouse is not on the rope.
+    bool pickRope(const QPointF &position, QVector3D &point) const;
+
+    // where the line of sight through `position` meets the plane through
+    // `through` that faces the camera
+    QVector3D pointOnViewPlane(const QPointF &position, const QVector3D &through) const;
+
     // depth of the scene seen from the key light (self-shadowing)
     void drawShadowMap();
     // `wanted`: this kind of shadow is turned on
@@ -403,6 +427,15 @@ private:
 
     bool leftMouseDown_ = false;
     bool rightMouseDown_ = false;
+
+    // grab and pull: the curve that can be grabbed, the point grabbed and
+    // where the press met the plane of the drag
+    bool ropeGrab_ = false;
+    bool ropeDragging_ = false;
+    QVector<KnotMath::Vec3> grabCurve_;
+    double grabRadius_ = 0.1;
+    QVector3D grabPoint_;
+    QVector3D grabStart_;
 
     bool glInitialized_ = false;
     bool useVertexColors_ = false;

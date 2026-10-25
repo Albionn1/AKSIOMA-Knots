@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #ifndef GL_PROGRAM_POINT_SIZE
 #define GL_PROGRAM_POINT_SIZE 0x8642
@@ -2584,7 +2585,7 @@ void KnotGLWidget::onAnimationTick()
     {
         advanceCameraFlight(dt);
     }
-    else if (autoRotation_)
+    else if (autoRotation_ && !ropeDragging_)
     {
         // 18 degrees per second
         yaw_ += 18.0f * dt;
@@ -2632,12 +2633,157 @@ bool KnotGLWidget::autoRotation() const
  * =========================================================
  */
 
+void KnotGLWidget::setRopeGrab(bool enabled)
+{
+    ropeGrab_ = enabled;
+
+    // the cursor shows when the mouse is over the rope
+    setMouseTracking(enabled);
+
+    if (!enabled)
+    {
+        ropeDragging_ = false;
+        grabCurve_.clear();
+        unsetCursor();
+    }
+}
+
+void KnotGLWidget::setGrabCurve(const QVector<KnotMath::Vec3> &curve, double radius)
+{
+    grabCurve_ = curve;
+    grabRadius_ = radius;
+}
+
+void KnotGLWidget::cancelRopeGrab()
+{
+    ropeDragging_ = false;
+
+    if (ropeGrab_)
+        setCursor(Qt::OpenHandCursor);
+}
+
+bool KnotGLWidget::pickRope(const QPointF &position, QVector3D &point) const
+{
+    const int n = grabCurve_.size();
+
+    if (n < 2 || width() <= 0 || height() <= 0)
+        return false;
+
+    const QVector3D eye = computeCameraPosition() + panOffset_;
+    const QVector3D forward = (panOffset_ - eye).normalized();
+
+    // pixels per unit at distance 1 from the camera
+    const float focal =
+        static_cast<float>(height()) /
+        (2.0f * std::tan(qDegreesToRadians(FieldOfView * 0.5f)));
+
+    bool found = false;
+    float nearest = std::numeric_limits<float>::max();
+
+    for (int i = 0; i < n; ++i)
+    {
+        const KnotMath::Vec3 &a = grabCurve_.at(i);
+        const KnotMath::Vec3 &b = grabCurve_.at((i + 1) % n);
+
+        const QPointF pa = projectPointToScreen(a);
+        const QPointF pb = projectPointToScreen(b);
+
+        // the point of the segment on screen nearest to the mouse
+        const QPointF d = pb - pa;
+        const double length2 = QPointF::dotProduct(d, d);
+
+        const double u =
+            length2 > 1.0e-9
+                ? std::clamp(QPointF::dotProduct(position - pa, d) / length2, 0.0, 1.0)
+                : 0.0;
+
+        const QPointF onScreen = pa + d * u;
+        const QPointF offset = position - onScreen;
+
+        const KnotMath::Vec3 p = a + (b - a) * u;
+        const QVector3D world(
+            static_cast<float>(p.x),
+            static_cast<float>(p.y),
+            static_cast<float>(p.z));
+
+        const float depth = QVector3D::dotProduct(world - eye, forward);
+
+        if (depth <= NearPlane)
+            continue;
+
+        // the tube on screen, and a few pixels more so a thin one can be
+        // caught
+        const double reach =
+            grabRadius_ * static_cast<double>(focal / depth) + 4.0;
+
+        if (std::hypot(offset.x(), offset.y()) <= reach && depth < nearest)
+        {
+            found = true;
+            nearest = depth;
+            point = world;
+        }
+    }
+
+    return found;
+}
+
+QVector3D KnotGLWidget::pointOnViewPlane(
+    const QPointF &position,
+    const QVector3D &through) const
+{
+    const QMatrix4x4 inverse = lastViewProjection_.inverted();
+
+    const float x = static_cast<float>(2.0 * position.x() / std::max(1, width()) - 1.0);
+    const float y = static_cast<float>(1.0 - 2.0 * position.y() / std::max(1, height()));
+
+    auto unproject = [&](float z)
+    {
+        const QVector4D p = inverse * QVector4D(x, y, z, 1.0f);
+
+        return std::abs(p.w()) > 1.0e-9f ? p.toVector3D() / p.w() : p.toVector3D();
+    };
+
+    const QVector3D nearPoint = unproject(-1.0f);
+    const QVector3D direction = unproject(1.0f) - nearPoint;
+
+    const QVector3D eye = computeCameraPosition() + panOffset_;
+    const QVector3D forward = (panOffset_ - eye).normalized();
+
+    const float along = QVector3D::dotProduct(direction, forward);
+
+    if (std::abs(along) < 1.0e-9f)
+        return through;
+
+    return nearPoint +
+           direction * (QVector3D::dotProduct(through - nearPoint, forward) / along);
+}
+
 void KnotGLWidget::mousePressEvent(QMouseEvent *event)
 {
     lastMousePosition_ = event->position().toPoint();
 
     // the user takes over the camera
     stopCameraFlight();
+
+    // a press on the rope grabs it (the view does not turn)
+    QVector3D point;
+
+    if (ropeGrab_ &&
+        event->button() == Qt::LeftButton &&
+        pickRope(event->position(), point))
+    {
+        ropeDragging_ = true;
+        grabPoint_ = point;
+        grabStart_ = pointOnViewPlane(event->position(), point);
+
+        setCursor(Qt::ClosedHandCursor);
+
+        emit ropeGrabbed(point);
+
+        event->accept();
+
+        return;
+    }
 
     leftMouseDown_ = event->button() == Qt::LeftButton;
     rightMouseDown_ = event->button() == Qt::RightButton;
@@ -2655,6 +2801,29 @@ void KnotGLWidget::mouseMoveEvent(QMouseEvent *event)
     const QPoint delta = current - lastMousePosition_;
 
     lastMousePosition_ = current;
+
+    if (ropeDragging_)
+    {
+        // the grabbed point follows the mouse in the plane facing the camera
+        emit ropeDragged(
+            grabPoint_ +
+            pointOnViewPlane(event->position(), grabPoint_) -
+            grabStart_);
+
+        event->accept();
+
+        return;
+    }
+
+    if (ropeGrab_ && !leftMouseDown_ && !rightMouseDown_)
+    {
+        QVector3D point;
+
+        if (pickRope(event->position(), point))
+            setCursor(Qt::OpenHandCursor);
+        else
+            unsetCursor();
+    }
 
     if (leftMouseDown_)
     {
@@ -2706,6 +2875,15 @@ void KnotGLWidget::mouseMoveEvent(QMouseEvent *event)
 
 void KnotGLWidget::mouseReleaseEvent(QMouseEvent *event)
 {
+    if (event->button() == Qt::LeftButton && ropeDragging_)
+    {
+        ropeDragging_ = false;
+
+        setCursor(Qt::OpenHandCursor);
+
+        emit ropeReleased();
+    }
+
     if (event->button() == Qt::LeftButton)
         leftMouseDown_ = false;
 

@@ -32,6 +32,7 @@
 #include <QMenu>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSignalBlocker>
 #include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
@@ -575,6 +576,30 @@ MainWindow::MainWindow(
         &MainWindow::relaxReset);
 
     connect(
+        grabButton_,
+        &QPushButton::toggled,
+        this,
+        &MainWindow::grabToggled);
+
+    connect(
+        glWidget_,
+        &KnotGLWidget::ropeGrabbed,
+        this,
+        &MainWindow::ropeGrabbed);
+
+    connect(
+        glWidget_,
+        &KnotGLWidget::ropeDragged,
+        this,
+        &MainWindow::ropeDragged);
+
+    connect(
+        glWidget_,
+        &KnotGLWidget::ropeReleased,
+        this,
+        &MainWindow::ropeReleased);
+
+    connect(
         unknotPlayButton_,
         &QPushButton::clicked,
         this,
@@ -1051,6 +1076,18 @@ QWidget *MainWindow::createLeftPanel()
     relaxButtons->addWidget(relaxResetButton_, 2);
 
     relaxLayout->addLayout(relaxButtons);
+
+    grabButton_ = new QPushButton(tr("✋  Grab the rope"), relaxGroup);
+
+    // the same look as a chosen brush in Practice when it is on
+    grabButton_->setObjectName(QStringLiteral("BrushButton"));
+    grabButton_->setCheckable(true);
+    grabButton_->setMinimumHeight(40);
+    grabButton_->setToolTip(
+        tr("Pull the knot about with the mouse: drag the rope with the "
+           "left button."));
+
+    relaxLayout->addWidget(grabButton_);
 
     relaxStatusLabel_ = new QLabel(QString(), relaxGroup);
 
@@ -2914,7 +2951,7 @@ void MainWindow::rebuildMesh()
     }
 
     // the moving curve is drawn every frame (with the current thickness)
-    if (relaxRunning_ || joinActive_)
+    if (relaxRunning_ || pulling_ || joinActive_)
         return;
 
     if (unknotActive_)
@@ -3095,6 +3132,8 @@ void MainWindow::rebuildMesh()
     glWidget_->setShowCrossingNumbers(
         showCrossingNumbersCheck_ != nullptr &&
         showCrossingNumbersCheck_->isChecked());
+
+    updateGrabCurve();
 }
 
 void MainWindow::updateInvariantPanel(
@@ -5232,16 +5271,24 @@ void MainWindow::runRelaxation()
 
     glWidget_->clearFlashes();
 
-    // relax_.curve() always fits in a ball of radius 2.7
-    const float extent =
-        2.7f +
-        static_cast<float>(
-            thicknessSlider_->value()) /
-            100.0f;
+    // relax_.curve() always fits in a ball of radius 2.7 (with the rope
+    // grabbed the floor stays where pulling keeps it)
+    if (grabEnabled())
+    {
+        fixPullBounds();
+    }
+    else
+    {
+        const float extent =
+            2.7f +
+            static_cast<float>(
+                thicknessSlider_->value()) /
+                100.0f;
 
-    glWidget_->setFixedBounds(
-        QVector3D(-extent, -extent, -extent),
-        QVector3D(extent, extent, extent));
+        glWidget_->setFixedBounds(
+            QVector3D(-extent, -extent, -extent),
+            QVector3D(extent, extent, extent));
+    }
 
     relaxClock_.restart();
 
@@ -5279,7 +5326,8 @@ void MainWindow::pauseRelaxation()
     relaxChanged_ =
         true;
 
-    glWidget_->clearFixedBounds();
+    if (!grabEnabled())
+        glWidget_->clearFixedBounds();
 
     rebuildMesh();
 
@@ -5294,9 +5342,16 @@ void MainWindow::stopRelaxation()
         relaxTimer_->stop();
 
     const bool wasRunning =
-        relaxRunning_;
+        relaxRunning_ || pulling_;
 
     relaxRunning_ =
+        false;
+
+    // the rope in the hand is gone too
+    if (pulling_ && glWidget_ != nullptr)
+        glWidget_->cancelRopeGrab();
+
+    pulling_ =
         false;
 
     relaxChanged_ =
@@ -5311,7 +5366,7 @@ void MainWindow::stopRelaxation()
     relaxAnalysisWanted_ =
         false;
 
-    if (wasRunning && glWidget_ != nullptr)
+    if (wasRunning && glWidget_ != nullptr && !grabEnabled())
         glWidget_->clearFixedBounds();
 
     if (relaxStatusLabel_ != nullptr)
@@ -5322,6 +5377,9 @@ void MainWindow::stopRelaxation()
 
 void MainWindow::relaxPlayPause()
 {
+    if (pulling_)
+        return;
+
     if (relaxRunning_)
     {
         pauseRelaxation();
@@ -5349,7 +5407,7 @@ void MainWindow::relaxPlayPause()
 
 void MainWindow::relaxScramble()
 {
-    if (!prepareRelaxation())
+    if (pulling_ || !prepareRelaxation())
         return;
 
     // the scramble keeps the strands about a tube thickness apart
@@ -5375,6 +5433,19 @@ void MainWindow::relaxReset()
 
 void MainWindow::relaxTick()
 {
+    // the rope follows the hand (most of the frame for the physics)
+    if (pulling_)
+    {
+        relax_.advance(
+            10.0);
+
+        renderRelaxFrame();
+
+        requestRelaxAnalysis();
+
+        return;
+    }
+
     if (!relaxRunning_)
         return;
 
@@ -5536,6 +5607,8 @@ void MainWindow::renderRelaxFrame()
 
     glWidget_->setMesh(
         mesh);
+
+    updateGrabCurve();
 }
 
 void MainWindow::requestRelaxAnalysis()
@@ -5626,6 +5699,254 @@ void MainWindow::updateRelaxControls()
 
     relaxResetButton_->setEnabled(
         relaxRunning_ || relaxChanged_);
+}
+
+namespace
+{
+
+// The hand stays within this distance of the centre of the view (the
+// rope cannot be pulled away out of sight).
+constexpr double PullReach =
+    3.3;
+
+QString pullExplanation(
+    const QString &title,
+    const QString &body)
+{
+    return QStringLiteral("<b>%1</b><br>%2").arg(title, body);
+}
+
+} // namespace
+
+bool MainWindow::grabEnabled() const
+{
+    return grabButton_ != nullptr &&
+           grabButton_->isChecked();
+}
+
+void MainWindow::fixPullBounds()
+{
+    const float extent =
+        static_cast<float>(PullReach) +
+        static_cast<float>(
+            thicknessSlider_->value()) /
+            100.0f;
+
+    glWidget_->setFixedBounds(
+        QVector3D(-extent, -extent, -extent),
+        QVector3D(extent, extent, extent));
+}
+
+void MainWindow::updateGrabCurve()
+{
+    if (!grabEnabled() || glWidget_ == nullptr)
+        return;
+
+    const double requestedRadius =
+        static_cast<double>(
+            thicknessSlider_->value()) /
+        100.0;
+
+    // the curve on screen: the moving one, or the current knot
+    if (relax_.isValid() &&
+        (pulling_ || relaxRunning_ || relaxChanged_))
+    {
+        glWidget_->setGrabCurve(
+            relax_.curve(),
+            relaxShownRadius_ > 0.0
+                ? relaxShownRadius_
+                : requestedRadius);
+    }
+    else if (hasData_ &&
+             !currentData_.multiStrand &&
+             currentData_.closed &&
+             !seifertActive_ &&
+             !unknotActive_ &&
+             !joinActive_)
+    {
+        glWidget_->setGrabCurve(
+            currentData_.points,
+            requestedRadius);
+    }
+    else
+    {
+        // nothing to grab (several strands, an open curve, or an
+        // animation shows something else)
+        glWidget_->setGrabCurve(
+            {},
+            0.0);
+    }
+}
+
+void MainWindow::grabToggled(
+    bool enabled)
+{
+    if (!enabled)
+    {
+        if (pulling_)
+            ropeReleased();
+
+        glWidget_->setRopeGrab(
+            false);
+
+        if (!relaxRunning_)
+        {
+            glWidget_->clearFixedBounds();
+
+            rebuildMesh();
+        }
+
+        relaxStatusLabel_->clear();
+
+        return;
+    }
+
+    // a running relaxation stops where it is
+    if (relaxRunning_)
+        pauseRelaxation();
+
+    if (!prepareRelaxation())
+    {
+        const QSignalBlocker blocker(
+            grabButton_);
+
+        grabButton_->setChecked(
+            false);
+
+        return;
+    }
+
+    glWidget_->setRopeGrab(
+        true);
+
+    fixPullBounds();
+
+    updateGrabCurve();
+
+    relaxStatusLabel_->setText(
+        pullExplanation(
+            tr("Grab the rope"),
+            tr("Drag the rope with the left mouse button: the rest "
+               "follows, and no strand can pass through another. Drag "
+               "next to the rope to turn the view.")));
+}
+
+void MainWindow::ropeGrabbed(
+    const QVector3D &point)
+{
+    if (!grabEnabled())
+    {
+        glWidget_->cancelRopeGrab();
+        return;
+    }
+
+    // the shape on screen is the relaxed one so far
+    if (relaxRunning_)
+        pauseRelaxation();
+
+    if (!prepareRelaxation())
+    {
+        glWidget_->cancelRopeGrab();
+        return;
+    }
+
+    relax_.setTubeRadius(
+        static_cast<double>(
+            thicknessSlider_->value()) /
+        100.0);
+
+    relax_.beginPull(
+        KnotMath::Vec3(
+            point.x(),
+            point.y(),
+            point.z()));
+
+    pulling_ =
+        true;
+
+    // the numbered markers belong to the curve before it moves
+    glWidget_->setShowCrossingNumbers(
+        false);
+
+    glWidget_->clearFlashes();
+
+    fixPullBounds();
+
+    relaxClock_.restart();
+
+    relaxTimer_->start();
+
+    relaxStatusLabel_->setText(
+        pullExplanation(
+            tr("Pulling"),
+            tr("The rest of the rope follows. Strands push each other "
+               "aside but never pass through each other, so it is still "
+               "the same knot - watch the classification on the right.")));
+
+    updateRelaxControls();
+}
+
+void MainWindow::ropeDragged(
+    const QVector3D &point)
+{
+    if (!pulling_)
+        return;
+
+    KnotMath::Vec3 target(
+        point.x(),
+        point.y(),
+        point.z());
+
+    const double distance =
+        target.length();
+
+    if (distance > PullReach)
+        target *= PullReach / distance;
+
+    relax_.setPullTarget(
+        target);
+}
+
+void MainWindow::ropeReleased()
+{
+    if (!pulling_)
+        return;
+
+    relax_.endPull();
+
+    pulling_ =
+        false;
+
+    relaxTimer_->stop();
+
+    // the pulled curve becomes the current one (as after a pause)
+    currentData_.points =
+        relax_.curve();
+
+    currentData_.closed =
+        true;
+
+    currentCrossings_ =
+        KnotMath::detectProjectionCrossings(
+            currentData_.points,
+            2,
+            700);
+
+    relaxChanged_ =
+        true;
+
+    rebuildMesh();
+
+    requestRelaxAnalysis();
+
+    updateRelaxControls();
+
+    relaxStatusLabel_->setText(
+        pullExplanation(
+            tr("Let go"),
+            tr("No strand passed through another, so this is still the "
+               "same knot. Pull again, press Relax to let it settle, or "
+               "Reset to go back to the original.")));
 }
 
 /*

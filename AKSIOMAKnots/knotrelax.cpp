@@ -52,6 +52,28 @@ constexpr int scrambleStiffness = 16;
 constexpr double scrambleRod = 0.08;
 constexpr double scrambleSpring = 0.15;
 
+// Pull: the hand moves the grabbed point at most `pullHandStep` per step
+// and no point moves more than `pullMaxStep`. The rope does not stretch
+// (edges at most 1 long) and does not bunch up (at least `pullShortest`),
+// and it bends no tighter than `pullBendRadius` (or 1.3 tube radii).
+// Strands are kept 2.2 tube radii apart, but at least `pullClearance` and
+// at most `pullWidestClearance` (a thick tube on a tight knot would leave
+// the rope no room; the tube drawn is thinned there instead). In each pass
+// they are pushed apart by at most `pullContactStep`, but always back to
+// `pullClearance`. The steps are small so that no strand can be carried
+// to the far side of another in one. Below `pullIdle` the rope has come to
+// rest.
+constexpr double pullHandStep = 0.05;
+constexpr double pullMaxStep = 0.15;
+constexpr double pullShortest = 0.7;
+constexpr double pullBendRadius = 1.0;
+constexpr double pullClearance = 0.6;
+constexpr double pullWidestClearance = 2.5;
+constexpr int pullBendPasses = 3;
+constexpr int pullContactPasses = 3;
+constexpr double pullContactStep = 0.1;
+constexpr double pullIdle = 1.0e-3;
+
 // Step limits are spread along the curve over this many points on each
 // side, so that a point held back by a nearby strand slows its neighbours
 // down too instead of leaving a kink.
@@ -164,7 +186,16 @@ bool KnotRelaxation::start(const QVector<Vec3> &curve)
             continue;
 
         points_ = resampled;
+
+        // normalise() moves the frame along with the points, so that
+        // curve() gives the curve as it was passed in (relaxing and
+        // scrambling then bring it to the usual size)
+        framed_ = true;
+        frameCentre_ = Vec3();
+        frameScale_ = 1.0;
+
         normalise();
+
         measureGaps(0.0);
 
         if (gap_ <= 1.0e-9)
@@ -263,7 +294,13 @@ int KnotRelaxation::advance(double milliseconds, int scrambleLimit)
 
     do
     {
-        if (scrambling())
+        if (pulling_)
+        {
+            // nothing more to do until the hand moves again
+            if (pullStep() < pullIdle)
+                break;
+        }
+        else if (scrambling())
         {
             if (scrambled >= scrambleLimit)
                 break;
@@ -286,6 +323,58 @@ int KnotRelaxation::advance(double milliseconds, int scrambleLimit)
     } while (timer.nsecsElapsed() < milliseconds * 1.0e6);
 
     return done;
+}
+
+void KnotRelaxation::beginPull(const Vec3 &grabbed)
+{
+    if (!isValid())
+        return;
+
+    // the curve stays where curve() shows it now
+    if (!framed_)
+    {
+        freshFrame(frameCentre_, frameScale_);
+        framed_ = true;
+    }
+
+    // the pull takes over from scrambling, and the curve is relaxed again
+    // only when asked
+    scrambleLeft_ = 0;
+    resetSettling();
+
+    const Vec3 point = grabbed / frameScale_ + frameCentre_;
+
+    double nearest = std::numeric_limits<double>::max();
+
+    for (int i = 0; i < points_.size(); ++i)
+    {
+        const double distance = (points_.at(i) - point).lengthSquared();
+
+        if (distance < nearest)
+        {
+            nearest = distance;
+            pullIndex_ = i;
+        }
+    }
+
+    pullTarget_ = points_.at(pullIndex_);
+    pulling_ = true;
+}
+
+void KnotRelaxation::setPullTarget(const Vec3 &target)
+{
+    if (pulling_)
+        pullTarget_ = target / frameScale_ + frameCentre_;
+}
+
+void KnotRelaxation::endPull()
+{
+    pulling_ = false;
+}
+
+bool KnotRelaxation::pulling() const
+{
+    return pulling_;
 }
 
 bool KnotRelaxation::settled() const
@@ -362,6 +451,9 @@ void KnotRelaxation::rotate(const Vec3 &axis, double angle)
     // a rigid motion: strands keep their distances
     for (Vec3 &p : points_)
         p = rotated(p, axis, angle);
+
+    // the curve on screen turns about the same point
+    frameCentre_ = rotated(frameCentre_, axis, angle);
 }
 
 int KnotRelaxation::steps() const
@@ -376,24 +468,57 @@ QVector<Vec3> KnotRelaxation::curve() const
     if (result.isEmpty())
         return result;
 
-    Vec3 centre;
+    Vec3 centre = frameCentre_;
+    double scale = frameScale_;
 
-    for (const Vec3 &p : result)
-        centre += p;
-
-    centre = centre / static_cast<double>(result.size());
-
-    double extent = 0.0;
-
-    for (const Vec3 &p : result)
-        extent = std::max(extent, (p - centre).length());
-
-    const double scale = extent > 1.0e-12 ? 2.7 / extent : 1.0;
+    if (!framed_)
+        freshFrame(centre, scale);
 
     for (Vec3 &p : result)
         p = (p - centre) * scale;
 
     return result;
+}
+
+void KnotRelaxation::freshFrame(Vec3 &centre, double &scale) const
+{
+    centre = Vec3();
+
+    for (const Vec3 &p : points_)
+        centre += p;
+
+    centre = centre / std::max(1, static_cast<int>(points_.size()));
+
+    double extent = 0.0;
+
+    for (const Vec3 &p : points_)
+        extent = std::max(extent, (p - centre).length());
+
+    scale = extent > 1.0e-12 ? 2.7 / extent : 1.0;
+}
+
+void KnotRelaxation::easeFrame()
+{
+    if (!framed_)
+        return;
+
+    Vec3 centre;
+    double scale = 1.0;
+
+    freshFrame(centre, scale);
+
+    // a few percent of the way in every step
+    constexpr double rate = 0.03;
+
+    frameCentre_ += (centre - frameCentre_) * rate;
+    frameScale_ *= std::pow(scale / frameScale_, rate);
+
+    // close enough not to be seen any more
+    if ((frameCentre_ - centre).length() < 1.0e-3 &&
+        std::abs(frameScale_ / scale - 1.0) < 1.0e-3)
+    {
+        framed_ = false;
+    }
 }
 
 void KnotRelaxation::setTubeRadius(double radius)
@@ -403,19 +528,15 @@ void KnotRelaxation::setTubeRadius(double radius)
 
 double KnotRelaxation::displayScale() const
 {
-    double extent = 0.0;
+    if (framed_)
+        return frameScale_;
 
     Vec3 centre;
+    double scale = 1.0;
 
-    for (const Vec3 &p : points_)
-        centre += p;
+    freshFrame(centre, scale);
 
-    centre = centre / std::max(1, static_cast<int>(points_.size()));
-
-    for (const Vec3 &p : points_)
-        extent = std::max(extent, (p - centre).length());
-
-    return extent > 1.0e-12 ? 2.7 / extent : 1.0;
+    return scale;
 }
 
 double KnotRelaxation::tubeLimit(double requested) const
@@ -515,8 +636,10 @@ void KnotRelaxation::relaxStep()
 
     // Strands that nearly touch between two points are pushed apart too:
     // otherwise the springs and the smoothing can press one strand against
-    // another, and the safe steps would only bring them ever closer.
-    addContactRepulsion(force, relaxContactStrength, relaxContactRange);
+    // another, and the safe steps would only bring them ever closer. That
+    // includes segments with one segment between them: a tight bend (left
+    // by a pull, say) could otherwise be folded shut.
+    addContactRepulsion(force, relaxContactStrength, relaxContactRange, 2);
 
     // repulsion between points that are not close along the curve
     for (int i = 0; i < n; ++i)
@@ -543,6 +666,7 @@ void KnotRelaxation::relaxStep()
     applyMoves(force, relaxMaxStep);
 
     normalise();
+    easeFrame();
 
     ++relaxSteps_;
 
@@ -718,13 +842,270 @@ void KnotRelaxation::scrambleStep()
     // keep the centre and the length (the squeeze must crumple the curve,
     // not shrink it)
     normalise();
+    easeFrame();
 }
 
-void KnotRelaxation::applyMoves(QVector<Vec3> &move, double maxStep)
+double KnotRelaxation::pullStep()
+{
+    const int n = points_.size();
+    const int g = pullIndex_;
+
+    // Strands stay a little more than a tube diameter apart; the pairs of
+    // segments that could come that close in this step are the contacts
+    // (no point moves more than pullMaxStep).
+    const double tube = tubeRadius_ / displayScale();
+    const double clearance = std::clamp(2.2 * tube, pullClearance, pullWidestClearance);
+
+    measureGaps(clearance + 2.0 * pullMaxStep);
+
+    // segments this close along the curve are neighbours on the same
+    // stretch of rope (the bends keep them apart)
+    const int minimumGap = static_cast<int>(std::ceil(1.5 * clearance)) + 1;
+
+    QVector<Vec3> target = points_;
+
+    // the hand: the grabbed point goes towards it
+    Vec3 reach = pullTarget_ - points_.at(g);
+
+    const double distance = reach.length();
+
+    if (distance > pullHandStep)
+        reach *= pullHandStep / distance;
+
+    target[g] += reach;
+
+    // A thick rope bends no tighter than about its thickness. Where the
+    // curve turns along a smaller circle at point b (neighbours a and c),
+    // the bulge s = b - (a + c) / 2 is made smaller by d: b moves by
+    // 2/3 d and a and c by -1/3 d (the bend is straightened without
+    // pushing the rope anywhere). The hand holds its point, so a bend
+    // there moves the neighbours towards the hand instead - that is how a
+    // pull at one point drags the rope on both sides along. (Only tight
+    // bends: a smoothing everywhere would slowly pull every loop tight.)
+    const double bend = std::max(pullBendRadius, 1.3 * tube);
+
+    for (int pass = 0; pass < pullBendPasses; ++pass)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const int ia = (i + n - 1) % n;
+            const int ic = (i + 1) % n;
+
+            const Vec3 &a = target.at(ia);
+            const Vec3 &b = target.at(i);
+            const Vec3 &c = target.at(ic);
+
+            const Vec3 u = b - a;
+            const Vec3 v = c - b;
+
+            const double lu = u.length();
+            const double lv = v.length();
+
+            if (lu < 1.0e-12 || lv < 1.0e-12)
+                continue;
+
+            const double turn = std::acos(std::clamp(Vec3::dot(u, v) / (lu * lv), -1.0, 1.0));
+
+            if (turn < 1.0e-6)
+                continue;
+
+            const double radius = 0.5 * (lu + lv) / turn;
+
+            if (radius >= bend)
+                continue;
+
+            const Vec3 d = ((a + c) * 0.5 - b) * (0.5 * (1.0 - radius / bend));
+
+            // weights of the three points (0: held by the hand); the bulge
+            // changes by lambda (wb + (wa + wc) / 4)
+            const double wa = ia == g ? 0.0 : 1.0;
+            const double wb = i == g ? 0.0 : 1.0;
+            const double wc = ic == g ? 0.0 : 1.0;
+
+            const double lambda = 1.0 / (wb + 0.25 * (wa + wc));
+
+            target[i] += d * (lambda * wb);
+            target[ia] -= d * (0.5 * lambda * wa);
+            target[ic] -= d * (0.5 * lambda * wc);
+        }
+    }
+
+    // Follow the leader: an edge longer than 1 pulls its far point after
+    // the near one (the rope does not stretch), one shorter than
+    // pullShortest pushes it away (it does not bunch up); a slack stretch
+    // stays where it lies. One walk goes all the way round from the hand
+    // forwards, another one backwards, and every point takes a blend of
+    // the two, mostly from the walk that reaches it first. (Two walks that
+    // stop where they meet would leave one edge there that nothing keeps
+    // from stretching.)
+    auto walk = [&](int direction)
+    {
+        QVector<Vec3> chain = target;
+
+        for (int k = 1; k < n; ++k)
+        {
+            const int leader = ((g + direction * (k - 1)) % n + n) % n;
+            const int point = ((g + direction * k) % n + n) % n;
+
+            const Vec3 edge = chain.at(point) - chain.at(leader);
+            const double length = edge.length();
+
+            if (length > 1.0)
+                chain[point] = chain.at(leader) + edge / length;
+            else if (length < pullShortest && length > 1.0e-12)
+                chain[point] = chain.at(leader) + edge * (pullShortest / length);
+        }
+
+        return chain;
+    };
+
+    const QVector<Vec3> forward = walk(1);
+    const QVector<Vec3> backward = walk(-1);
+
+    for (int k = 1; k < n; ++k)
+    {
+        const int i = (g + k) % n;
+        const double w = static_cast<double>(n - k) / n;
+
+        target[i] = forward.at(i) * w + backward.at(i) * (1.0 - w);
+    }
+
+    // Strands closer than the clearance are pushed apart until they have
+    // it, the ends of both segments sharing the push like their closest
+    // points (a strand in the way is shoved along). The hand does not hold
+    // its point here: it cannot press the rope into another strand. This
+    // comes last, so the clearance is what the new shape keeps best.
+    //
+    // The gap is measured across the line between the closest points as
+    // they are now, not as they would be: the walks above may have carried
+    // one strand right through the other, and pushing those apart again
+    // would only finish the pass (the step limits would then squeeze the
+    // two strands together without end). Measured this way, a strand
+    // dragged against another pushes it along on its own side.
+    for (int pass = 0; pass < pullContactPasses; ++pass)
+    {
+        for (const Contact &contact : contacts_)
+        {
+            if (cyclicGap(contact.i, contact.j, n) < minimumGap ||
+                contact.distance < 1.0e-12)
+            {
+                continue;
+            }
+
+            const int i0 = contact.i;
+            const int i1 = (contact.i + 1) % n;
+            const int j0 = contact.j;
+            const int j1 = (contact.j + 1) % n;
+
+            const double s = contact.s;
+            const double t = contact.t;
+
+            const Vec3 normal =
+                ((points_.at(i0) * (1.0 - s) + points_.at(i1) * s) -
+                 (points_.at(j0) * (1.0 - t) + points_.at(j1) * t)) /
+                contact.distance;
+
+            const Vec3 p = target.at(i0) * (1.0 - s) + target.at(i1) * s;
+            const Vec3 q = target.at(j0) * (1.0 - t) + target.at(j1) * t;
+
+            const double gap = Vec3::dot(p - q, normal);
+
+            if (gap >= clearance)
+                continue;
+
+            // moving the four ends by the push times their share opens the
+            // gap by `open`
+            const double weights =
+                (1.0 - s) * (1.0 - s) + s * s + (1.0 - t) * (1.0 - t) + t * t;
+
+            const double open =
+                std::min(clearance - gap, std::max(pullContactStep, pullClearance - gap));
+
+            const Vec3 push = normal * (open / weights);
+
+            target[i0] += push * (1.0 - s);
+            target[i1] += push * s;
+            target[j0] -= push * (1.0 - t);
+            target[j1] -= push * t;
+        }
+    }
+
+    QVector<Vec3> move(n);
+
+    for (int i = 0; i < n; ++i)
+        move[i] = target.at(i) - points_.at(i);
+
+    // The pushes above can undo each other where many strands crowd
+    // together. So the moves themselves are corrected too: two strands may
+    // come closer by at most half of what they have more than a smallest
+    // distance, and closer than that they must part by half of what they
+    // lack. That still holds when applyMoves() scales the moves down, so
+    // no two strands can be squeezed together step after step. This holds
+    // for segments with one segment between them too (their distance is
+    // that segment, at least pullShortest, unless the rope folds back).
+    for (int pass = 0; pass < pullContactPasses; ++pass)
+    {
+        for (const Contact &contact : contacts_)
+        {
+            if (contact.distance < 1.0e-12)
+                continue;
+
+            const int i0 = contact.i;
+            const int i1 = (contact.i + 1) % n;
+            const int j0 = contact.j;
+            const int j1 = (contact.j + 1) % n;
+
+            const double s = contact.s;
+            const double t = contact.t;
+
+            const Vec3 normal =
+                ((points_.at(i0) * (1.0 - s) + points_.at(i1) * s) -
+                 (points_.at(j0) * (1.0 - t) + points_.at(j1) * t)) /
+                contact.distance;
+
+            // how fast the two closest points part
+            const double parting = Vec3::dot(
+                (move.at(i0) * (1.0 - s) + move.at(i1) * s) -
+                    (move.at(j0) * (1.0 - t) + move.at(j1) * t),
+                normal);
+
+            const double needed = 0.5 * (pullClearance - contact.distance);
+
+            if (parting >= needed)
+                continue;
+
+            const double weights =
+                (1.0 - s) * (1.0 - s) + s * s + (1.0 - t) * (1.0 - t) + t * t;
+
+            const Vec3 push = normal * ((needed - parting) / weights);
+
+            move[i0] += push * (1.0 - s);
+            move[i1] += push * s;
+            move[j0] -= push * (1.0 - t);
+            move[j1] -= push * t;
+        }
+    }
+
+    const QVector<Vec3> before = points_;
+
+    // the hand moves the whole rope: no rigid motion is taken out, and the
+    // curve is not centred again (curve() keeps its frame)
+    applyMoves(move, pullMaxStep, true);
+
+    double moved = 0.0;
+
+    for (int i = 0; i < n; ++i)
+        moved = std::max(moved, (points_.at(i) - before.at(i)).length());
+
+    return moved;
+}
+
+void KnotRelaxation::applyMoves(QVector<Vec3> &move, double maxStep, bool pulling)
 {
     const int n = points_.size();
 
-    removeRigidMotion(move);
+    if (!pulling)
+        removeRigidMotion(move);
 
     // Every point moves at most 0.4 times the distance from its two
     // segments to any segment that does not share a point with them (see
@@ -742,12 +1123,19 @@ void KnotRelaxation::applyMoves(QVector<Vec3> &move, double maxStep)
             factor[i] = allowed / length;
     }
 
+    if (pulling)
+    {
+        const double lowest = *std::min_element(factor.cbegin(), factor.cend());
+
+        factor.fill(lowest);
+    }
+
     // Spread the limits along the curve: the smallest factor within
     // 2 x limitSpread points, then the average over limitSpread points on
     // each side. Every factor in that average is the smallest one of a
     // window that contains point i, so it is at most factor i: the limit
     // above still holds, but a point held back no longer leaves a kink.
-    if (n > 4 * limitSpread + 2)
+    if (!pulling && n > 4 * limitSpread + 2)
     {
         QVector<double> lowest(n);
 
@@ -936,9 +1324,9 @@ void KnotRelaxation::measureGaps(double contactRange)
             segmentGap_[i] = std::min(segmentGap_.at(i), contact.distance);
             segmentGap_[j] = std::min(segmentGap_.at(j), contact.distance);
 
-            // segments with one segment between them meet at every bend;
-            // springs and smoothing take care of those
-            if (contact.distance < contactRange && cyclicGap(i, j, n) >= 3)
+            // segments with one segment between them are about an edge
+            // apart, so they are contacts only where the curve folds back
+            if (contact.distance < contactRange && cyclicGap(i, j, n) >= 2)
                 contacts_.push_back(contact);
         }
     }
@@ -1030,6 +1418,14 @@ void KnotRelaxation::normalise()
         p = (p - centre) * scale;
 
     gap_ *= scale;
+
+    // A held frame moves with the points: (p - C) S stays the same when p
+    // becomes (p - centre) scale and C becomes (C - centre) scale.
+    if (framed_)
+    {
+        frameCentre_ = (frameCentre_ - centre) * scale;
+        frameScale_ /= scale;
+    }
 }
 
 } // namespace KnotMath

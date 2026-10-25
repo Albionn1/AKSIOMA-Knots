@@ -1258,6 +1258,14 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Ngatërro</translation>
     </message>
     <message>
+        <source>✋  Grab the rope</source>
+        <translation>✋  Kap litarin</translation>
+    </message>
+    <message>
+        <source>Pull the knot about with the mouse: drag the rope with the left button.</source>
+        <translation>Tërhiqeni nyjën me miun: zvarritni litarin me butonin e majtë.</translation>
+    </message>
+    <message>
         <source>Steps</source>
         <translation>Hapat</translation>
     </message>
@@ -2068,6 +2076,30 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>No strand passed through another, so this is still the same knot. Scramble it again, or press Reset to go back to the original.</source>
         <translation>Asnjë fije nuk kaloi nëpër një tjetër, kështu që kjo është ende e njëjta nyjë. Ngatërrojeni përsëri, ose shtypni Rikthe për t&apos;u kthyer te origjinali.</translation>
+    </message>
+    <message>
+        <source>Grab the rope</source>
+        <translation>Kap litarin</translation>
+    </message>
+    <message>
+        <source>Drag the rope with the left mouse button: the rest follows, and no strand can pass through another. Drag next to the rope to turn the view.</source>
+        <translation>Zvarritni litarin me butonin e majtë të miut: pjesa tjetër e ndjek, dhe asnjë fije nuk mund të kalojë nëpër një tjetër. Zvarritni pranë litarit për të rrotulluar pamjen.</translation>
+    </message>
+    <message>
+        <source>Pulling</source>
+        <translation>Tërheqja</translation>
+    </message>
+    <message>
+        <source>The rest of the rope follows. Strands push each other aside but never pass through each other, so it is still the same knot - watch the classification on the right.</source>
+        <translation>Pjesa tjetër e litarit e ndjek. Fijet shtyjnë njëra-tjetrën mënjanë, por kurrë nuk kalojnë nëpër njëra-tjetrën, kështu që është ende e njëjta nyjë - shikoni klasifikimin në të djathtë.</translation>
+    </message>
+    <message>
+        <source>Let go</source>
+        <translation>U lëshua</translation>
+    </message>
+    <message>
+        <source>No strand passed through another, so this is still the same knot. Pull again, press Relax to let it settle, or Reset to go back to the original.</source>
+        <translation>Asnjë fije nuk kaloi nëpër një tjetër, kështu që kjo është ende e njëjta nyjë. Tërhiqeni përsëri, shtypni Relakso që të qetësohet, ose Rikthe për t&apos;u kthyer te origjinali.</translation>
     </message>
     <message>
         <source>Stopped.</source>

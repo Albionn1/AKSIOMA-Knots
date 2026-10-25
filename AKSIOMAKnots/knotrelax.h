@@ -26,6 +26,10 @@ namespace KnotMath
  * thickness of the tube apart (setTubeRadius()), so it still looks like a
  * rope being crumpled, not a wire being crushed.
  *
+ * Pull: one point follows the mouse and the rest of the curve is dragged
+ * after it like a thick rope that neither stretches nor bends sharply;
+ * strands in the way are shoved aside (beginPull()).
+ *
  * No strand passes through another: in every step no point moves more than
  * 0.4 times the smallest distance between two segments of the polygon that
  * do not share a point. Every point of a segment then moves at most that
@@ -56,6 +60,17 @@ public:
     // scramble steps (so that scrambling can be watched); returns the
     // number of steps. Relaxing stops by itself once the curve has settled.
     int advance(double milliseconds, int scrambleLimit = scrambleSteps());
+
+    // Grab and pull: the point of the curve nearest to `grabbed` (in the
+    // coordinates of curve()) is pulled towards the target until
+    // endPull(), and the rest of the curve follows like a rope; no strand
+    // passes through another. While a pull goes on (and after it, until
+    // the curve is relaxed again) curve() keeps its place and size, so the
+    // rope stays under the mouse.
+    void beginPull(const Vec3 &grabbed);
+    void setPullTarget(const Vec3 &target);
+    void endPull();
+    bool pulling() const;
 
     // true when relaxing has (nearly) stopped moving the curve
     bool settled() const;
@@ -94,10 +109,19 @@ private:
     void relaxStep();
     void scrambleStep();
 
+    // one step of a pull; returns how far the points moved at most
+    double pullStep();
+
     // Moves every point by `move` (scaled down where needed so that no
     // strand can pass through another). Needs measureGaps() for the
-    // current points.
-    void applyMoves(QVector<Vec3> &move, double maxStep);
+    // current points. Relaxing and scrambling take out the motion of the
+    // whole curve and hold back only the points near a close strand. A
+    // pull (`pulling`) keeps that motion (the hand moves the rope) and
+    // scales all moves by the same factor: the edges of the new shape and
+    // of the old one are (about) at most 1 long, and so are the edges of
+    // a shape in between, so the rope never stretches where it is held
+    // back.
+    void applyMoves(QVector<Vec3> &move, double maxStep, bool pulling = false);
 
     // How far the curve has changed its shape since `before` (the same
     // points earlier): the largest distance of a point from that polygon.
@@ -133,6 +157,20 @@ private:
 
     // factor from the coordinates of points_ to those of curve()
     double displayScale() const;
+
+    // The centre and factor curve() would use when it is not held in
+    // place: the centre of the points, outer radius 2.7.
+    void freshFrame(Vec3 &centre, double &scale) const;
+
+    // After start() and after a pull curve() is (p - frameCentre_) x
+    // frameScale_ for every point p of points_ (the curve stays where it
+    // was on screen). Relaxing and scrambling bring that frame to
+    // freshFrame() a little in every step, so that nothing jumps.
+    void easeFrame();
+
+    bool framed_ = false;
+    Vec3 frameCentre_;
+    double frameScale_ = 1.0;
 
     QVector<Vec3> points_;
     QString error_;
@@ -170,6 +208,12 @@ private:
         double phase = 0.0;
         double speed = 0.0;
     };
+
+    // pull: the grabbed point and where the hand is (coordinates of
+    // points_)
+    bool pulling_ = false;
+    int pullIndex_ = 0;
+    Vec3 pullTarget_;
 
     int scrambleLeft_ = 0;
     double scrambleRadius_ = 1.0;

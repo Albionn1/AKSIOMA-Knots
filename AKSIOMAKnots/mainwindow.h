@@ -19,6 +19,7 @@
 #include <QTextEdit>
 #include <QTimer>
 #include <QVector>
+#include <QVector3D>
 #include <QElapsedTimer>
 #include <QPair>
 
@@ -79,6 +80,15 @@ private slots:
     void relaxScramble();
     void relaxReset();
     void relaxTick();
+
+    // Grab and pull the rope with the mouse (KnotRelaxation::beginPull)
+    void grabToggled(
+        bool enabled);
+    void ropeGrabbed(
+        const QVector3D &point);
+    void ropeDragged(
+        const QVector3D &point);
+    void ropeReleased();
 
     // Unknotting animation
     void unknotPlayPause();
@@ -217,6 +227,14 @@ private:
     // at most one runs at a time, the newest curve is taken next.
     void requestRelaxAnalysis();
     void updateRelaxControls();
+
+    // Grab helpers
+    // Gives the 3D view the curve on screen to grab (none if it is not a
+    // single closed curve).
+    void updateGrabCurve();
+    // Keeps the floor where it is while the rope is pulled about.
+    void fixPullBounds();
+    bool grabEnabled() const;
 
     // Unknotting animation helpers
     // Builds the animation on a worker thread; playback starts in
@@ -547,6 +565,14 @@ private:
 
     QLabel *relaxStatusLabel_ =
         nullptr;
+
+    // Grab the rope (checkable)
+    QPushButton *grabButton_ =
+        nullptr;
+
+    // the rope is held with the mouse (relax_ is pulling)
+    bool pulling_ =
+        false;
 
     QTimer *relaxTimer_ =
         nullptr;
