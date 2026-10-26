@@ -7,6 +7,7 @@
 #include "knotrelax.h"
 #include "knotseifert.h"
 #include "ropephysics.h"
+#include "sneaker.h"
 
 #include <QColor>
 #include <QComboBox>
@@ -81,6 +82,14 @@ private slots:
     // animation or a pull, several strands, or the rope could not be
     // laid down as the same knot).
     bool showRestingRope(double radius);
+
+    // The Sneaker scene takes knots of up to 7 crossings (one closed
+    // strand): larger knots do not fit on a shoe.
+    bool knotFitsSneaker() const;
+
+    // the Sneaker scene greyed out for other knots (and left for the
+    // shoelace on the floor if it was chosen)
+    void updateSneakerChoice();
 
     void updateLearnSection();
 
@@ -429,6 +438,9 @@ private:
     QVector<KnotMath::Vec3> restingFrom_;
     double restingRadius_ = 0.0;
     int restingScene_ = -1;
+
+    // the Sneaker scene: where the knot lies in the whole lace
+    Photo::TiedLace restingTied_;
 
     QPushButton *resetCameraButton_ =
         nullptr;

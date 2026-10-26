@@ -407,6 +407,21 @@ private:
     // around the knot (view factors), drawn into occlusionTexture_.
     void bakeSurfaceOcclusion();
 
+    // The Sneaker scene (sneaker.h): the shoe stands under the lace at
+    // rest (in the frame of setRestingRope's pose, scaled from mm).
+    bool showShoe() const;
+
+    // its surface and its shade on the floor onto the card (with the
+    // scene), and off again
+    void uploadShoe();
+    void destroyShoe();
+
+    // How much of the room each point of the shoe sees past the lace
+    // (view factors, as for the table), into shoeShadeBuffer_.
+    void updateShoeShade();
+
+    void drawShoe(const QMatrix4x4 &viewProjection);
+
     // height of the floor in Photo mode: right under the knot
     float photoFloorLevel() const;
 
@@ -637,6 +652,17 @@ private:
 
     // lowest point of the mesh (the view's coordinates)
     float meshBottom() const;
+
+    // the sneaker: its surface (millimetres), the lace's shade on it (one
+    // float a vertex) and the floor's view of the room past it
+    std::unique_ptr<QOpenGLShaderProgram> shoeProgram_;
+    QOpenGLVertexArrayObject shoeVao_;
+    QOpenGLBuffer shoeBuffer_;
+    QOpenGLBuffer shoeIndexBuffer_;
+    QOpenGLBuffer shoeShadeBuffer_;
+    int shoeIndexCount_ = 0;
+    bool shoeShadeDirty_ = true;
+    GLuint shoeFloorTexture_ = 0;
 };
 
 #endif // KNOTGLWIDGET_H

@@ -13,6 +13,8 @@
 #include "timelineslider.h"
 #include "unknotsummarydialog.h"
 
+#include <QStandardItemModel>
+
 #include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
@@ -266,6 +268,10 @@ MainWindow::MainWindow(
     photoSceneCombo_->addItem(
         tr("Shoelace on a sunlit floor"),
         static_cast<int>(Photo::Scene::BallroomFloor));
+
+    photoSceneCombo_->addItem(
+        tr("Tied on a sneaker"),
+        static_cast<int>(Photo::Scene::Sneaker));
 
     photoSceneCombo_->setToolTip(tr("Where the knot is photographed."));
     photoSceneCombo_->setVisible(false);
@@ -3260,6 +3266,55 @@ void MainWindow::updateInvariantPanel(
         methodologyValueLabel_->setText(
             invariants.methodology);
     }
+
+    updateSneakerChoice();
+}
+
+bool MainWindow::knotFitsSneaker() const
+{
+    if (!hasData_ || currentData_.multiStrand || !currentData_.closed ||
+        currentData_.points.size() < 4)
+    {
+        return false;
+    }
+
+    // the knot's own crossing number when it is known, else this diagram's
+    const int crossings =
+        currentInvariants_.knownCrossingNumber >= 0
+            ? currentInvariants_.knownCrossingNumber
+            : currentInvariants_.crossingNumber;
+
+    return crossings >= 0 && crossings <= 7;
+}
+
+void MainWindow::updateSneakerChoice()
+{
+    if (photoSceneCombo_ == nullptr)
+        return;
+
+    auto *model = qobject_cast<QStandardItemModel *>(photoSceneCombo_->model());
+
+    const int index = photoSceneCombo_->findData(static_cast<int>(Photo::Scene::Sneaker));
+
+    if (model == nullptr || index < 0)
+        return;
+
+    // (before the first knot every scene can be chosen)
+    const bool fits = !hasData_ || knotFitsSneaker();
+
+    QStandardItem *item = model->item(index);
+
+    item->setEnabled(fits);
+    item->setToolTip(
+        fits ? QString()
+             : tr("Only knots with up to 7 crossings can be tied on the sneaker: "
+                  "larger knots do not fit on a shoe."));
+
+    if (!fits && photoSceneCombo_->currentIndex() == index)
+    {
+        photoSceneCombo_->setCurrentIndex(
+            photoSceneCombo_->findData(static_cast<int>(Photo::Scene::BallroomFloor)));
+    }
 }
 
 void MainWindow::chooseColor()
@@ -3325,6 +3380,12 @@ bool MainWindow::showRestingRope(double radius)
 
     const Photo::RopeMaterial material = Photo::sceneInfo(scene).rope;
 
+    // tied in the sneaker's lace (only knots that fit), or on the table
+    const bool sneaker = Photo::sceneInfo(scene).sneaker;
+
+    if (sneaker && !knotFitsSneaker())
+        return false;
+
     const bool known =
         restingRope_.valid &&
         restingScene_ == static_cast<int>(scene) &&
@@ -3343,12 +3404,23 @@ bool MainWindow::showRestingRope(double radius)
     {
         QApplication::setOverrideCursor(Qt::WaitCursor);
 
-        Photo::RestingRope rope =
-            Photo::layOnTable(
+        Photo::TiedLace tied;
+
+        if (sneaker)
+        {
+            tied = Photo::tieOnSneaker(currentData_.points, radius, material);
+        }
+        else
+        {
+            tied.rope = Photo::layOnTable(
                 currentData_.points,
                 currentData_.closed,
                 radius,
                 material);
+        }
+
+        // (the lace through the eyelets is the same knot as well)
+        Photo::RestingRope rope = tied.rope;
 
         /*
          * The rope never passes through itself, so it is the same knot;
@@ -3370,6 +3442,7 @@ bool MainWindow::showRestingRope(double radius)
         QApplication::restoreOverrideCursor();
 
         restingRope_ = rope;
+        restingTied_ = tied;
         restingFrom_ = currentData_.points;
         restingRadius_ = radius;
         restingScene_ = static_cast<int>(scene);
@@ -3390,7 +3463,9 @@ bool MainWindow::showRestingRope(double radius)
 
     /*
      * The crossing numbers stay on their crossings: each is at the same
-     * place along the rope (a fraction of its length) as before.
+     * place along the rope (a fraction of its length) as before. On the
+     * sneaker the knot is a part of the lace: it starts at cutFraction of
+     * the knot, and the cut left out gapFraction of it.
      */
     const QVector<KnotMath::Vec3> &rest = restingRope_.points;
     const int n = rest.size();
@@ -3400,9 +3475,21 @@ bool MainWindow::showRestingRope(double radius)
     for (int i = 0; i < n; ++i)
         arc[i + 1] = arc.at(i) + (rest.at((i + 1) % n) - rest.at(i)).length();
 
-    auto pointAt = [&rest, &arc, n](double fraction)
+    const Photo::TiedLace &tied = restingTied_;
+    const bool inLace = sneaker && tied.knotTo > tied.knotFrom;
+
+    auto pointAt = [&rest, &arc, n, &tied, inLace](double fraction)
     {
-        const double target = (fraction - std::floor(fraction)) * arc.at(n);
+        double target = (fraction - std::floor(fraction)) * arc.at(n);
+
+        if (inLace)
+        {
+            double along = fraction - tied.cutFraction;
+
+            along = std::clamp((along - std::floor(along)) / std::max(1.0 - tied.gapFraction, 1.0e-6), 0.0, 1.0);
+
+            target = arc.at(tied.knotFrom) + along * (arc.at(tied.knotTo) - arc.at(tied.knotFrom));
+        }
 
         const int i = std::clamp(
             static_cast<int>(std::upper_bound(arc.cbegin(), arc.cend(), target) - arc.cbegin()) - 1,

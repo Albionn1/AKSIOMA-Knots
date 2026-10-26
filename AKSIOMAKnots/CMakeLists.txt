@@ -47,6 +47,8 @@ qt_add_executable(AKSIOMAKnots
     photoscene.cpp
     ropephysics.h
     ropephysics.cpp
+    sneaker.h
+    sneaker.cpp
     timelineslider.h
     timelineslider.cpp
     knottable.h
@@ -88,8 +90,9 @@ qt_add_resources(AKSIOMAKnots "knottable"
 )
 
 # Photo mode: two sunlit rooms (unclipped 4k HDRIs) and two wood surfaces
-# from Poly Haven, CC0 (data/photo/CREDITS.txt). About 70 MB, linked in as
-# binary data too.
+# from Poly Haven, CC0 (data/photo/CREDITS.txt), and the sneaker made in
+# Blender (tools/sneaker/make_sneaker.py). About 75 MB, linked in as binary
+# data too.
 qt_add_resources(AKSIOMAKnots "photo"
     PREFIX "/"
     BIG_RESOURCES
@@ -102,6 +105,9 @@ qt_add_resources(AKSIOMAKnots "photo"
         data/photo/wood_floor_worn_diff.jpg
         data/photo/wood_floor_worn_nor_gl.jpg
         data/photo/wood_floor_worn_rough.jpg
+        data/photo/sneaker.bin
+        data/photo/sneaker.json
+        data/photo/sneaker_floor.png
 )
 
 target_link_libraries(AKSIOMAKnots PRIVATE

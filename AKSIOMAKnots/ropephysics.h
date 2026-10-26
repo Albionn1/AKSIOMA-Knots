@@ -7,6 +7,8 @@
 #include <QMatrix4x4>
 #include <QVector>
 
+#include <functional>
+
 /*
  * Photo mode: a real rope does not float. It lies on the table, pulled down
  * by its own weight: every part of it rests on the table or on another part
@@ -53,6 +55,37 @@ RestingRope layOnTable(
     bool closed,
     double radius,
     const RopeMaterial &material);
+
+/*
+ * What the rope lies on, in units of its radius (y up): the height of the
+ * surface over (x, z) and its slope there (dy/dx, dy/dz). Empty: a flat
+ * table at y = 0.
+ */
+using Ground = std::function<double(double x, double z, double &slopeX, double &slopeZ)>;
+
+struct Settling
+{
+    // simulated time (seconds), steps, the fastest point at the end
+    // (millimetres per second), and whether it came to rest
+    double seconds = 0.0;
+    int steps = 0;
+    double finalSpeed = 0.0;
+    bool settled = false;
+};
+
+/*
+ * The simulation of layOnTable on its own: the rope `x` (points about half
+ * a radius apart, in units of the radius, y up) falls onto `ground` and
+ * comes to rest. Pinned points never move (a part of the rope held fast,
+ * such as a lace through the eyelets of a shoe); the free parts rest on
+ * them as on any other part of the rope.
+ */
+Settling settleRope(
+    QVector<KnotMath::Vec3> &x,
+    const QVector<bool> &pinned,
+    bool closed,
+    const RopeMaterial &material,
+    const Ground &ground);
 
 /*
  * The surface of the rope around a centre line, as it really is: three

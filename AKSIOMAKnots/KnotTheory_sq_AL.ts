@@ -68,8 +68,8 @@
         <translation>MËNYRA FOTO</translation>
     </message>
     <message>
-        <source>The rooms and surfaces of Photo mode come from &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; and are free for any use (CC0): the HDRIs Aft Lounge (Greg Zaal) and Country Club (Sergej Majboroda), the textures Wood Table Large and Wood Floor Worn (Dimitrios Savva). The rope lies down by position based dynamics (XPBD: M. Macklin, M. Müller and N. Chentanez, 2016).</source>
-        <translation>Dhomat dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): HDRI-të Aft Lounge (Greg Zaal) dhe Country Club (Sergej Majboroda), teksturat Wood Table Large dhe Wood Floor Worn (Dimitrios Savva). Litari shtrihet me dinamikë të bazuar në pozicione (XPBD: M. Macklin, M. Müller dhe N. Chentanez, 2016).</translation>
+        <source>The rooms and surfaces of Photo mode come from &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; and are free for any use (CC0): the HDRIs Aft Lounge (Greg Zaal) and Country Club (Sergej Majboroda), the textures Wood Table Large and Wood Floor Worn (Dimitrios Savva). The rope lies down by position based dynamics (XPBD: M. Macklin, M. Müller and N. Chentanez, 2016). The sneaker was made for AKSIOMA in Blender.</source>
+        <translation>Dhomat dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): HDRI-të Aft Lounge (Greg Zaal) dhe Country Club (Sergej Majboroda), teksturat Wood Table Large dhe Wood Floor Worn (Dimitrios Savva). Litari shtrihet me dinamikë të bazuar në pozicione (XPBD: M. Macklin, M. Müller dhe N. Chentanez, 2016). Atletja u bë për AKSIOMA në Blender.</translation>
     </message>
     <message>
         <source>About Qt</source>
@@ -1306,6 +1306,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Foto</translation>
     </message>
     <message>
+        <source>Tied on a sneaker</source>
+        <translation>Lidhur në një atlete</translation>
+    </message>
+    <message>
         <source>Where the knot is photographed.</source>
         <translation>Ku fotografohet nyja.</translation>
     </message>
@@ -1776,6 +1780,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>in this view; at least %1</source>
         <translation>në këtë pamje; të paktën %1</translation>
+    </message>
+    <message>
+        <source>Only knots with up to 7 crossings can be tied on the sneaker: larger knots do not fit on a shoe.</source>
+        <translation>Në atlete mund të lidhen vetëm nyjet me deri në 7 kryqëzime: nyjet më të mëdha nuk zënë vend në një këpucë.</translation>
     </message>
     <message>
         <source>Choose Tube Color</source>

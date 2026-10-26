@@ -30,6 +30,10 @@ enum class Scene
     // a braided cotton shoelace on the wooden floor of a sunlit ballroom
     BallroomFloor,
 
+    // the knot tied in the lace of a canvas sneaker on that floor
+    // (sneaker.h)
+    Sneaker,
+
     Count
 };
 
@@ -89,6 +93,12 @@ struct SceneInfo
     float environmentYaw = 0.0f;
 
     RopeMaterial rope;
+
+    // the knot is tied in the lace of the sneaker (sneaker.h)
+    bool sneaker = false;
+
+    // colour of the sneaker's canvas (sRGB)
+    QColor canvas;
 };
 
 SceneInfo sceneInfo(

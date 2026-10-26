@@ -165,6 +165,47 @@ RestingRope layOnTable(
         x[i] = Vec3(p.x(), p.y(), p.z()) / radius;
     }
 
+    const Settling settling = settleRope(x, QVector<bool>(n, false), closed, material, Ground());
+
+    result.steps = settling.steps;
+    result.seconds = settling.seconds;
+    result.finalSpeed = settling.finalSpeed;
+    result.settled = settling.settled;
+
+    // back to the knot's coordinates
+    const QMatrix4x4 back = pose.inverted();
+
+    result.points.reserve(n);
+
+    for (const Vec3 &q : x)
+    {
+        const QVector3D k = back.map(QVector3D(
+            float(q.x * radius),
+            float(q.y * radius),
+            float(q.z * radius)));
+
+        result.points.push_back(Vec3(k.x(), k.y(), k.z()));
+    }
+
+    result.valid = true;
+
+    return result;
+}
+
+Settling settleRope(
+    QVector<Vec3> &x,
+    const QVector<bool> &pinned,
+    bool closed,
+    const RopeMaterial &material,
+    const Ground &ground)
+{
+    Settling result;
+
+    const int n = x.size();
+
+    if (n < 4)
+        return result;
+
     // the true spacing along the rope (the resampling is close to even)
     const int segments = closed ? n : n - 1;
 
@@ -179,6 +220,15 @@ RestingRope layOnTable(
         h += l;
 
     h /= std::max(segments, 1);
+
+    /*
+     * Each point moves in proportion to its inverse mass: 1 for a free
+     * point (all free points weigh the same), 0 for a pinned one.
+     */
+    QVector<double> w(n);
+
+    for (int i = 0; i < n; ++i)
+        w[i] = pinned.value(i, false) ? 0.0 : 1.0;
 
     /*
      * The material in these units. Bending stiffness B = w c^3 with w = 1:
@@ -224,6 +274,12 @@ RestingRope layOnTable(
 
         for (int i = 0; i < n; ++i)
         {
+            if (w.at(i) == 0.0)
+            {
+                p[i] = x.at(i);
+                continue;
+            }
+
             v[i].y -= dt;
             v[i] *= keep;
 
@@ -242,16 +298,21 @@ RestingRope layOnTable(
             {
                 const int j = (i + 1) % n;
 
+                const double weights = w.at(i) + w.at(j);
+
+                if (weights == 0.0)
+                    continue;
+
                 const Vec3 d = p.at(j) - p.at(i);
                 const double l = d.length();
 
                 if (l < 1.0e-9)
                     continue;
 
-                const Vec3 move = d * (0.5 * (l - rest.at(i)) / l);
+                const Vec3 move = d * ((l - rest.at(i)) / l / weights);
 
-                p[i] += move;
-                p[j] -= move;
+                p[i] += move * w.at(i);
+                p[j] -= move * w.at(j);
             }
 
             /*
@@ -266,6 +327,9 @@ RestingRope layOnTable(
             {
                 const int a = (i - 1 + n) % n;
                 const int b = (i + 1) % n;
+
+                if (w.at(a) + w.at(b) + w.at(i) == 0.0)
+                    continue;
 
                 const Vec3 e1 = p.at(i) - p.at(a);
                 const Vec3 e2 = p.at(b) - p.at(i);
@@ -293,25 +357,28 @@ RestingRope layOnTable(
                 const Vec3 gb = n2 * (-1.0 / l2);
                 const Vec3 gi = (ga + gb) * -1.0;
 
-                const double inverseMass = 1.0 / h;
+                const double ma = w.at(a) / h;
+                const double mb = w.at(b) / h;
+                const double mi = w.at(i) / h;
 
                 const double denominator =
-                    inverseMass * (ga.lengthSquared() + gb.lengthSquared() + gi.lengthSquared()) +
+                    ma * ga.lengthSquared() + mb * gb.lengthSquared() + mi * gi.lengthSquared() +
                     compliance;
 
                 const double dl = -theta / denominator;
 
-                p[a] += ga * (inverseMass * dl);
-                p[b] += gb * (inverseMass * dl);
-                p[i] += gi * (inverseMass * dl);
+                p[a] += ga * (ma * dl);
+                p[b] += gb * (mb * dl);
+                p[i] += gi * (mi * dl);
             }
         }
 
         /*
          * Contacts of the rope with itself: two segments far apart along
          * the rope stay two radii apart (centre lines). The push is shared
-         * by their four points by where the closest points lie; friction
-         * takes away the sliding of the two parts against each other.
+         * by their four points by where the closest points lie (a pinned
+         * point takes none of it); friction takes away the sliding of the
+         * two parts against each other.
          */
         double minX = 1.0e30;
         double minZ = 1.0e30;
@@ -379,6 +446,10 @@ RestingRope layOnTable(
                         const int i1 = (i + 1) % n;
                         const int j1 = (j + 1) % n;
 
+                        // two pinned parts never move
+                        if (w.at(i) + w.at(i1) + w.at(j) + w.at(j1) == 0.0)
+                            continue;
+
                         double s = 0.0;
                         double t = 0.0;
 
@@ -403,14 +474,19 @@ RestingRope layOnTable(
                         const double wb0 = 1.0 - t;
                         const double wb1 = t;
 
-                        const double share = wa0 * wa0 + wa1 * wa1 + wb0 * wb0 + wb1 * wb1;
+                        const double share =
+                            w.at(i) * wa0 * wa0 + w.at(i1) * wa1 * wa1 +
+                            w.at(j) * wb0 * wb0 + w.at(j1) * wb1 * wb1;
+
+                        if (share < 1.0e-12)
+                            continue;
 
                         const Vec3 push = normal * (depth / share);
 
-                        p[i] += push * wa0;
-                        p[i1] += push * wa1;
-                        p[j] -= push * wb0;
-                        p[j1] -= push * wb1;
+                        p[i] += push * (wa0 * w.at(i));
+                        p[i1] += push * (wa1 * w.at(i1));
+                        p[j] -= push * (wb0 * w.at(j));
+                        p[j1] -= push * (wb1 * w.at(j1));
 
                         // sliding of the two parts against each other in this step
                         const Vec3 moveA =
@@ -432,41 +508,47 @@ RestingRope layOnTable(
 
                         const Vec3 hold = slide * (stop / share);
 
-                        p[i] -= hold * wa0;
-                        p[i1] -= hold * wa1;
-                        p[j] += hold * wb0;
-                        p[j1] += hold * wb1;
+                        p[i] -= hold * (wa0 * w.at(i));
+                        p[i1] -= hold * (wa1 * w.at(i1));
+                        p[j] += hold * (wb0 * w.at(j));
+                        p[j1] += hold * (wb1 * w.at(j1));
                     }
                 }
             }
         }
 
-        // the table (with friction)
+        /*
+         * The ground (with friction): a point below it goes back out along
+         * the ground's normal, by its depth below the sloping surface; its
+         * sliding along the surface in this step is held or slowed.
+         */
         for (int i = 0; i < n; ++i)
         {
-            if (p.at(i).y >= 1.0)
+            if (w.at(i) == 0.0)
                 continue;
 
-            const double depth = 1.0 - p.at(i).y;
+            double slopeX = 0.0;
+            double slopeZ = 0.0;
 
-            p[i].y = 1.0;
+            const double top = ground ? ground(p.at(i).x, p.at(i).z, slopeX, slopeZ) : 0.0;
 
-            const double sx = p.at(i).x - x.at(i).x;
-            const double sz = p.at(i).z - x.at(i).z;
-            const double amount = std::sqrt(sx * sx + sz * sz);
+            if (p.at(i).y >= top + 1.0)
+                continue;
+
+            const Vec3 normal = Vec3(-slopeX, 1.0, -slopeZ).normalized();
+            const double depth = (top + 1.0 - p.at(i).y) * normal.y;
+
+            p[i] += normal * depth;
+
+            Vec3 slide = p.at(i) - x.at(i);
+            slide -= normal * Vec3::dot(slide, normal);
+
+            const double amount = slide.length();
 
             if (amount < muSurface * depth)
-            {
-                p[i].x = x.at(i).x;
-                p[i].z = x.at(i).z;
-            }
-            else
-            {
-                const double slow = std::min(muSurface * depth / amount, 1.0);
-
-                p[i].x -= sx * slow;
-                p[i].z -= sz * slow;
-            }
+                p[i] -= slide;
+            else if (amount > 1.0e-12)
+                p[i] -= slide * std::min(muSurface * depth / amount, 1.0);
         }
 
         // velocities from the motion
@@ -477,7 +559,8 @@ RestingRope layOnTable(
             v[i] = (p.at(i) - x.at(i)) / dt;
             x[i] = p.at(i);
 
-            fastest = std::max(fastest, v.at(i).length());
+            if (w.at(i) != 0.0)
+                fastest = std::max(fastest, v.at(i).length());
         }
 
         quiet = fastest < RestSpeed ? quiet + 1 : 0;
@@ -492,23 +575,6 @@ RestingRope layOnTable(
     result.seconds = step * dt * timeUnit;
     result.finalSpeed = fastest * radiusMm / timeUnit;
     result.settled = quiet >= RestSteps;
-
-    // back to the knot's coordinates
-    const QMatrix4x4 back = pose.inverted();
-
-    result.points.reserve(n);
-
-    for (const Vec3 &q : x)
-    {
-        const QVector3D k = back.map(QVector3D(
-            float(q.x * radius),
-            float(q.y * radius),
-            float(q.z * radius)));
-
-        result.points.push_back(Vec3(k.x(), k.y(), k.z()));
-    }
-
-    result.valid = true;
 
     return result;
 }

@@ -9,3 +9,8 @@ wood_table_large_*.jpg       texture "Wood Table Large" by Dimitrios Savva
                              (4k colour and normal map, 2k roughness, re-encoded)
 wood_floor_worn_*.jpg        texture "Wood Floor Worn" by Dimitrios Savva
                              (4k colour and normal map, 2k roughness, re-encoded)
+
+The sneaker (sneaker.bin, sneaker.json, sneaker_floor.png) was made for
+AKSIOMA in Blender 5.2 by tools/sneaker/make_sneaker.py, from measurements
+(a canvas shoe, EU 43); its occlusion and its shade on the floor were baked
+with Cycles. Part of AKSIOMA, under its own licence.

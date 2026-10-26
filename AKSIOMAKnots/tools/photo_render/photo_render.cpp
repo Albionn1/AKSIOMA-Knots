@@ -2,12 +2,13 @@
 // screen and saved as a picture): a knot from the table is laid on the
 // table by the rope physics and photographed in each scene.
 //
-//   photo_render <knot name> <out folder> [width height]
+//   photo_render <knot name> <out folder> [width height [scene]]
 
 #include "knotglwidget.h"
 #include "knotmath.h"
 #include "knottable.h"
 #include "ropephysics.h"
+#include "sneaker.h"
 
 #include <QApplication>
 #include <QDir>
@@ -46,6 +47,7 @@ int main(int argc, char **argv)
     const QString folder = argc >= 3 ? QString(argv[2]) : QStringLiteral(".");
     const int width = argc >= 5 ? QString(argv[3]).toInt() : 1600;
     const int height = argc >= 5 ? QString(argv[4]).toInt() : 1000;
+    const int only = argc >= 6 ? QString(argv[5]).toInt() : -1;
 
     const KnotTable &table = KnotTable::instance();
     const int index = table.indexOf(name);
@@ -76,13 +78,20 @@ int main(int argc, char **argv)
 
     for (int k = 0; k < static_cast<int>(Photo::Scene::Count); ++k)
     {
+        if (only >= 0 && k != only)
+            continue;
+
         const auto scene = static_cast<Photo::Scene>(k);
         const Photo::RopeMaterial material = Photo::sceneInfo(scene).rope;
 
         QElapsedTimer clock;
         clock.start();
 
-        const Photo::RestingRope rope = Photo::layOnTable(curve, true, radius, material);
+        // tied in the sneaker's lace, or dropped on the table
+        const Photo::RestingRope rope =
+            Photo::sceneInfo(scene).sneaker
+                ? Photo::tieOnSneaker(curve, radius, material).rope
+                : Photo::layOnTable(curve, true, radius, material);
         const qint64 physics = clock.restart();
 
         const Mesh mesh = Photo::buildRopeMesh(rope.points, true, radius, material);

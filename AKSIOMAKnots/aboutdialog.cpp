@@ -119,7 +119,7 @@ AboutDialog::AboutDialog(QWidget *parent)
                     "and Country Club (Sergej Majboroda), the textures Wood Table "
                     "Large and Wood Floor Worn (Dimitrios Savva). The rope lies down "
                     "by position based dynamics (XPBD: M. Macklin, M. Müller and N. "
-                    "Chentanez, 2016)."))));
+                    "Chentanez, 2016). The sneaker was made for AKSIOMA in Blender."))));
 
     layout->addWidget(text, 1);
 

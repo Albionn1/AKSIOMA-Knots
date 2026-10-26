@@ -1,8 +1,10 @@
 #include "knotglwidget.h"
 
+#include "sneaker.h"
 #include "theme.h"
 
 #include <QFontMetrics>
+#include <QHash>
 #include <QHideEvent>
 #include <QImage>
 #include <QMouseEvent>
@@ -338,7 +340,10 @@ KnotGLWidget::KnotGLWidget(QWidget *parent)
       groundBuffer_(QOpenGLBuffer::VertexBuffer),
       particleBuffer_(QOpenGLBuffer::VertexBuffer),
       rng_(std::random_device{}()),
-      surfaceBuffer_(QOpenGLBuffer::VertexBuffer)
+      surfaceBuffer_(QOpenGLBuffer::VertexBuffer),
+      shoeBuffer_(QOpenGLBuffer::VertexBuffer),
+      shoeIndexBuffer_(QOpenGLBuffer::IndexBuffer),
+      shoeShadeBuffer_(QOpenGLBuffer::VertexBuffer)
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -424,6 +429,7 @@ KnotGLWidget::~KnotGLWidget()
         prefilterProgram_.reset();
         developProgram_.reset();
         occlusionProgram_.reset();
+        shoeProgram_.reset();
 
         doneCurrent();
     }
@@ -1377,6 +1383,12 @@ uniform float uFadeRadius;
 
 uniform float uReflections;
 
+// the share of the room the sneaker leaves the floor (baked in Blender),
+// over the rectangle uShoeArea (x0, z0, x1, z1)
+uniform sampler2D uShoeShade;
+uniform vec4 uShoeArea;
+uniform int uUseShoeShade;
+
 out vec4 fragColor;
 
 void main()
@@ -1411,6 +1423,19 @@ void main()
 
     // what the rope hides is replaced by the rope itself, lit by the room
     float seen = 1.0 - hidden + hidden * 0.5 * dot(uRopeAlbedo, vec3(0.2126, 0.7152, 0.0722));
+
+    if (uUseShoeShade != 0)
+    {
+        vec2 s = (vWorld.xz - uShoeArea.xy) / (uShoeArea.zw - uShoeArea.xy);
+
+        if (s.x > 0.0 && s.x < 1.0 && s.y > 0.0 && s.y < 1.0 && geometric.y > 0.5)
+        {
+            float open = texture(uShoeShade, s).r;
+
+            seen *= open;
+            hidden = 1.0 - (1.0 - hidden) * open;
+        }
+    }
 
     float sunLit = keyShadow(vWorld, geometric);
 
@@ -1753,6 +1778,218 @@ void main()
         prefilterProgram_->link();
     }
 
+    /*
+     * ---------------------------------------------------------
+     * The sneaker: woven canvas, rubber, metal eyelets and the lining,
+     * lit like the table (the sun with its shadows, the room less what
+     * the shoe itself and the lace hide from each point, the room's
+     * reflections). Positions in millimetres, scaled into the view.
+     * ---------------------------------------------------------
+     */
+
+    const char *shoeVertexShader = R"(
+#version 330 core
+
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in float aOcclusion;
+layout(location = 3) in float aMaterial;
+layout(location = 4) in float aShade;
+
+uniform mat4 uViewProjection;
+uniform float uScale;          // view units per millimetre
+
+out vec3 vWorld;
+out vec3 vMm;
+out vec3 vNormal;
+out float vOpen;
+flat out int vMaterial;
+
+void main()
+{
+    vMm = aPosition;
+    vWorld = aPosition * uScale;
+    vNormal = aNormal;
+
+    // the room seen past the shoe (baked) and past the lace
+    vOpen = aOcclusion * (1.0 - aShade);
+    vMaterial = int(aMaterial + 0.5);
+
+    gl_Position = uViewProjection * vec4(vWorld, 1.0);
+}
+)";
+
+    const char *shoeFragmentShader = R"(
+in vec3 vWorld;
+in vec3 vMm;
+in vec3 vNormal;
+in float vOpen;
+flat in int vMaterial;
+
+uniform vec3 uCameraPosition;
+uniform vec3 uCanvas;          // the canvas's colour (linear)
+uniform float uReflections;
+
+out vec4 fragColor;
+
+float ggx(float nh, float a)
+{
+    float a2 = a * a;
+    float d = nh * nh * (a2 - 1.0) + 1.0;
+
+    return a2 / (PhotoPi * d * d);
+}
+
+float smith(float nv, float nl, float a)
+{
+    float k = a * 0.5;
+
+    return 0.25 / ((nv * (1.0 - k) + k) * (nl * (1.0 - k) + k));
+}
+
+// the canvas's threads (0.5 mm apart each way, over and under), seen
+// across the face; faded out where a pixel covers several of them
+float weave(vec3 p, vec3 n, out vec2 slope)
+{
+    vec3 w = abs(n);
+    vec2 uv = w.x > w.y && w.x > w.z ? p.zy : (w.y > w.z ? p.xz : p.xy);
+
+    vec2 t = uv / 0.5;
+    vec2 f = fract(t) - 0.5;
+
+    // the thread on top in this cell: warp or weft
+    bool warp = mod(floor(t.x) + floor(t.y), 2.0) < 1.0;
+
+    float across = warp ? f.x : f.y;
+    float h = cos(3.14159 * across);
+
+    float fade = 1.0 - smoothstep(0.08, 0.3, length(fwidth(uv)));
+
+    slope = (warp ? vec2(-sin(3.14159 * f.x), 0.0) : vec2(0.0, -sin(3.14159 * f.y))) * 0.35 * fade;
+
+    return mix(1.0, 0.86 + 0.14 * h, fade);
+}
+
+void main()
+{
+    vec3 geometric = normalize(vNormal);
+    vec3 n = geometric;
+
+    vec3 v = normalize(uCameraPosition - vWorld);
+
+    // seen from inside (the lining in the opening), the face looks back
+    if (dot(n, v) < 0.0)
+        n = -n;
+
+    vec3 albedo;
+    float rough;
+    float metal = 0.0;
+    float sheen = 0.0;
+
+    // slow changes of the cloth's colour, a few millimetres across
+    float cloth = noise2(vMm.xz * 0.35 + vMm.y * 0.2) * 0.6 + noise2(vMm.xy * 1.3) * 0.4;
+
+    if (vMaterial == 0 || vMaterial == 5)
+    {
+        vec2 slope;
+        float threads = weave(vMm, geometric, slope);
+
+        albedo = uCanvas * threads * (0.9 + 0.2 * cloth);
+        rough = 0.85;
+        sheen = 0.25;
+
+        vec3 helper = abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+        vec3 t1 = normalize(cross(helper, n));
+        vec3 t2 = cross(n, t1);
+
+        n = normalize(n + t1 * slope.x + t2 * slope.y);
+    }
+    else if (vMaterial == 1)
+    {
+        // the rubber sole, with a stripe of the canvas's colour round it
+        // and a thin one above; its underside worn grey
+        albedo = vec3(0.78, 0.76, 0.71);
+        rough = 0.6;
+
+        float side = 1.0 - smoothstep(0.3, 0.6, abs(geometric.y));
+
+        if (vMm.y > 13.0 && vMm.y < 16.0 && side > 0.5)
+            albedo = uCanvas * 1.3;
+        else if (vMm.y > 17.2 && vMm.y < 18.0 && side > 0.5)
+            albedo = vec3(0.45, 0.06, 0.05);
+
+        if (geometric.y < -0.5)
+            albedo = vec3(0.35, 0.34, 0.32);
+
+        albedo *= 0.94 + 0.06 * cloth;
+    }
+    else if (vMaterial == 2)
+    {
+        // nickel-plated brass
+        albedo = vec3(0.86, 0.85, 0.82);
+        rough = 0.28;
+        metal = 1.0;
+    }
+    else if (vMaterial == 4)
+    {
+        albedo = vec3(0.80, 0.78, 0.73) * (0.95 + 0.05 * cloth);
+        rough = 0.5;
+    }
+    else
+    {
+        // the lining
+        albedo = vec3(0.42, 0.40, 0.37) * (0.9 + 0.2 * cloth);
+        rough = 0.9;
+        sheen = 0.15;
+    }
+
+    float nv = max(dot(n, v), 1.0e-3);
+
+    vec3 l = uKeyDir;
+    float nl = max(dot(n, l), 0.0);
+
+    float sunLit = keyShadow(vWorld, geometric);
+
+    vec3 f0 = mix(vec3(0.04), albedo, metal);
+    vec3 diffuse = albedo * (1.0 - metal);
+
+    // the sun
+    vec3 h = normalize(l + v);
+    float nh = max(dot(n, h), 0.0);
+    float a = max(rough * rough, 0.02);
+
+    vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
+    vec3 specular = fresnel * ggx(nh, a) * smith(nv, nl, a);
+
+    vec3 color = (diffuse / PhotoPi + specular) * uKeyIrradiance * nl * sunLit;
+
+    // the room
+    color += diffuse * roomIrradiance(n) * vOpen / PhotoPi;
+
+    vec3 r = reflect(-v, n);
+
+    color += roomSpecular(r, rough) * roomReflectance(f0, rough, nv) * vOpen * uReflections;
+
+    // the soft glow of cloth at grazing angles
+    color += sheen * pow(1.0 - nv, 4.0) * roomIrradiance(n) * vOpen * albedo * 2.0 / PhotoPi;
+
+    fragColor = vec4(color, 1.0);
+}
+)";
+
+    shoeProgram_ = std::make_unique<QOpenGLShaderProgram>();
+
+    if (shoeProgram_->addShaderFromSourceCode(QOpenGLShader::Vertex, shoeVertexShader) &&
+        shoeProgram_->addShaderFromSourceCode(QOpenGLShader::Fragment, withPhoto(shoeFragmentShader)))
+    {
+        shoeProgram_->bindAttributeLocation("aPosition", 0);
+        shoeProgram_->bindAttributeLocation("aNormal", 1);
+        shoeProgram_->bindAttributeLocation("aOcclusion", 2);
+        shoeProgram_->bindAttributeLocation("aMaterial", 3);
+        shoeProgram_->bindAttributeLocation("aShade", 4);
+        shoeProgram_->link();
+    }
+
     // the shadow map read as plain depth (no comparison)
     QOpenGLExtraFunctions *extra = context()->extraFunctions();
 
@@ -1960,6 +2197,23 @@ void KnotGLWidget::drawShadowMap()
     glDrawElements(GL_TRIANGLES, indexCount_, GL_UNSIGNED_INT, nullptr);
 
     meshVao_.release();
+
+    // the sneaker casts its shadow too (on the floor and on the lace)
+    if (showShoe())
+    {
+        QMatrix4x4 scale;
+
+        scale.scale(worldPerMm());
+
+        depthProgram_->setUniformValue("uLightViewProjection", lightViewProjection * scale);
+
+        shoeVao_.bind();
+
+        glDrawElements(GL_TRIANGLES, shoeIndexCount_, GL_UNSIGNED_INT, nullptr);
+
+        shoeVao_.release();
+    }
+
     depthProgram_->release();
 
     glDisable(GL_POLYGON_OFFSET_FILL);
@@ -2201,6 +2455,21 @@ void KnotGLWidget::computeMeshBounds()
         maximum.setX(std::max(maximum.x(), x));
         maximum.setY(std::max(maximum.y(), y));
         maximum.setZ(std::max(maximum.z(), z));
+    }
+
+    // the sneaker under the lace (its sole on the floor)
+    if (showShoe())
+    {
+        const Photo::Sneaker &shoe = Photo::sneaker();
+        const float mm = worldPerMm();
+
+        for (const QVector3D &corner : {shoe.minimum * mm, shoe.maximum * mm})
+        {
+            minimum = QVector3D(std::min(minimum.x(), corner.x()), std::min(minimum.y(), corner.y()),
+                                std::min(minimum.z(), corner.z()));
+            maximum = QVector3D(std::max(maximum.x(), corner.x()), std::max(maximum.y(), corner.y()),
+                                std::max(maximum.z(), corner.z()));
+        }
     }
 
     meshMin_ = minimum;
@@ -3488,6 +3757,7 @@ void KnotGLWidget::paintGL()
 
         drawPhotoBackground(projection * view);
         drawPhotoFloor(projection * view);
+        drawShoe(projection * view * model);
         drawMesh(model, view, projection);
 
         developPhotoFrame(view, projection);
@@ -3954,7 +4224,8 @@ void KnotGLWidget::wheelEvent(QWheelEvent *event)
 
     distance_ *= static_cast<float>(std::pow(0.88, delta));
 
-    distance_ = std::clamp(distance_, 2.2f, 30.0f);
+    // the whole sneaker needs more room
+    distance_ = std::clamp(distance_, 2.2f, showShoe() ? 90.0f : 30.0f);
 
     emit cameraChanged(yaw_, pitch_, distance_);
 
@@ -4051,6 +4322,105 @@ void KnotGLWidget::resetCamera(float highestPitch, bool animate)
     if (samples < 3)
     {
         flyCameraTo(35.0f, 18.0f, 8.0f, QVector3D(0.0f, 0.0f, 0.0f));
+
+        return;
+    }
+
+    /*
+     * The sneaker: the knot and the lacing with the shoe around them, from
+     * above the front of its outer side (steeper than a table: the knot
+     * lies on top of the shoe).
+     */
+    if (showShoe())
+    {
+        const Photo::Sneaker &shoe = Photo::sneaker();
+        const float mm = worldPerMm();
+
+        const float yaw = 38.0f;
+        const float pitch = 55.0f;
+
+        const float pr = qDegreesToRadians(pitch);
+        const float yr = qDegreesToRadians(yaw);
+
+        const QVector3D toCamera(std::cos(pr) * std::sin(yr), std::sin(pr), std::cos(pr) * std::cos(yr));
+
+        const QVector3D right = QVector3D::crossProduct(-toCamera, QVector3D(0.0f, 1.0f, 0.0f)).normalized();
+        const QVector3D up = QVector3D::crossProduct(right, -toCamera);
+
+        // the lace, and the shoe within a few centimetres of it
+        QVector<QVector3D> points;
+
+        QVector3D low(1e30f, 1e30f, 1e30f);
+        QVector3D high(-1e30f, -1e30f, -1e30f);
+
+        for (int i = 0; i + 2 < mesh_.positions.size(); i += 3 * 37)
+        {
+            const QVector3D p(mesh_.positions.at(i), mesh_.positions.at(i + 1), mesh_.positions.at(i + 2));
+
+            points.push_back(p);
+
+            low = QVector3D(std::min(low.x(), p.x()), std::min(low.y(), p.y()), std::min(low.z(), p.z()));
+            high = QVector3D(std::max(high.x(), p.x()), std::max(high.y(), p.y()), std::max(high.z(), p.z()));
+        }
+
+        const float margin = 30.0f * mm;
+
+        const int count = shoe.vertices.size() / Photo::Sneaker::VertexFloats;
+
+        for (int i = 0; i < count; i += 23)
+        {
+            const float *v = shoe.vertices.constData() + i * Photo::Sneaker::VertexFloats;
+            const QVector3D p = QVector3D(v[0], v[1], v[2]) * mm;
+
+            if (p.x() > low.x() - margin && p.x() < high.x() + margin &&
+                p.z() > low.z() - margin && p.z() < high.z() + margin)
+            {
+                points.push_back(p);
+            }
+        }
+
+        QVector3D centre = 0.5f * (low + high);
+
+        float minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f;
+
+        for (const QVector3D &p : points)
+        {
+            const QVector3D d = p - centre;
+
+            minX = std::min(minX, QVector3D::dotProduct(d, right));
+            maxX = std::max(maxX, QVector3D::dotProduct(d, right));
+            minY = std::min(minY, QVector3D::dotProduct(d, up));
+            maxY = std::max(maxY, QVector3D::dotProduct(d, up));
+        }
+
+        centre += right * (0.5f * (minX + maxX)) + up * (0.5f * (minY + maxY));
+
+        constexpr float ShoeFill = 0.75f;
+
+        const float aspect =
+            height() > 0 ? static_cast<float>(width()) / static_cast<float>(height()) : 1.0f;
+
+        const float tanY = std::tan(qDegreesToRadians(FieldOfView * 0.5f)) * ShoeFill;
+        const float tanX = tanY * aspect;
+
+        float distance = 0.0f;
+
+        for (const QVector3D &p : points)
+        {
+            const QVector3D d = p - centre;
+            const float depth = QVector3D::dotProduct(d, toCamera);
+
+            distance = std::max(distance, depth + std::abs(QVector3D::dotProduct(d, right)) / tanX);
+            distance = std::max(distance, depth + std::abs(QVector3D::dotProduct(d, up)) / tanY);
+        }
+
+        flyCameraTo(yaw, pitch, std::clamp(distance, 2.2f, 90.0f), centre);
+
+        if (!animate)
+        {
+            flightProgress_ = 1.0f;
+            advanceCameraFlight(0.0f);
+        }
 
         return;
     }
@@ -4440,6 +4810,7 @@ void KnotGLWidget::setRestingRope(const KnotMath::Mesh &mesh, const QMatrix4x4 &
 
     surfaceDirty_ = true;
     occlusionDirty_ = true;
+    shoeShadeDirty_ = true;
 
     refreshPose();
 }
@@ -4850,6 +5221,10 @@ bool KnotGLWidget::loadPhotoScene()
         return false;
     }
 
+    // the sneaker (its scene only)
+    if (photoInfo_.sneaker)
+        uploadShoe();
+
     loadedScene_ = static_cast<int>(photoScene_);
 
     surfaceDirty_ = true;
@@ -4874,6 +5249,8 @@ void KnotGLWidget::destroyPhotoResources()
         glDeleteFramebuffers(1, &occlusionFramebuffer_);
 
     occlusionFramebuffer_ = 0;
+
+    destroyShoe();
 
     loadedScene_ = -1;
     photoBytes_ = 0;
@@ -5287,6 +5664,278 @@ void KnotGLWidget::bakeSurfaceOcclusion()
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
 }
 
+bool KnotGLWidget::showShoe() const
+{
+    return photo_ && photoInfo_.sneaker && restingRope_ && shoeIndexCount_ > 0;
+}
+
+void KnotGLWidget::uploadShoe()
+{
+    destroyShoe();
+
+    const Photo::Sneaker &shoe = Photo::sneaker();
+
+    if (!shoe.valid || !shoeProgram_ || !shoeProgram_->isLinked())
+        return;
+
+    const int vertexCount = shoe.vertices.size() / Photo::Sneaker::VertexFloats;
+
+    shoeVao_.create();
+    shoeVao_.bind();
+
+    shoeBuffer_.create();
+    shoeBuffer_.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    shoeBuffer_.bind();
+    shoeBuffer_.allocate(shoe.vertices.constData(), static_cast<int>(shoe.vertices.size() * sizeof(float)));
+
+    const int stride = static_cast<int>(Photo::Sneaker::VertexFloats * sizeof(float));
+
+    shoeProgram_->bind();
+
+    shoeProgram_->enableAttributeArray(0);
+    shoeProgram_->setAttributeBuffer(0, GL_FLOAT, 0, 3, stride);
+    shoeProgram_->enableAttributeArray(1);
+    shoeProgram_->setAttributeBuffer(1, GL_FLOAT, static_cast<int>(3 * sizeof(float)), 3, stride);
+    shoeProgram_->enableAttributeArray(2);
+    shoeProgram_->setAttributeBuffer(2, GL_FLOAT, static_cast<int>(6 * sizeof(float)), 1, stride);
+    shoeProgram_->enableAttributeArray(3);
+    shoeProgram_->setAttributeBuffer(3, GL_FLOAT, static_cast<int>(7 * sizeof(float)), 1, stride);
+
+    // the lace's shade: none until the lace is there
+    shoeShadeBuffer_.create();
+    shoeShadeBuffer_.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+    shoeShadeBuffer_.bind();
+
+    const QVector<float> open(vertexCount, 0.0f);
+
+    shoeShadeBuffer_.allocate(open.constData(), static_cast<int>(open.size() * sizeof(float)));
+
+    shoeProgram_->enableAttributeArray(4);
+    shoeProgram_->setAttributeBuffer(4, GL_FLOAT, 0, 1, static_cast<int>(sizeof(float)));
+
+    shoeProgram_->release();
+
+    shoeIndexBuffer_.create();
+    shoeIndexBuffer_.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    shoeIndexBuffer_.bind();
+    shoeIndexBuffer_.allocate(shoe.indices.constData(), static_cast<int>(shoe.indices.size() * sizeof(quint32)));
+
+    shoeVao_.release();
+
+    shoeBuffer_.release();
+    shoeShadeBuffer_.release();
+    shoeIndexBuffer_.release();
+
+    shoeIndexCount_ = shoe.indices.size();
+    shoeShadeDirty_ = true;
+
+    photoBytes_ += static_cast<qint64>(shoe.vertices.size() + vertexCount) * 4 +
+                   static_cast<qint64>(shoe.indices.size()) * 4;
+
+    // the floor's view of the room past the shoe (one channel is enough;
+    // it lies over a rectangle, not repeated)
+    shoeFloorTexture_ = loadTexture(shoe.floorShade);
+
+    if (shoeFloorTexture_ != 0)
+    {
+        glBindTexture(GL_TEXTURE_2D, shoeFloorTexture_);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+}
+
+void KnotGLWidget::destroyShoe()
+{
+    if (shoeVao_.isCreated())
+        shoeVao_.destroy();
+
+    for (QOpenGLBuffer *buffer : {&shoeBuffer_, &shoeIndexBuffer_, &shoeShadeBuffer_})
+    {
+        if (buffer->isCreated())
+            buffer->destroy();
+    }
+
+    if (shoeFloorTexture_ != 0)
+        glDeleteTextures(1, &shoeFloorTexture_);
+
+    shoeFloorTexture_ = 0;
+    shoeIndexCount_ = 0;
+}
+
+void KnotGLWidget::updateShoeShade()
+{
+    shoeShadeDirty_ = false;
+
+    if (!shoeShadeBuffer_.isCreated())
+        return;
+
+    const Photo::Sneaker &shoe = Photo::sneaker();
+    const int vertexCount = shoe.vertices.size() / Photo::Sneaker::VertexFloats;
+
+    QVector<float> hidden(vertexCount, 0.0f);
+
+    const int samples = mesh_.centerline.size() / 4;
+
+    if (samples >= 3 && restingRope_)
+    {
+        /*
+         * The lace's centre line in millimetres, in pieces of about 0.4
+         * radii, sorted into cubes of the reach of their shade. Each point
+         * of the shoe adds up the view factors of the pieces near it,
+         *     dF = 2 r |s x d| max(n . d, 0) ds / (pi D^2)
+         * (as for the table, bakeSurfaceOcclusion).
+         */
+        const float mm = worldPerMm();
+        const double r = 0.5 * photoInfo_.rope.diameterMm;
+
+        const float length = mesh_.strandLength.isEmpty() ? 0.0f : mesh_.strandLength.first();
+        const int wanted = std::clamp(static_cast<int>(length / (0.4f * mesh_.centerline.at(3))), 16, 8192);
+        const int stride = std::max(1, samples / wanted);
+
+        QVector<KnotMath::Vec3> line;
+
+        for (int s = 0; s < samples; s += stride)
+        {
+            line.push_back(KnotMath::Vec3(
+                mesh_.centerline.at(4 * s) / mm,
+                mesh_.centerline.at(4 * s + 1) / mm,
+                mesh_.centerline.at(4 * s + 2) / mm));
+        }
+
+        const int pieces = line.size();
+        const double reach = 12.0 * r;
+
+        struct Piece
+        {
+            KnotMath::Vec3 middle;
+            KnotMath::Vec3 along;
+        };
+
+        QHash<qint64, QVector<Piece>> cubes;
+
+        auto key = [reach](const KnotMath::Vec3 &p)
+        {
+            const qint64 i = static_cast<qint64>(std::floor(p.x / reach)) + 1000;
+            const qint64 j = static_cast<qint64>(std::floor(p.y / reach)) + 1000;
+            const qint64 k = static_cast<qint64>(std::floor(p.z / reach)) + 1000;
+
+            return (i * 4096 + j) * 4096 + k;
+        };
+
+        for (int i = 0; i < pieces; ++i)
+        {
+            const KnotMath::Vec3 a = line.at(i);
+            const KnotMath::Vec3 b = line.at((i + 1) % pieces);
+
+            cubes[key((a + b) * 0.5)].push_back(Piece{(a + b) * 0.5, b - a});
+        }
+
+        for (int v = 0; v < vertexCount; ++v)
+        {
+            const float *f = shoe.vertices.constData() + v * Photo::Sneaker::VertexFloats;
+
+            const KnotMath::Vec3 p(f[0], f[1], f[2]);
+            const KnotMath::Vec3 n(f[3], f[4], f[5]);
+
+            const qint64 i0 = static_cast<qint64>(std::floor(p.x / reach)) + 1000;
+            const qint64 j0 = static_cast<qint64>(std::floor(p.y / reach)) + 1000;
+            const qint64 k0 = static_cast<qint64>(std::floor(p.z / reach)) + 1000;
+
+            double sum = 0.0;
+
+            for (qint64 i = i0 - 1; i <= i0 + 1; ++i)
+            {
+                for (qint64 j = j0 - 1; j <= j0 + 1; ++j)
+                {
+                    for (qint64 k = k0 - 1; k <= k0 + 1; ++k)
+                    {
+                        const auto found = cubes.constFind((i * 4096 + j) * 4096 + k);
+
+                        if (found == cubes.constEnd())
+                            continue;
+
+                        for (const Piece &piece : *found)
+                        {
+                            KnotMath::Vec3 d = piece.middle - p;
+
+                            const double distance = d.length();
+
+                            if (distance > reach || distance < 1.0e-9)
+                                continue;
+
+                            d = d / distance;
+
+                            const double facing = KnotMath::Vec3::dot(n, d);
+
+                            if (facing <= 0.0)
+                                continue;
+
+                            const double ds = piece.along.length();
+
+                            if (ds < 1.0e-12)
+                                continue;
+
+                            const double sine = KnotMath::Vec3::cross(piece.along / ds, d).length();
+                            const double clamped = std::max(distance, 1.2 * r);
+
+                            sum += 2.0 * r * sine * facing * ds / (3.14159265 * clamped * clamped);
+                        }
+                    }
+                }
+            }
+
+            hidden[v] = float(std::min(sum, 0.9));
+        }
+    }
+
+    shoeShadeBuffer_.bind();
+    shoeShadeBuffer_.write(0, hidden.constData(), static_cast<int>(hidden.size() * sizeof(float)));
+    shoeShadeBuffer_.release();
+}
+
+void KnotGLWidget::drawShoe(const QMatrix4x4 &viewProjection)
+{
+    if (!showShoe())
+        return;
+
+    if (shoeShadeDirty_)
+        updateShoeShade();
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+
+    // the lining is seen from inside: both sides
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+
+    shoeProgram_->bind();
+
+    setShadowUniforms(*shoeProgram_, lighting_.knotShadows);
+    setPhotoUniforms(*shoeProgram_);
+
+    shoeProgram_->setUniformValue("uViewProjection", viewProjection);
+    shoeProgram_->setUniformValue("uScale", worldPerMm());
+    shoeProgram_->setUniformValue("uCameraPosition", computeCameraPosition() + panOffset_);
+    shoeProgram_->setUniformValue("uReflections", lighting_.reflections ? 1.0f : 0.0f);
+
+    const QColor canvas = photoInfo_.canvas;
+
+    shoeProgram_->setUniformValue(
+        "uCanvas",
+        QVector3D(
+            std::pow(static_cast<float>(canvas.redF()), 2.2f),
+            std::pow(static_cast<float>(canvas.greenF()), 2.2f),
+            std::pow(static_cast<float>(canvas.blueF()), 2.2f)));
+
+    shoeVao_.bind();
+
+    glDrawElements(GL_TRIANGLES, shoeIndexCount_, GL_UNSIGNED_INT, nullptr);
+
+    shoeVao_.release();
+    shoeProgram_->release();
+}
+
 void KnotGLWidget::drawPhotoBackground(const QMatrix4x4 &viewProjection)
 {
     if (!photoBackgroundProgram_ || !photoBackgroundProgram_->isLinked() ||
@@ -5393,6 +6042,25 @@ void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
     photoFloorProgram_->setUniformValue("uFadeRadius", fade);
 
     photoFloorProgram_->setUniformValue("uReflections", lighting_.reflections ? 1.0f : 0.0f);
+
+    // the sneaker's shade
+    const bool shoeShade = showShoe() && shoeFloorTexture_ != 0;
+
+    glActiveTexture(GL_TEXTURE9);
+    glBindTexture(GL_TEXTURE_2D, shoeShade ? shoeFloorTexture_ : 0);
+    glActiveTexture(GL_TEXTURE0);
+
+    photoFloorProgram_->setUniformValue("uShoeShade", 9);
+    photoFloorProgram_->setUniformValue("uUseShoeShade", shoeShade ? 1 : 0);
+
+    if (shoeShade)
+    {
+        const QRectF area = Photo::sneaker().floorArea;
+
+        photoFloorProgram_->setUniformValue(
+            "uShoeArea",
+            QVector4D(float(area.left()), float(area.top()), float(area.right()), float(area.bottom())) * mm);
+    }
 
     surfaceVao_.bind();
 

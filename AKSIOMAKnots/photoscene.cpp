@@ -680,6 +680,31 @@ SceneInfo sceneInfo(Scene scene)
 
     switch (scene)
     {
+    case Scene::Sneaker:
+        // the ballroom's floor, a navy canvas sneaker on it
+        info.environment = QStringLiteral(":/data/photo/country_club_4k.hdr");
+        info.cameraHeightM = 1.6;
+        info.roomRadiusM = 9.0;
+
+        info.surfaceColor = QStringLiteral(":/data/photo/wood_floor_worn_diff.jpg");
+        info.surfaceNormal = QStringLiteral(":/data/photo/wood_floor_worn_nor_gl.jpg");
+        info.surfaceRoughness = QStringLiteral(":/data/photo/wood_floor_worn_rough.jpg");
+        info.surfaceTileMm = 2000.0;
+
+        // a white braided cotton lace, 4.5 mm (it fits the eyelets); it
+        // holds on the canvas a little better than on the floor
+        info.rope.construction = 2;
+        info.rope.diameterMm = 4.5;
+        info.rope.bendingLengthMm = 20.0;
+        info.rope.frictionSurface = 0.6;
+        info.rope.frictionSelf = 0.5;
+        info.rope.color = QColor(240, 238, 232);
+        info.rope.roughness = 0.8f;
+
+        info.sneaker = true;
+        info.canvas = QColor(28, 38, 66);
+        break;
+
     case Scene::BallroomFloor:
         // a Victorian ballroom in the morning sun: tall windows, a worn
         // board floor
