@@ -4,6 +4,7 @@
 
 #include <QFontMetrics>
 #include <QHideEvent>
+#include <QImage>
 #include <QMouseEvent>
 #include <QOpenGLContext>
 #include <QOpenGLExtraFunctions>
@@ -30,6 +31,14 @@
 #define GL_MULTISAMPLE 0x809D
 #endif
 
+#ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
+#define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
+#endif
+
+#ifndef GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
+#define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
+#endif
+
 #ifndef GL_DEPTH_COMPONENT24
 #define GL_DEPTH_COMPONENT24 0x81A6
 #endif
@@ -54,6 +63,13 @@ constexpr float NearPlane = 0.1f;
 constexpr float FarPlane = 100.0f;
 
 constexpr int MaxParticles = 120;
+
+// side of the shadow map in Photo mode
+constexpr int PhotoShadowMapSize = 4096;
+
+// the room blurred for roughness 0, 0.2, .. 1 (mip levels of one texture)
+constexpr int SpecularLevels = 6;
+constexpr int SpecularWidth = 512;
 
 // Spacing between the ground grid lines and half size of the grid.
 constexpr int GridHalfLines = 10;
@@ -83,6 +99,15 @@ uniform int uShadows;
 uniform float uShadowTexel;     // one texel of the map, in world units
 uniform float uShadowSoftness;  // radius of the soft edge, in map units
 uniform float uShadowDepthBias; // depth change across it on a 45 degree slope
+
+// Photo mode: contact-hardening shadows (PCSS). The edge is sharp where
+// the rope touches the floor and softer the farther the shadow falls,
+// like the shadow of a window or a lamp of some size.
+uniform sampler2D uShadowDepth; // the same map, read as plain depth
+uniform int uPcss;
+uniform float uLightTan;        // tangent of the light's angular radius
+uniform float uDepthRange;      // world units per unit of map depth
+uniform float uMapWorld;        // world units across the map
 
 const vec2 Disk[16] = vec2[16](
     vec2(-0.942, -0.399), vec2(0.946, -0.769), vec2(-0.094, -0.929), vec2(0.345, 0.294),
@@ -116,16 +141,138 @@ float keyShadow(vec3 p, vec3 n)
         fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     mat2 turn = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
 
-    for (int i = 0; i < 16; ++i)
-        lit += texture(uShadowMap, vec3(c.xy + turn * Disk[i] * uShadowSoftness, depth));
+    if (uPcss == 0)
+    {
+        for (int i = 0; i < 16; ++i)
+            lit += texture(uShadowMap, vec3(c.xy + turn * Disk[i] * uShadowSoftness, depth));
 
-    return lit / 16.0;
+        return lit / 16.0;
+    }
+
+    // What lies between the point and the light: the average depth of the
+    // blockers within the widest penumbra the point can have.
+    float search = clamp(uLightTan * c.z * uDepthRange / uMapWorld, 2.0 * uShadowSoftness, 0.06);
+
+    float blockers = 0.0;
+    float found = 0.0;
+
+    for (int i = 0; i < 16; ++i)
+    {
+        float d = texture(uShadowDepth, c.xy + turn * Disk[i] * search).r;
+
+        if (d < depth)
+        {
+            blockers += d;
+            found += 1.0;
+        }
+    }
+
+    if (found == 0.0)
+        return 1.0;
+
+    // the penumbra grows with the distance from the blocker
+    float gap = (depth - blockers / found) * uDepthRange;
+    float radius = clamp(gap * uLightTan / uMapWorld, uShadowSoftness, search);
+
+    mat2 eighth = mat2(0.7071, 0.7071, -0.7071, 0.7071);
+
+    for (int i = 0; i < 16; ++i)
+    {
+        lit += texture(uShadowMap, vec3(c.xy + turn * Disk[i] * radius, depth));
+        lit += texture(uShadowMap, vec3(c.xy + turn * eighth * Disk[i] * (0.5 * radius), depth));
+    }
+
+    return lit / 32.0;
+}
+)";
+
+// Photo mode, shared by the knot, the floor and the background: the room
+// (a 360 degree photograph), its light, and the camera's exposure.
+const char *PhotoGlsl = R"(
+uniform int uPhoto;
+uniform sampler2D uEnvironment;  // the room, with mipmaps
+uniform sampler2D uSpecular;     // the room blurred for roughness r: mip level 5 r
+uniform mat3 uEnvRotation;       // view -> room
+uniform vec3 uIrradiance[9];     // the room's light without its main light (harmonics)
+uniform vec3 uKeyIrradiance;     // the main light
+uniform float uKeySize;          // its size (widens its highlight)
+uniform vec3 uFloorBounce;       // light thrown back up by the surface under the knot
+uniform float uPhotoExposure;
+
+const float PhotoPi = 3.14159265;
+
+// where direction d (in the view) is in the picture of the room
+vec2 roomUv(vec3 d)
+{
+    vec3 e = normalize(uEnvRotation * d);
+
+    return vec2(0.5 + atan(e.x, -e.z) / (2.0 * PhotoPi),
+                acos(clamp(e.y, -1.0, 1.0)) / PhotoPi);
+}
+
+// Light of the room (without its main light) falling on a surface facing
+// n. Below the horizon the room's own floor is replaced by the surface
+// under the knot.
+vec3 roomIrradiance(vec3 n)
+{
+    vec3 e = uEnvRotation * n;
+
+    vec3 c = uIrradiance[0] * 0.282095
+           + uIrradiance[1] * (0.488603 * e.y)
+           + uIrradiance[2] * (0.488603 * e.z)
+           + uIrradiance[3] * (0.488603 * e.x)
+           + uIrradiance[4] * (1.092548 * e.x * e.y)
+           + uIrradiance[5] * (1.092548 * e.y * e.z)
+           + uIrradiance[6] * (0.315392 * (3.0 * e.z * e.z - 1.0))
+           + uIrradiance[7] * (1.092548 * e.x * e.z)
+           + uIrradiance[8] * (0.546274 * (e.x * e.x - e.y * e.y));
+
+    return mix(max(c, vec3(0.0)), uFloorBounce, smoothstep(0.0, 0.8, -n.y));
+}
+
+// The room in direction d as a surface of (perceptual) roughness r sees it.
+vec3 roomSpecular(vec3 d, float r)
+{
+    vec3 c = textureLod(uSpecular, roomUv(d), 5.0 * clamp(r, 0.0, 1.0)).rgb;
+
+    return mix(c, uFloorBounce / PhotoPi, smoothstep(0.02, -0.15, d.y));
+}
+
+// How much of the room a surface reflects (an analytic fit of the
+// split-sum table, after Karis).
+vec3 roomReflectance(vec3 f0, float r, float nv)
+{
+    const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
+    const vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
+
+    vec4 k = r * c0 + c1;
+    float a004 = min(k.x * k.x, exp2(-9.28 * nv)) * k.x + k.y;
+    vec2 ab = vec2(-1.04, 1.04) * a004 + k.zw;
+
+    return f0 * ab.x + ab.y;
+}
+
+// filmic tone mapping (ACES fit), display gamma and a trace of noise
+// against banding
+vec4 develop(vec3 c)
+{
+    c = (c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14);
+    c = pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));
+
+    float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+
+    return vec4(c + (noise - 0.5) / 255.0, 1.0);
 }
 )";
 
 QByteArray withShadows(const char *body)
 {
     return QByteArray("#version 330 core\n") + ShadowGlsl + body;
+}
+
+QByteArray withPhoto(const char *body)
+{
+    return QByteArray("#version 330 core\n") + ShadowGlsl + PhotoGlsl + body;
 }
 
 } // namespace
@@ -200,11 +347,19 @@ KnotGLWidget::~KnotGLWidget()
         if (shadowTexture_ != 0)
             glDeleteTextures(1, &shadowTexture_);
 
+        destroyPhotoResources();
+
+        if (depthSampler_ != 0)
+            context()->extraFunctions()->glDeleteSamplers(1, &depthSampler_);
+
         meshProgram_.reset();
         backgroundProgram_.reset();
         flatProgram_.reset();
         shadowProgram_.reset();
         depthProgram_.reset();
+        photoBackgroundProgram_.reset();
+        photoFloorProgram_.reset();
+        prefilterProgram_.reset();
 
         doneCurrent();
     }
@@ -237,6 +392,7 @@ void KnotGLWidget::initializeGL()
     glClearColor(0.0235f, 0.0235f, 0.0235f, 1.0f);
 
     initializeShaders();
+    initializePhotoShaders();
     initializeShadowMap();
     initializeFlatBuffers();
 
@@ -543,6 +699,34 @@ void main()
         s.sheen = 0.5 * albedo * mix(0.6, 1.0, fibres);
         s.sheenRough = 0.7;
     }
+    else if (uMaterial == 4)
+    {
+        // Braided lace: eight yarns spiral one way round the tube and eight
+        // the other way, passing over and under each other in turn (a
+        // plain weave). Integer multiples of the angles keep it seamless.
+        float around = atan(vTexcoord.y, vTexcoord.x);
+        float along = atan(vTexcoord.w, vTexcoord.z);
+
+        float one = (8.0 * around + 16.0 * along) / (2.0 * PI);
+        float other = (8.0 * around - 16.0 * along) / (2.0 * PI);
+
+        // which yarn is on top here: they take turns from cell to cell
+        bool oneOnTop = mod(floor(one) + floor(other), 2.0) < 1.0;
+
+        float across = oneOnTop ? fract(one) : fract(other);
+        float lengthwise = oneOnTop ? other : one;
+
+        // round profile of the yarn on top, its fibres lengthwise
+        float bulge = sqrt(max(sin(PI * across), 0.0));
+        float fibres = 0.5 + 0.5 * cos(2.0 * PI * 5.0 * across + 0.7 * lengthwise);
+
+        albedo *= mix(0.45, 1.0, bulge) * mix(0.88, 1.0, fibres);
+        ao *= mix(0.55, 1.0, bulge);
+
+        // cotton: matte, with a soft sheen at grazing angles
+        s.sheen = 0.6 * mix(albedo, vec3(1.0), 0.2);
+        s.sheenRough = 0.6;
+    }
 
     // Where the normal turns quickly across a pixel (thin or far tubes) a
     // sharp highlight would flicker; it is widened to what the pixel sees.
@@ -559,6 +743,56 @@ void main()
     s.metal = metal;
 
     float keyLit = keyShadow(vWorldPosition, geometric);
+
+    if (uPhoto != 0)
+    {
+        /*
+         * Photo mode: lit by the room. Its main light gives the diffuse
+         * light, the sheen and the shadows (its reflection is part of the
+         * room's picture), the rest of the room the soft light from every
+         * side and the reflections.
+         */
+        Surface matte = s;
+
+        matte.f0 = vec3(0.0);
+        matte.coat = 0.0;
+
+        vec3 photo = directLight(n, v, uKeyDir, uKeyIrradiance * keyLit, uKeySize, matte);
+
+        photo *= mix(1.0, ao, 0.6);
+
+        photo += roomIrradiance(n) * albedo * (1.0 - metal) * ao / PI;
+
+        // a little of the main light shines through the sheet from behind
+        if (sheet)
+        {
+            float behind = max(dot(-geometric, uKeyDir), 0.0);
+
+            photo += albedo * uKeyIrradiance * (0.08 * behind / PI) *
+                     keyShadow(vWorldPosition, -geometric);
+        }
+
+        float pnv = max(dot(n, v), 1.0e-3);
+        vec3 pr = reflect(-v, n);
+
+        float occluded = clamp(pow(pnv + ao, exp2(-16.0 * a - 1.0)) - 1.0 + ao, 0.0, 1.0);
+
+        // the reflection of the main light is shadowed with it
+        occluded *= mix(1.0, keyLit, pow(max(dot(pr, uKeyDir), 0.0), 4.0));
+
+        float coatRoom = s.coat * (0.04 + 0.96 * pow(1.0 - pnv, 5.0));
+
+        float perceptual = sqrt(a);
+
+        photo += roomSpecular(pr, perceptual) * roomReflectance(s.f0, perceptual, pnv) *
+                 occluded * (1.0 - coatRoom) * uReflections;
+
+        photo += roomSpecular(pr, sqrt(s.coatA)) * coatRoom * occluded * uReflections;
+
+        fragColor = develop(photo * (uPhotoExposure * uExposure));
+
+        return;
+    }
 
     // direct light, partly shaded where strands are close (depth cue)
     vec3 color = vec3(0.0);
@@ -619,7 +853,7 @@ void main()
     meshOk = meshOk &&
              meshProgram_->addShaderFromSourceCode(
                  QOpenGLShader::Fragment,
-                 withShadows(meshFragmentShader));
+                 withPhoto(meshFragmentShader));
 
     if (meshOk)
     {
@@ -870,6 +1104,303 @@ void main()
     }
 }
 
+void KnotGLWidget::initializePhotoShaders()
+{
+    // one full-screen triangle, 0..1 across the screen
+    const char *screenVertexShader = R"(
+#version 330 core
+
+out vec2 vUv;
+
+void main()
+{
+    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+
+    vUv = p;
+    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+)";
+
+    /*
+     * ---------------------------------------------------------
+     * The room behind the knot, a little out of focus
+     * ---------------------------------------------------------
+     */
+
+    const char *backgroundFragmentShader = R"(
+in vec2 vUv;
+
+uniform mat4 uInverseViewProjection;
+uniform float uBlur;      // mip level: how far out of focus
+uniform float uExposure;
+
+out vec4 fragColor;
+
+void main()
+{
+    vec2 ndc = vUv * 2.0 - 1.0;
+
+    vec4 near = uInverseViewProjection * vec4(ndc, -1.0, 1.0);
+    vec4 far = uInverseViewProjection * vec4(ndc, 1.0, 1.0);
+
+    vec3 d = normalize(far.xyz / far.w - near.xyz / near.w);
+
+    vec3 c = textureLod(uEnvironment, roomUv(d), uBlur).rgb;
+
+    fragColor = develop(c * (uPhotoExposure * uExposure));
+}
+)";
+
+    photoBackgroundProgram_ = std::make_unique<QOpenGLShaderProgram>();
+
+    if (photoBackgroundProgram_->addShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
+        photoBackgroundProgram_->addShaderFromSourceCode(QOpenGLShader::Fragment,
+                                                         withPhoto(backgroundFragmentShader)))
+    {
+        photoBackgroundProgram_->link();
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * The surface under the knot: a large square of wood (colour, normal
+     * and roughness pictures) lit by the room, with the main light's
+     * shadow and a soft contact shadow under the rope. Far from the knot
+     * it goes out of focus like in a photograph and fades into the room.
+     * ---------------------------------------------------------
+     */
+
+    const char *floorVertexShader = R"(
+#version 330 core
+
+uniform mat4 uViewProjection;
+uniform vec3 uCentre;
+uniform float uHalf;
+
+out vec3 vWorld;
+
+void main()
+{
+    const vec2 corners[6] = vec2[6](
+        vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0),
+        vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0));
+
+    vec2 c = corners[gl_VertexID];
+
+    vWorld = uCentre + vec3(c.x * uHalf, 0.0, c.y * uHalf);
+
+    gl_Position = uViewProjection * vec4(vWorld, 1.0);
+}
+)";
+
+    const char *floorFragmentShader = R"(
+in vec3 vWorld;
+
+uniform sampler2D uFloorColor;
+uniform sampler2D uFloorNormal;
+uniform sampler2D uFloorRoughness;
+
+uniform float uTile;          // world units per picture
+uniform vec3 uCameraPosition;
+uniform float uFocus;         // distance to the knot (in focus)
+
+// soft contact shadow: x, z, blur (sigma), weight of each point of the rope
+uniform vec4 uPoints[96];
+uniform int uCount;
+uniform float uContact;
+
+uniform vec2 uFadeCentre;
+uniform float uFadeRadius;
+
+uniform float uExposure;
+uniform float uReflections;
+
+out vec4 fragColor;
+
+void main()
+{
+    vec2 uv = vWorld.xz / uTile;
+
+    // depth of field: sharp at the knot, blurred far in front and behind
+    float away = length(uCameraPosition - vWorld);
+    float blur = clamp(abs(away - uFocus) / uFocus * 2.5 - 0.25, 0.0, 5.0);
+
+    vec3 albedo = pow(texture(uFloorColor, uv, blur).rgb, vec3(2.2));
+
+    vec3 t = texture(uFloorNormal, uv, blur).xyz * 2.0 - 1.0;
+    vec3 n = normalize(vec3(0.8 * t.x, t.z, 0.8 * t.y));
+
+    // a waxed, not a lacquered finish: the room is not mirrored in it
+    float rough = clamp(0.3 + 0.7 * texture(uFloorRoughness, uv, blur).r, 0.35, 1.0);
+
+    vec3 v = normalize(uCameraPosition - vWorld);
+    float nv = max(dot(n, v), 1.0e-3);
+
+    float coverage = 0.0;
+
+    for (int i = 0; i < uCount; ++i)
+    {
+        vec4 p = uPoints[i];
+        vec2 d = vWorld.xz - p.xy;
+        float s2 = p.z * p.z;
+
+        coverage += p.w / s2 * exp(-dot(d, d) / (2.0 * s2));
+    }
+
+    float contact = 1.0 - (1.0 - exp(-coverage)) * uContact;
+
+    float keyLit = keyShadow(vWorld, vec3(0.0, 1.0, 0.0));
+
+    vec3 light =
+        uKeyIrradiance * max(dot(n, uKeyDir), 0.0) * keyLit * mix(1.0, contact, 0.5) +
+        roomIrradiance(n) * contact;
+
+    vec3 color = albedo * light / PhotoPi;
+
+    vec3 r = reflect(-v, n);
+
+    color += roomSpecular(r, rough) * roomReflectance(vec3(0.04), rough, nv) *
+             contact * mix(1.0, keyLit, pow(max(dot(r, uKeyDir), 0.0), 4.0)) * uReflections;
+
+    float fade = 1.0 - smoothstep(0.55, 1.0, length(vWorld.xz - uFadeCentre) / uFadeRadius);
+
+    if (fade <= 0.002)
+        discard;
+
+    fragColor = vec4(develop(color * (uPhotoExposure * uExposure)).rgb, fade);
+}
+)";
+
+    photoFloorProgram_ = std::make_unique<QOpenGLShaderProgram>();
+
+    if (photoFloorProgram_->addShaderFromSourceCode(QOpenGLShader::Vertex, floorVertexShader) &&
+        photoFloorProgram_->addShaderFromSourceCode(QOpenGLShader::Fragment,
+                                                    withPhoto(floorFragmentShader)))
+    {
+        photoFloorProgram_->link();
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * The room blurred for a roughness: what a surface of that roughness
+     * reflects in each direction. Directions are drawn the way a rough
+     * surface scatters them (GGX importance sampling, viewed head-on),
+     * each read from a level of the picture as blurred as the share of the
+     * sphere it stands for, so 512 of them give a smooth result.
+     * ---------------------------------------------------------
+     */
+
+    const char *prefilterFragmentShader = R"(
+#version 330 core
+
+in vec2 vUv;
+
+uniform sampler2D uSource;
+uniform float uRoughness;
+uniform float uSourceTexels;  // texels of the full picture
+
+out vec4 fragColor;
+
+const float PI = 3.14159265;
+
+vec3 directionAt(vec2 uv)
+{
+    float phi = (uv.x - 0.5) * 2.0 * PI;
+    float theta = uv.y * PI;
+
+    return vec3(sin(theta) * sin(phi), cos(theta), -sin(theta) * cos(phi));
+}
+
+vec2 uvOf(vec3 d)
+{
+    return vec2(0.5 + atan(d.x, -d.z) / (2.0 * PI), acos(clamp(d.y, -1.0, 1.0)) / PI);
+}
+
+float radicalInverse(uint bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+
+    return float(bits) * 2.3283064365386963e-10;
+}
+
+void main()
+{
+    vec3 n = directionAt(vUv);
+
+    // a mirror: the picture itself, at about the size of this level
+    if (uRoughness <= 0.0)
+    {
+        fragColor = vec4(textureLod(uSource, vUv, 2.0).rgb, 1.0);
+        return;
+    }
+
+    float a = uRoughness * uRoughness;
+
+    vec3 helper = abs(n.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(helper, n));
+    vec3 bitangent = cross(n, tangent);
+
+    const uint Count = 512u;
+
+    vec3 sum = vec3(0.0);
+    float weight = 0.0;
+
+    for (uint i = 0u; i < Count; ++i)
+    {
+        vec2 xi = vec2(float(i) / float(Count), radicalInverse(i));
+
+        float phi = 2.0 * PI * xi.x;
+        float cosine = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
+        float sine = sqrt(1.0 - cosine * cosine);
+
+        vec3 h = tangent * (sine * cos(phi)) + bitangent * (sine * sin(phi)) + n * cosine;
+        vec3 l = 2.0 * dot(n, h) * h - n;
+
+        float nl = dot(n, l);
+
+        if (nl <= 0.0)
+            continue;
+
+        // probability of this direction, and the share of the sphere it
+        // stands for compared with one texel
+        float d = a * a / (PI * pow(cosine * cosine * (a * a - 1.0) + 1.0, 2.0));
+        float pdf = d / 4.0;
+
+        float share = 1.0 / (float(Count) * pdf + 1.0e-6);
+        float texel = 4.0 * PI / uSourceTexels;
+
+        float level = max(0.5 * log2(share / texel) + 1.0, 0.0);
+
+        sum += textureLod(uSource, uvOf(l), level).rgb * nl;
+        weight += nl;
+    }
+
+    fragColor = vec4(sum / max(weight, 1.0e-4), 1.0);
+}
+)";
+
+    prefilterProgram_ = std::make_unique<QOpenGLShaderProgram>();
+
+    if (prefilterProgram_->addShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
+        prefilterProgram_->addShaderFromSourceCode(QOpenGLShader::Fragment, prefilterFragmentShader))
+    {
+        prefilterProgram_->link();
+    }
+
+    // the shadow map read as plain depth (no comparison)
+    QOpenGLExtraFunctions *extra = context()->extraFunctions();
+
+    extra->glGenSamplers(1, &depthSampler_);
+    extra->glSamplerParameteri(depthSampler_, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    extra->glSamplerParameteri(depthSampler_, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    extra->glSamplerParameteri(depthSampler_, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    extra->glSamplerParameteri(depthSampler_, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    extra->glSamplerParameteri(depthSampler_, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+}
+
 void KnotGLWidget::initializeShadowMap()
 {
     depthProgram_ = std::make_unique<QOpenGLShaderProgram>();
@@ -985,15 +1516,20 @@ void KnotGLWidget::drawShadowMap()
     const QVector3D centre = 0.5f * (meshMin_ + meshMax_);
     const float radius = 1.05f * std::max(0.5f * (meshMax_ - meshMin_).length(), 0.5f);
 
+    // In Photo mode the light may be low (a window): its shadows run far
+    // across the floor, so the depth range reaches much farther.
     const float nearPlane = 0.5f * radius;
-    const float farPlane = 6.0f * radius + 1.0f;
+    const float farPlane = (photo_ ? 14.0f : 6.0f) * radius + 1.0f;
+
+    const QVector3D toLight =
+        photo_ ? photoKeyDirection() : lightRig().map(KeyLightRig);
 
     QMatrix4x4 lightView;
 
     lightView.lookAt(
-        centre + lightRig().map(KeyLightRig) * (2.0f * radius),
+        centre + toLight * (2.0f * radius),
         centre,
-        QVector3D(0.0f, 1.0f, 0.0f));
+        std::abs(toLight.y()) > 0.98f ? QVector3D(0.0f, 0.0f, 1.0f) : QVector3D(0.0f, 1.0f, 0.0f));
 
     QMatrix4x4 lightProjection;
 
@@ -1023,8 +1559,21 @@ void KnotGLWidget::drawShadowMap()
     shadowSoftness_ = softness / (2.0f * radius);
     shadowDepthBias_ = 1.25f * softness / (farPlane - nearPlane);
 
+    shadowDepthRange_ = farPlane - nearPlane;
+    shadowMapWorld_ = 2.0f * radius;
+
+    // Photo mode: the softness is set by the size of the light (PCSS);
+    // this is only the sharpest edge, where the rope touches the floor
+    if (photo_)
+    {
+        shadowSoftness_ = 1.5f * shadowTexel_ / (2.0f * radius);
+        shadowDepthBias_ = 3.0f * shadowTexel_ / (farPlane - nearPlane);
+    }
+
     // not bound for reading while it is drawn into
     glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE0);
 
@@ -1061,14 +1610,26 @@ void KnotGLWidget::setShadowUniforms(QOpenGLShaderProgram &program, bool wanted)
         wanted && lighting_.keyLight &&
         shadowsReady_ && mesh_.isValid() && indexCount_ > 0;
 
-    // the map is on texture unit 1
+    // the map is on texture unit 1, and again on unit 2 as plain depth
     glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, shadows ? shadowTexture_ : 0);
+    glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, shadows ? shadowTexture_ : 0);
     glActiveTexture(GL_TEXTURE0);
 
-    program.setUniformValue("uKeyDir", lightRig().map(KeyLightRig));
+    context()->extraFunctions()->glBindSampler(2, depthSampler_);
+
+    program.setUniformValue(
+        "uKeyDir",
+        photo_ ? photoKeyDirection() : lightRig().map(KeyLightRig));
+
     program.setUniformValue("uShadowMap", 1);
+    program.setUniformValue("uShadowDepth", 2);
     program.setUniformValue("uShadows", shadows ? 1 : 0);
+    program.setUniformValue("uPcss", photo_ ? 1 : 0);
+    program.setUniformValue("uLightTan", std::tan(environment_.keyRadius));
+    program.setUniformValue("uDepthRange", shadowDepthRange_);
+    program.setUniformValue("uMapWorld", shadowMapWorld_);
     program.setUniformValue("uLightMatrix", lightMatrix_);
     program.setUniformValue("uShadowTexel", shadowTexel_);
     program.setUniformValue("uShadowSoftness", shadowSoftness_);
@@ -1281,11 +1842,28 @@ void KnotGLWidget::computeMeshBounds()
 
     meshMin_ = minimum;
     meshMax_ = maximum;
+
+    tableLevel_ = minimum.y();
+}
+
+float KnotGLWidget::meshBottom() const
+{
+    float bottom = 1.0e30f;
+
+    const int vertexCount = mesh_.positions.size() / 3;
+
+    for (int i = 0; i < vertexCount; ++i)
+        bottom = std::min(bottom, mesh_.positions.at(3 * i + 1));
+
+    return vertexCount > 0 ? bottom : meshMin_.y();
 }
 
 void KnotGLWidget::setMesh(const KnotMath::Mesh &mesh)
 {
-    mesh_ = mesh;
+    rawMesh_ = mesh;
+
+    // laid down in Photo mode (the pose stays until the next knot)
+    applyPose();
 
     if (!boundsFixed_)
     {
@@ -1311,10 +1889,44 @@ void KnotGLWidget::setFixedBounds(
     const QVector3D &maximum)
 {
     boundsFixed_ = true;
-    meshMin_ = minimum;
-    meshMax_ = maximum;
+    rawFixedMin_ = minimum;
+    rawFixedMax_ = maximum;
+
+    poseFixedBounds();
+
+    tableLevel_ = meshBottom();
+
     groundDirty_ = true;
     update();
+}
+
+void KnotGLWidget::poseFixedBounds()
+{
+    if (!photo_)
+    {
+        meshMin_ = rawFixedMin_;
+        meshMax_ = rawFixedMax_;
+
+        return;
+    }
+
+    // the box around the eight corners of the turned box
+    QVector3D minimum(1.0e30f, 1.0e30f, 1.0e30f);
+    QVector3D maximum(-1.0e30f, -1.0e30f, -1.0e30f);
+
+    for (int corner = 0; corner < 8; ++corner)
+    {
+        const QVector3D p = posed(QVector3D(
+            (corner & 1) ? rawFixedMax_.x() : rawFixedMin_.x(),
+            (corner & 2) ? rawFixedMax_.y() : rawFixedMin_.y(),
+            (corner & 4) ? rawFixedMax_.z() : rawFixedMin_.z()));
+
+        minimum = QVector3D(std::min(minimum.x(), p.x()), std::min(minimum.y(), p.y()), std::min(minimum.z(), p.z()));
+        maximum = QVector3D(std::max(maximum.x(), p.x()), std::max(maximum.y(), p.y()), std::max(maximum.z(), p.z()));
+    }
+
+    meshMin_ = minimum;
+    meshMax_ = maximum;
 }
 
 void KnotGLWidget::clearFixedBounds()
@@ -1702,7 +2314,10 @@ void KnotGLWidget::setLighting(const Lighting::Options &options)
 {
     lighting_ = options;
 
-    const int size = Lighting::shadowMapSize(options.shadowQuality);
+    normalShadowMapSize_ = Lighting::shadowMapSize(options.shadowQuality);
+
+    // Photo mode always uses the sharpest map
+    const int size = photo_ ? PhotoShadowMapSize : normalShadowMapSize_;
 
     if (size != shadowMapSize_)
     {
@@ -1752,7 +2367,7 @@ KnotGLWidget::MemoryUse KnotGLWidget::memoryUse() const
     use.view = pixels * (std::max(1, format().samples()) * 8 + 4);
 
     use.other =
-        groundBytes_ +
+        groundBytes_ + photoBytes_ +
         static_cast<qint64>(MaxParticles) * static_cast<qint64>(sizeof(FlatVertex));
 
     return use;
@@ -1760,7 +2375,7 @@ KnotGLWidget::MemoryUse KnotGLWidget::memoryUse() const
 
 void KnotGLWidget::setSurface(int material, float roughness)
 {
-    material_ = std::clamp(material, 0, 3);
+    material_ = std::clamp(material, 0, 4);
     roughness_ = std::clamp(roughness, 0.0f, 1.0f);
 
     update();
@@ -1984,12 +2599,14 @@ QVector3D KnotGLWidget::computeCameraPosition() const
 
 QPointF KnotGLWidget::projectPointToScreen(const KnotMath::Vec3 &point) const
 {
+    // the point is in the knot's own coordinates (laid down in Photo mode)
     const QVector4D clip =
         lastViewProjection_ *
         QVector4D(
-            static_cast<float>(point.x),
-            static_cast<float>(point.y),
-            static_cast<float>(point.z),
+            posed(QVector3D(
+                static_cast<float>(point.x),
+                static_cast<float>(point.y),
+                static_cast<float>(point.z))),
             1.0f);
 
     if (std::abs(clip.w()) < 1.0e-6f)
@@ -2120,59 +2737,10 @@ void KnotGLWidget::drawShadow(const QMatrix4x4 &viewProjection)
     if (!shadowProgram_ || !shadowProgram_->isLinked())
         return;
 
-    const int samples = mesh_.centerline.size() / 4;
+    const QVector<QVector4D> points = contactShadowPoints(groundLevel(meshMin_.y()));
 
-    if (samples == 0 || mesh_.centerlineStrand.size() != samples)
+    if (points.isEmpty())
         return;
-
-    // must match the size of uPoints in the shader
-    constexpr int MaxPoints = 96;
-
-    const int stride = (samples + MaxPoints - 1) / MaxPoints;
-    const float groundY = groundLevel(meshMin_.y());
-
-    auto centre = [this](int s)
-    {
-        return QVector3D(
-            mesh_.centerline.at(4 * s),
-            mesh_.centerline.at(4 * s + 1),
-            mesh_.centerline.at(4 * s + 2));
-    };
-
-    QVector<QVector4D> points;
-    points.reserve(MaxPoints);
-
-    for (int s = 0; s < samples && points.size() < MaxPoints; s += stride)
-    {
-        const QVector3D c = centre(s);
-        const float r = mesh_.centerline.at(4 * s + 3);
-
-        // length of tube this point stands for
-        int neighbour = s;
-
-        if (s + 1 < samples &&
-            mesh_.centerlineStrand.at(s + 1) == mesh_.centerlineStrand.at(s))
-        {
-            neighbour = s + 1;
-        }
-        else if (s > 0 &&
-                 mesh_.centerlineStrand.at(s - 1) == mesh_.centerlineStrand.at(s))
-        {
-            neighbour = s - 1;
-        }
-
-        const float spacing =
-            (neighbour != s ? (centre(neighbour) - c).length() : r) *
-            static_cast<float>(stride);
-
-        const float height = std::max(0.0f, c.y() - r - groundY);
-        const float sigma = 0.9f * r + 0.35f * height;
-
-        // A tube lying on the ground then covers about 2r/(sqrt(2 pi) sigma).
-        const float weight = spacing * 2.0f * r / (2.0f * 3.14159265f);
-
-        points.push_back(QVector4D(c.x(), c.z(), sigma, weight));
-    }
 
     float cx = 0.0f;
     float cz = 0.0f;
@@ -2209,6 +2777,65 @@ void KnotGLWidget::drawShadow(const QMatrix4x4 &viewProjection)
     shadowProgram_->release();
 }
 
+QVector<QVector4D> KnotGLWidget::contactShadowPoints(float groundY) const
+{
+    QVector<QVector4D> points;
+
+    const int samples = mesh_.centerline.size() / 4;
+
+    if (samples == 0 || mesh_.centerlineStrand.size() != samples)
+        return points;
+
+    // must match the size of uPoints in the shaders
+    constexpr int MaxPoints = 96;
+
+    const int stride = (samples + MaxPoints - 1) / MaxPoints;
+
+    auto centre = [this](int s)
+    {
+        return QVector3D(
+            mesh_.centerline.at(4 * s),
+            mesh_.centerline.at(4 * s + 1),
+            mesh_.centerline.at(4 * s + 2));
+    };
+
+    points.reserve(MaxPoints);
+
+    for (int s = 0; s < samples && points.size() < MaxPoints; s += stride)
+    {
+        const QVector3D c = centre(s);
+        const float r = mesh_.centerline.at(4 * s + 3);
+
+        // length of tube this point stands for
+        int neighbour = s;
+
+        if (s + 1 < samples &&
+            mesh_.centerlineStrand.at(s + 1) == mesh_.centerlineStrand.at(s))
+        {
+            neighbour = s + 1;
+        }
+        else if (s > 0 &&
+                 mesh_.centerlineStrand.at(s - 1) == mesh_.centerlineStrand.at(s))
+        {
+            neighbour = s - 1;
+        }
+
+        const float spacing =
+            (neighbour != s ? (centre(neighbour) - c).length() : r) *
+            static_cast<float>(stride);
+
+        const float height = std::max(0.0f, c.y() - r - groundY);
+        const float sigma = 0.9f * r + 0.35f * height;
+
+        // A tube lying on the ground then covers about 2r/(sqrt(2 pi) sigma).
+        const float weight = spacing * 2.0f * r / (2.0f * 3.14159265f);
+
+        points.push_back(QVector4D(c.x(), c.z(), sigma, weight));
+    }
+
+    return points;
+}
+
 void KnotGLWidget::drawMesh(
     const QMatrix4x4 &model,
     const QMatrix4x4 &view,
@@ -2238,15 +2865,24 @@ void KnotGLWidget::drawMesh(
         "uCameraPosition",
         computeCameraPosition() + panOffset_);
 
-    meshProgram_->setUniformValue("uBaseColor", meshColor_);
+    // Photo mode: the rope of the scene (colours that carry meaning, such
+    // as the two sides of a Seifert surface, are kept)
+    const QVector3D photoColor(
+        static_cast<float>(photoInfo_.color.redF()),
+        static_cast<float>(photoInfo_.color.greenF()),
+        static_cast<float>(photoInfo_.color.blueF()));
+
+    meshProgram_->setUniformValue("uBaseColor", photo_ ? photoColor : meshColor_);
 
     meshProgram_->setUniformValue(
         "uUseVertexColors",
         useVertexColors_ ? 1 : 0);
 
-    meshProgram_->setUniformValue("uMetallic", metallic_);
-    meshProgram_->setUniformValue("uRoughness", roughness_);
-    meshProgram_->setUniformValue("uMaterial", material_);
+    meshProgram_->setUniformValue("uMetallic", photo_ ? 0.0f : metallic_);
+    meshProgram_->setUniformValue("uRoughness", photo_ ? photoInfo_.roughness : roughness_);
+    meshProgram_->setUniformValue("uMaterial", photo_ ? photoInfo_.material : material_);
+
+    setPhotoUniforms(*meshProgram_);
     meshProgram_->setUniformValue("uDarkTheme", Theme::isDark() ? 1 : 0);
     meshProgram_->setUniformValue("uRig", lightRig().normalMatrix());
 
@@ -2421,6 +3057,10 @@ void KnotGLWidget::paintGL()
         resetCamera(pitch, false);
     }
 
+    // Photo mode turned on before the view was ready: the room now
+    if (photo_ && loadedScene_ != static_cast<int>(photoScene_) && !loadPhotoScene())
+        photo_ = false;
+
     // first the shadow map (its own framebuffer and viewport)
     drawShadowMap();
 
@@ -2446,11 +3086,24 @@ void KnotGLWidget::paintGL()
 
     lastViewProjection_ = projection * view * model;
 
-    // 1. background (no depth), 2. ground, 3. knot, 4. particles
-    drawBackground();
-    drawGround(lastViewProjection_);
-    drawMesh(model, view, projection);
-    drawParticles(lastViewProjection_);
+    // 1. background (no depth), 2. ground, 3. knot, 4. particles; in Photo
+    // mode the room, the table and the rope
+    if (photo_)
+    {
+        drawPhotoBackground(projection * view);
+        drawPhotoFloor(projection * view);
+        drawMesh(model, view, projection);
+    }
+    else
+    {
+        drawBackground();
+        drawGround(lastViewProjection_);
+        drawMesh(model, view, projection);
+        drawParticles(lastViewProjection_);
+    }
+
+    // the plain-depth reader off unit 2 (QPainter may use the unit)
+    context()->extraFunctions()->glBindSampler(2, 0);
 
     // Restore the state QPainter expects before using it.
     glDisable(GL_DEPTH_TEST);
@@ -2701,10 +3354,10 @@ bool KnotGLWidget::pickRope(const QPointF &position, QVector3D &point) const
         const QPointF offset = position - onScreen;
 
         const KnotMath::Vec3 p = a + (b - a) * u;
-        const QVector3D world(
+        const QVector3D world = posed(QVector3D(
             static_cast<float>(p.x),
             static_cast<float>(p.y),
-            static_cast<float>(p.z));
+            static_cast<float>(p.z)));
 
         const float depth = QVector3D::dotProduct(world - eye, forward);
 
@@ -2778,7 +3431,7 @@ void KnotGLWidget::mousePressEvent(QMouseEvent *event)
 
         setCursor(Qt::ClosedHandCursor);
 
-        emit ropeGrabbed(point);
+        emit ropeGrabbed(unposed(point));
 
         event->accept();
 
@@ -2805,10 +3458,10 @@ void KnotGLWidget::mouseMoveEvent(QMouseEvent *event)
     if (ropeDragging_)
     {
         // the grabbed point follows the mouse in the plane facing the camera
-        emit ropeDragged(
+        emit ropeDragged(unposed(
             grabPoint_ +
             pointOnViewPlane(event->position(), grabPoint_) -
-            grabStart_);
+            grabStart_));
 
         event->accept();
 
@@ -2830,7 +3483,8 @@ void KnotGLWidget::mouseMoveEvent(QMouseEvent *event)
         yaw_ += static_cast<float>(delta.x()) * 0.55f;
         pitch_ += static_cast<float>(delta.y()) * 0.55f;
 
-        pitch_ = std::clamp(pitch_, -89.0f, 89.0f);
+        // in Photo mode the camera stays above the table
+        pitch_ = std::clamp(pitch_, photo_ ? 6.0f : -89.0f, 89.0f);
 
         emit cameraChanged(yaw_, pitch_, distance_);
 
@@ -2934,11 +3588,35 @@ void KnotGLWidget::flyToSphere(
     float yaw,
     float pitch)
 {
-    flyCameraTo(yaw, pitch, sphereDistance(radius), centre);
+    if (!photo_)
+    {
+        flyCameraTo(yaw, pitch, sphereDistance(radius), centre);
+        return;
+    }
+
+    // the direction is meant for the knot's own coordinates: turned with
+    // the knot, and never from below the table
+    const float yr = qDegreesToRadians(yaw);
+    const float pr = qDegreesToRadians(pitch);
+
+    const QVector3D toCamera =
+        pose_.mapVector(QVector3D(
+            std::cos(pr) * std::sin(yr),
+            std::sin(pr),
+            std::cos(pr) * std::cos(yr)));
+
+    const float worldYaw = qRadiansToDegrees(std::atan2(toCamera.x(), toCamera.z()));
+    const float worldPitch =
+        std::clamp(qRadiansToDegrees(std::asin(std::clamp(toCamera.y(), -1.0f, 1.0f))), 25.0f, 70.0f);
+
+    flyCameraTo(worldYaw, worldPitch, sphereDistance(radius), posed(centre));
 }
 
 void KnotGLWidget::fitNewKnot(float highestPitch)
 {
+    // a new knot is laid down anew in Photo mode
+    poseDirty_ = true;
+
     if (glInitialized_ && isVisible() && width() > 0 && height() > 0)
     {
         resetCamera(highestPitch);
@@ -2956,6 +3634,19 @@ void KnotGLWidget::resetCamera(float highestPitch, bool animate)
      * spreads out most while its strands overlap least, then the
      * distance at which the whole tube fills about half of the view.
      */
+
+    // a new knot in Photo mode is laid down first
+    if (photo_ && poseDirty_)
+    {
+        computePose();
+        refreshPose();
+    }
+
+    // Photo mode: from where a photographer would stand, above the table
+    const float lowestPitch = photo_ ? 25.0f : 5.0f;
+
+    if (photo_)
+        highestPitch = std::min(highestPitch, 45.0f);
 
     const int samples = mesh_.centerline.size() / 4;
 
@@ -3043,7 +3734,7 @@ void KnotGLWidget::resetCamera(float highestPitch, bool animate)
     QVector<QVector2D> flat(n);
 
     // from slightly above to well above: never from below the floor
-    for (float pitch = 5.0f; pitch <= highestPitch + 0.01f; pitch += 5.0f)
+    for (float pitch = lowestPitch; pitch <= highestPitch + 0.01f; pitch += 5.0f)
     {
         for (float yaw = 0.0f; yaw < 360.0f; yaw += 15.0f)
         {
@@ -3265,4 +3956,756 @@ void KnotGLWidget::advanceCameraFlight(
     }
 
     emit cameraChanged(yaw_, pitch_, distance_);
+}
+
+/*
+ * =========================================================
+ * PHOTO MODE
+ * =========================================================
+ */
+
+bool KnotGLWidget::setPhotoMode(bool enabled, Photo::Scene scene)
+{
+    photo_ = enabled;
+    photoScene_ = scene;
+    photoInfo_ = Photo::sceneInfo(scene);
+
+    bool ok = true;
+
+    if (glInitialized_ && context())
+    {
+        makeCurrent();
+
+        if (photo_ && loadedScene_ != static_cast<int>(scene))
+            ok = loadPhotoScene();
+
+        if (!ok)
+            photo_ = false;
+
+        const int size = photo_ ? PhotoShadowMapSize : normalShadowMapSize_;
+
+        if (size != shadowMapSize_ && shadowTexture_ != 0)
+        {
+            shadowMapSize_ = size;
+
+            allocateShadowMap();
+        }
+
+        doneCurrent();
+    }
+    else
+    {
+        // allocated at that size when the view is set up
+        shadowMapSize_ = photo_ ? PhotoShadowMapSize : normalShadowMapSize_;
+    }
+
+    // Laid down at the next framing (resetCamera); standing as given again
+    // at once when Photo mode ends.
+    poseDirty_ = true;
+
+    if (!photo_)
+    {
+        pose_.setToIdentity();
+
+        refreshPose();
+    }
+
+    update();
+
+    return ok;
+}
+
+bool KnotGLWidget::photoMode() const
+{
+    return photo_;
+}
+
+QVector3D KnotGLWidget::posed(const QVector3D &point) const
+{
+    return photo_ ? pose_.map(point) : point;
+}
+
+QVector3D KnotGLWidget::unposed(const QVector3D &point) const
+{
+    return photo_ ? pose_.inverted().map(point) : point;
+}
+
+void KnotGLWidget::computePose()
+{
+    /*
+     * A rope lies on a table with its thinnest direction up. That is the
+     * direction in which the centre line spreads least: the eigenvector of
+     * the smallest eigenvalue of its covariance (Jacobi rotations). The
+     * longest direction goes along x. The turn is a rotation, never a
+     * reflection, so the knot keeps its handedness.
+     */
+    poseDirty_ = false;
+
+    pose_.setToIdentity();
+
+    const int samples = rawMesh_.centerline.size() / 4;
+
+    if (samples < 3)
+        return;
+
+    double mean[3] = {0.0, 0.0, 0.0};
+
+    for (int s = 0; s < samples; ++s)
+    {
+        for (int i = 0; i < 3; ++i)
+            mean[i] += rawMesh_.centerline.at(4 * s + i);
+    }
+
+    for (double &m : mean)
+        m /= samples;
+
+    double a[3][3] = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
+
+    for (int s = 0; s < samples; ++s)
+    {
+        double d[3];
+
+        for (int i = 0; i < 3; ++i)
+            d[i] = rawMesh_.centerline.at(4 * s + i) - mean[i];
+
+        for (int i = 0; i < 3; ++i)
+        {
+            for (int j = 0; j < 3; ++j)
+                a[i][j] += d[i] * d[j];
+        }
+    }
+
+    // eigenvectors are the columns of v
+    double v[3][3] = {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}};
+
+    for (int sweep = 0; sweep < 50; ++sweep)
+    {
+        // the largest entry off the diagonal
+        int p = 0;
+        int q = 1;
+
+        if (std::abs(a[0][2]) > std::abs(a[p][q]))
+        {
+            p = 0;
+            q = 2;
+        }
+
+        if (std::abs(a[1][2]) > std::abs(a[p][q]))
+        {
+            p = 1;
+            q = 2;
+        }
+
+        const double scale = std::abs(a[0][0]) + std::abs(a[1][1]) + std::abs(a[2][2]);
+
+        if (std::abs(a[p][q]) <= 1.0e-12 * std::max(scale, 1.0e-30))
+            break;
+
+        // the rotation in the (p, q) plane that clears a[p][q]
+        const double theta = 0.5 * std::atan2(2.0 * a[p][q], a[q][q] - a[p][p]);
+        const double c = std::cos(theta);
+        const double s = std::sin(theta);
+
+        for (int k = 0; k < 3; ++k)
+        {
+            const double kp = a[k][p];
+            const double kq = a[k][q];
+
+            a[k][p] = c * kp - s * kq;
+            a[k][q] = s * kp + c * kq;
+        }
+
+        for (int k = 0; k < 3; ++k)
+        {
+            const double pk = a[p][k];
+            const double qk = a[q][k];
+
+            a[p][k] = c * pk - s * qk;
+            a[q][k] = s * pk + c * qk;
+        }
+
+        for (int k = 0; k < 3; ++k)
+        {
+            const double kp = v[k][p];
+            const double kq = v[k][q];
+
+            v[k][p] = c * kp - s * kq;
+            v[k][q] = s * kp + c * kq;
+        }
+    }
+
+    int smallest = 0;
+    int largest = 0;
+
+    for (int i = 1; i < 3; ++i)
+    {
+        if (a[i][i] < a[smallest][smallest])
+            smallest = i;
+
+        if (a[i][i] > a[largest][largest])
+            largest = i;
+    }
+
+    if (smallest == largest)
+        return;
+
+    auto column = [&v](int i)
+    {
+        return QVector3D(
+            static_cast<float>(v[0][i]),
+            static_cast<float>(v[1][i]),
+            static_cast<float>(v[2][i])).normalized();
+    };
+
+    QVector3D up = column(smallest);
+    QVector3D along = column(largest);
+
+    // the least turn: the side that faced up (or the camera) stays up
+    if (up.y() + 0.5f * up.z() < 0.0f)
+        up = -up;
+
+    if (along.x() < 0.0f)
+        along = -along;
+
+    // exactly at right angles to up
+    along = (along - up * QVector3D::dotProduct(along, up)).normalized();
+
+    const QVector3D third = QVector3D::crossProduct(along, up);
+
+    // rows: the knot's directions go to x, y (up) and z
+    const QMatrix4x4 rotation(
+        along.x(), along.y(), along.z(), 0.0f,
+        up.x(), up.y(), up.z(), 0.0f,
+        third.x(), third.y(), third.z(), 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f);
+
+    const QVector3D centre(
+        static_cast<float>(mean[0]),
+        static_cast<float>(mean[1]),
+        static_cast<float>(mean[2]));
+
+    // turned about its own middle, so it stays where it was
+    pose_.translate(centre);
+    pose_ *= rotation;
+    pose_.translate(-centre);
+}
+
+void KnotGLWidget::applyPose()
+{
+    mesh_ = rawMesh_;
+
+    if (!photo_)
+        return;
+
+    const int vertexCount = mesh_.positions.size() / 3;
+
+    for (int i = 0; i < vertexCount; ++i)
+    {
+        const QVector3D p = pose_.map(QVector3D(
+            mesh_.positions.at(3 * i),
+            mesh_.positions.at(3 * i + 1),
+            mesh_.positions.at(3 * i + 2)));
+
+        mesh_.positions[3 * i] = p.x();
+        mesh_.positions[3 * i + 1] = p.y();
+        mesh_.positions[3 * i + 2] = p.z();
+    }
+
+    const int normalCount = mesh_.normals.size() / 3;
+
+    for (int i = 0; i < normalCount; ++i)
+    {
+        const QVector3D n = pose_.mapVector(QVector3D(
+            mesh_.normals.at(3 * i),
+            mesh_.normals.at(3 * i + 1),
+            mesh_.normals.at(3 * i + 2)));
+
+        mesh_.normals[3 * i] = n.x();
+        mesh_.normals[3 * i + 1] = n.y();
+        mesh_.normals[3 * i + 2] = n.z();
+    }
+
+    const int samples = mesh_.centerline.size() / 4;
+
+    for (int s = 0; s < samples; ++s)
+    {
+        const QVector3D c = pose_.map(QVector3D(
+            mesh_.centerline.at(4 * s),
+            mesh_.centerline.at(4 * s + 1),
+            mesh_.centerline.at(4 * s + 2)));
+
+        mesh_.centerline[4 * s] = c.x();
+        mesh_.centerline[4 * s + 1] = c.y();
+        mesh_.centerline[4 * s + 2] = c.z();
+    }
+}
+
+void KnotGLWidget::refreshPose()
+{
+    applyPose();
+
+    if (boundsFixed_)
+    {
+        poseFixedBounds();
+
+        tableLevel_ = meshBottom();
+    }
+    else
+    {
+        computeMeshBounds();
+    }
+
+    groundDirty_ = true;
+
+    if (glInitialized_ && context())
+    {
+        // also called while painting (a framing waiting for the first
+        // paint): the context must then stay current
+        const bool current = QOpenGLContext::currentContext() == context();
+
+        if (!current)
+            makeCurrent();
+
+        uploadMesh();
+
+        if (!current)
+            doneCurrent();
+    }
+
+    update();
+}
+
+GLuint KnotGLWidget::loadTexture(const QString &path)
+{
+    QImage image(path);
+
+    if (image.isNull())
+        return 0;
+
+    image = image.convertToFormat(QImage::Format_RGBA8888);
+
+    GLuint texture = 0;
+
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        GL_RGBA8,
+        image.width(),
+        image.height(),
+        0,
+        GL_RGBA,
+        GL_UNSIGNED_BYTE,
+        image.constBits());
+
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+    // the table seen at a low angle stays sharp
+    if (context()->hasExtension(QByteArrayLiteral("GL_EXT_texture_filter_anisotropic")) ||
+        context()->hasExtension(QByteArrayLiteral("GL_ARB_texture_filter_anisotropic")))
+    {
+        GLfloat most = 1.0f;
+
+        glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &most);
+
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, std::min(most, 16.0f));
+    }
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // with the mipmaps, a third more
+    photoBytes_ += static_cast<qint64>(image.width()) * image.height() * 4 * 4 / 3;
+
+    return texture;
+}
+
+bool KnotGLWidget::loadPhotoScene()
+{
+    destroyPhotoResources();
+
+    if (!prefilterProgram_ || !prefilterProgram_->isLinked() ||
+        !photoFloorProgram_ || !photoFloorProgram_->isLinked() ||
+        !photoBackgroundProgram_ || !photoBackgroundProgram_->isLinked())
+    {
+        return false;
+    }
+
+    environment_ = Photo::loadEnvironment(photoInfo_.environment);
+
+    if (!environment_.valid)
+        return false;
+
+    const int width = environment_.width;
+    const int height = environment_.height;
+
+    // the room, in half floats, with mipmaps (the background's blur)
+    glGenTextures(1, &environmentTexture_);
+    glBindTexture(GL_TEXTURE_2D, environmentTexture_);
+
+    glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        GL_RGB16F,
+        width,
+        height,
+        0,
+        GL_RGB,
+        GL_FLOAT,
+        environment_.pixels.constData());
+
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // (most drivers keep three channels as four)
+    photoBytes_ += static_cast<qint64>(width) * height * 8 * 4 / 3;
+
+    // the pixels are on the card now
+    environment_.pixels = QVector<float>();
+
+    // the room blurred for each roughness, one mip level each
+    glGenTextures(1, &specularTexture_);
+    glBindTexture(GL_TEXTURE_2D, specularTexture_);
+
+    for (int level = 0; level < SpecularLevels; ++level)
+    {
+        glTexImage2D(
+            GL_TEXTURE_2D,
+            level,
+            GL_RGBA16F,
+            SpecularWidth >> level,
+            (SpecularWidth / 2) >> level,
+            0,
+            GL_RGBA,
+            GL_FLOAT,
+            nullptr);
+
+        photoBytes_ +=
+            static_cast<qint64>(SpecularWidth >> level) * ((SpecularWidth / 2) >> level) * 8;
+    }
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, SpecularLevels - 1);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    GLuint framebuffer = 0;
+
+    glGenFramebuffers(1, &framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glDepthMask(GL_FALSE);
+
+    prefilterProgram_->bind();
+
+    prefilterProgram_->setUniformValue("uSource", 0);
+    prefilterProgram_->setUniformValue(
+        "uSourceTexels",
+        static_cast<float>(width) * static_cast<float>(height));
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, environmentTexture_);
+
+    backgroundVao_.bind();
+
+    bool complete = true;
+
+    for (int level = 0; level < SpecularLevels; ++level)
+    {
+        glFramebufferTexture2D(
+            GL_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT0,
+            GL_TEXTURE_2D,
+            specularTexture_,
+            level);
+
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        {
+            complete = false;
+            break;
+        }
+
+        glViewport(0, 0, SpecularWidth >> level, (SpecularWidth / 2) >> level);
+
+        prefilterProgram_->setUniformValue(
+            "uRoughness",
+            static_cast<float>(level) / static_cast<float>(SpecularLevels - 1));
+
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+
+    backgroundVao_.release();
+    prefilterProgram_->release();
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+    glDeleteFramebuffers(1, &framebuffer);
+
+    glDepthMask(GL_TRUE);
+
+    // the surface, and its average colour (the light it throws back up)
+    floorColorTexture_ = loadTexture(photoInfo_.floorColor);
+    floorNormalTexture_ = loadTexture(photoInfo_.floorNormal);
+    floorRoughnessTexture_ = loadTexture(photoInfo_.floorRoughness);
+
+    const QImage small =
+        QImage(photoInfo_.floorColor)
+            .scaled(16, 16, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+            .convertToFormat(QImage::Format_RGB32);
+
+    QVector3D sum;
+
+    for (int y = 0; y < small.height(); ++y)
+    {
+        for (int x = 0; x < small.width(); ++x)
+        {
+            const QColor c = small.pixelColor(x, y);
+
+            sum += QVector3D(
+                std::pow(static_cast<float>(c.redF()), 2.2f),
+                std::pow(static_cast<float>(c.greenF()), 2.2f),
+                std::pow(static_cast<float>(c.blueF()), 2.2f));
+        }
+    }
+
+    if (!small.isNull())
+        floorAlbedo_ = sum / static_cast<float>(small.width() * small.height());
+
+    if (!complete || floorColorTexture_ == 0 || floorNormalTexture_ == 0 ||
+        floorRoughnessTexture_ == 0)
+    {
+        destroyPhotoResources();
+        return false;
+    }
+
+    loadedScene_ = static_cast<int>(photoScene_);
+
+    return true;
+}
+
+void KnotGLWidget::destroyPhotoResources()
+{
+    for (GLuint *texture : {&environmentTexture_, &specularTexture_, &floorColorTexture_,
+                            &floorNormalTexture_, &floorRoughnessTexture_})
+    {
+        if (*texture != 0)
+            glDeleteTextures(1, texture);
+
+        *texture = 0;
+    }
+
+    loadedScene_ = -1;
+    photoBytes_ = 0;
+}
+
+QVector3D KnotGLWidget::photoKeyDirection() const
+{
+    QMatrix4x4 turn;
+
+    turn.rotate(photoInfo_.environmentYaw, 0.0f, 1.0f, 0.0f);
+
+    const QVector3D d = turn.mapVector(environment_.keyDirection).normalized();
+
+    // no lower than keyMinElevation above the table
+    const float lowest = qDegreesToRadians(photoInfo_.keyMinElevation);
+    const float elevation = std::asin(std::clamp(d.y(), -1.0f, 1.0f));
+
+    if (elevation >= lowest)
+        return d;
+
+    const QVector3D flat = QVector3D(d.x(), 0.0f, d.z()).normalized();
+
+    return flat * std::cos(lowest) + QVector3D(0.0f, std::sin(lowest), 0.0f);
+}
+
+void KnotGLWidget::setPhotoUniforms(QOpenGLShaderProgram &program)
+{
+    // the units are set even when unused, so no two kinds of sampler
+    // share a unit
+    program.setUniformValue("uEnvironment", 3);
+    program.setUniformValue("uSpecular", 4);
+    program.setUniformValue("uPhoto", photo_ ? 1 : 0);
+
+    if (!photo_)
+        return;
+
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, environmentTexture_);
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, specularTexture_);
+    glActiveTexture(GL_TEXTURE0);
+
+    QMatrix4x4 toRoom;
+
+    toRoom.rotate(-photoInfo_.environmentYaw, 0.0f, 1.0f, 0.0f);
+
+    program.setUniformValue("uEnvRotation", toRoom.normalMatrix());
+    program.setUniformValueArray("uIrradiance", environment_.irradiance, 9);
+    program.setUniformValue("uKeyIrradiance", environment_.keyIrradiance);
+
+    // a light of some size gives a wider, softer highlight
+    program.setUniformValue("uKeySize", 0.5f * environment_.keyRadius);
+
+    // light falling on the table, and what it throws back up
+    const QVector3D key = photoKeyDirection();
+
+    const QVector3D onTable =
+        environment_.irradianceAt(QVector3D(0.0f, 1.0f, 0.0f)) +
+        environment_.keyIrradiance * std::max(key.y(), 0.0f);
+
+    program.setUniformValue("uFloorBounce", floorAlbedo_ * onTable);
+
+    // The camera is set for the light on the table: white paper there
+    // comes out a light grey, as a photographer would expose it.
+    const float lightOnTable =
+        0.2126f * onTable.x() + 0.7152f * onTable.y() + 0.0722f * onTable.z();
+
+    photoExposure_ = 1.9f / std::max(lightOnTable, 1.0e-3f);
+
+    program.setUniformValue("uPhotoExposure", photoExposure_);
+}
+
+float KnotGLWidget::photoFloorLevel() const
+{
+    return tableLevel_ - 0.002f;
+}
+
+void KnotGLWidget::drawPhotoBackground(const QMatrix4x4 &viewProjection)
+{
+    if (!photoBackgroundProgram_ || !photoBackgroundProgram_->isLinked() ||
+        environmentTexture_ == 0)
+    {
+        return;
+    }
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glDepthMask(GL_FALSE);
+
+    photoBackgroundProgram_->bind();
+
+    setPhotoUniforms(*photoBackgroundProgram_);
+
+    photoBackgroundProgram_->setUniformValue("uInverseViewProjection", viewProjection.inverted());
+
+    // the room is far behind the knot: out of focus
+    photoBackgroundProgram_->setUniformValue("uBlur", 2.2f);
+
+    photoBackgroundProgram_->setUniformValue(
+        "uExposure",
+        static_cast<float>(lighting_.brightness) / 100.0f);
+
+    backgroundVao_.bind();
+
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    backgroundVao_.release();
+    photoBackgroundProgram_->release();
+
+    glDepthMask(GL_TRUE);
+}
+
+void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
+{
+    if (!photoFloorProgram_ || !photoFloorProgram_->isLinked() ||
+        floorColorTexture_ == 0)
+    {
+        return;
+    }
+
+    const float y = photoFloorLevel();
+
+    const QVector3D centre(
+        0.5f * (meshMin_.x() + meshMax_.x()),
+        y,
+        0.5f * (meshMin_.z() + meshMax_.z()));
+
+    const float knotRadius = 0.5f * (meshMax_ - meshMin_).length();
+    const float half = std::max(40.0f, 12.0f * knotRadius);
+
+    // Everything is to scale with the rope: its real thickness sets how
+    // large one picture of the surface is.
+    const float tubeRadius =
+        mesh_.centerline.size() >= 4 ? mesh_.centerline.at(3) : 0.1f;
+
+    const float worldPerMm =
+        2.0f * tubeRadius / static_cast<float>(std::max(photoInfo_.ropeMm, 0.1));
+
+    const float tile = static_cast<float>(photoInfo_.floorTileMm) * worldPerMm;
+
+    const QVector3D eye = computeCameraPosition() + panOffset_;
+
+    const QVector<QVector4D> points = contactShadowPoints(y);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    photoFloorProgram_->bind();
+
+    setShadowUniforms(*photoFloorProgram_, lighting_.floorShadow);
+    setPhotoUniforms(*photoFloorProgram_);
+
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D, floorColorTexture_);
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_2D, floorNormalTexture_);
+    glActiveTexture(GL_TEXTURE7);
+    glBindTexture(GL_TEXTURE_2D, floorRoughnessTexture_);
+    glActiveTexture(GL_TEXTURE0);
+
+    photoFloorProgram_->setUniformValue("uFloorColor", 5);
+    photoFloorProgram_->setUniformValue("uFloorNormal", 6);
+    photoFloorProgram_->setUniformValue("uFloorRoughness", 7);
+
+    photoFloorProgram_->setUniformValue("uViewProjection", viewProjection);
+    photoFloorProgram_->setUniformValue("uCentre", centre);
+    photoFloorProgram_->setUniformValue("uHalf", half);
+    photoFloorProgram_->setUniformValue("uTile", tile);
+    photoFloorProgram_->setUniformValue("uCameraPosition", eye);
+    photoFloorProgram_->setUniformValue("uFocus", std::max((eye - centre).length(), 0.1f));
+
+    photoFloorProgram_->setUniformValueArray("uPoints", points.constData(), points.size());
+    photoFloorProgram_->setUniformValue("uCount", static_cast<int>(points.size()));
+    photoFloorProgram_->setUniformValue("uContact", lighting_.contactShadow ? 0.85f : 0.0f);
+
+    photoFloorProgram_->setUniformValue("uFadeCentre", QVector2D(centre.x(), centre.z()));
+    photoFloorProgram_->setUniformValue("uFadeRadius", half);
+
+    photoFloorProgram_->setUniformValue(
+        "uExposure",
+        static_cast<float>(lighting_.brightness) / 100.0f);
+
+    photoFloorProgram_->setUniformValue("uReflections", lighting_.reflections ? 1.0f : 0.0f);
+
+    backgroundVao_.bind();
+
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    backgroundVao_.release();
+    photoFloorProgram_->release();
+
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
 }

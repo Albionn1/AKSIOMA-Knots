@@ -64,6 +64,14 @@
         <translation>Animacioni i zgjidhjes: ndryshime kryqëzimesh deri te një diagram zbritës, i cili është gjithmonë nyja triviale.</translation>
     </message>
     <message>
+        <source>PHOTO MODE</source>
+        <translation>MËNYRA FOTO</translation>
+    </message>
+    <message>
+        <source>The rooms and surfaces of Photo mode come from &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; and are free for any use (CC0): the HDRIs Brown Photostudio 02 (Sergej Majboroda) and Lebombo (Greg Zaal), the textures Wood Table 001 (Dimitrios Savva, Rico Cilliers) and Laminate Floor 02 (Charlotte Baglioni, Dario Barresi).</source>
+        <translation>Dhomat dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): fotografitë HDRI Brown Photostudio 02 (Sergej Majboroda) dhe Lebombo (Greg Zaal), teksturat Wood Table 001 (Dimitrios Savva, Rico Cilliers) dhe Laminate Floor 02 (Charlotte Baglioni, Dario Barresi).</translation>
+    </message>
+    <message>
         <source>About Qt</source>
         <translation>Rreth Qt</translation>
     </message>
@@ -1282,6 +1290,26 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Ushtrime mbi diagramin e nyjës: trengjyrësimi, shenjat e kryqëzimeve</translation>
     </message>
     <message>
+        <source>Photo</source>
+        <translation>Foto</translation>
+    </message>
+    <message>
+        <source>Show the knot as a real rope lying on a real surface, lit by a photographed room: the highest quality, with soft shadows.</source>
+        <translation>Shfaq nyjën si një litar të vërtetë të shtrirë mbi një sipërfaqe të vërtetë, të ndriçuar nga një dhomë e fotografuar: cilësia më e lartë, me hije të buta.</translation>
+    </message>
+    <message>
+        <source>Rope on a studio table</source>
+        <translation>Litar mbi një tavolinë studioje</translation>
+    </message>
+    <message>
+        <source>Shoelace on a wooden floor</source>
+        <translation>Lidhëse këpucësh mbi dysheme druri</translation>
+    </message>
+    <message>
+        <source>Where the knot is photographed.</source>
+        <translation>Ku fotografohet nyja.</translation>
+    </message>
+    <message>
         <source>GENERAL</source>
         <translation>TË PËRGJITHSHME</translation>
     </message>
@@ -1752,6 +1780,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Choose Tube Color</source>
         <translation>Zgjidh ngjyrën e tubit</translation>
+    </message>
+    <message>
+        <source>The photographed room could not be loaded.</source>
+        <translation>Dhoma e fotografuar nuk mund të ngarkohej.</translation>
     </message>
     <message>
         <source>The requested curve could not be generated.

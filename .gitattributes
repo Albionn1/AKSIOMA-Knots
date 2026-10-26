@@ -1,0 +1,5 @@
+# Pictures and photographs are binary: never convert their line endings
+*.hdr binary
+*.jpg binary
+*.png binary
+*.dat binary

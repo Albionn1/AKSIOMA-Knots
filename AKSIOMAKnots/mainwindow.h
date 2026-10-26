@@ -71,6 +71,9 @@ private slots:
 
     void resetCamera();
 
+    // Photo button and scene list -> the 3D view
+    void applyPhotoMode();
+
     void updateLearnSection();
 
     void drawKnotDialog();
@@ -403,6 +406,13 @@ private:
         nullptr;
 
     QPushButton *leftGenerateButton_ =
+        nullptr;
+
+    // Photo mode (photoscene.h): on and off, and where the knot lies
+    QPushButton *photoButton_ =
+        nullptr;
+
+    QComboBox *photoSceneCombo_ =
         nullptr;
 
     QPushButton *resetCameraButton_ =

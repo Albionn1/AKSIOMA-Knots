@@ -68,6 +68,9 @@ AboutDialog::AboutDialog(QWidget *parent)
             "<div %4>%8</div>"
             "<p>%9</p>"
 
+            "<div %4>%15</div>"
+            "<p>%16</p>"
+
             "<div %4>%10</div>"
             "<ul style='margin-left:-20px;'>"
             "<li>%11</li>"
@@ -108,7 +111,14 @@ AboutDialog::AboutDialog(QWidget *parent)
                  tr("Jones polynomial: Kauffman bracket state sum (L. H. Kauffman, "
                     "1987)."),
                  tr("Unknotting animation: crossing changes to a descending "
-                    "diagram, which is always an unknot."))));
+                    "diagram, which is always an unknot."))
+            .arg(tr("PHOTO MODE"),
+                 tr("The rooms and surfaces of Photo mode come from "
+                    "<a href='https://polyhaven.com' style='color:#D99B42;'>Poly Haven</a> "
+                    "and are free for any use (CC0): the HDRIs Brown Photostudio 02 "
+                    "(Sergej Majboroda) and Lebombo (Greg Zaal), the textures Wood "
+                    "Table 001 (Dimitrios Savva, Rico Cilliers) and Laminate Floor 02 "
+                    "(Charlotte Baglioni, Dario Barresi)."))));
 
     layout->addWidget(text, 1);
 

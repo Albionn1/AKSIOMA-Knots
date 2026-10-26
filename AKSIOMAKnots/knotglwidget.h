@@ -3,6 +3,7 @@
 
 #include "knotmath.h"
 #include "lighting.h"
+#include "photoscene.h"
 
 #include <QColor>
 #include <QElapsedTimer>
@@ -134,8 +135,18 @@ public:
     MemoryUse memoryUse() const;
 
     // Surface look: 0 glossy, 1 satin, 2 metal, 3 rope (fibre pattern),
-    // roughness 0 (mirror) .. 1 (matte).
+    // 4 braided lace, roughness 0 (mirror) .. 1 (matte).
     void setSurface(int material, float roughness);
+
+    // Photo mode (photoscene.h): the knot as a real rope lying on a real
+    // surface in a photographed room, at the highest quality. The knot is
+    // laid down flat (turned so that its thinnest direction points up);
+    // positions given to and from the view (crossings, flashes, bounds,
+    // the rope) stay in the knot's own coordinates. Call resetCamera
+    // afterwards to frame it. False if the room could not be loaded.
+    bool setPhotoMode(bool enabled, Photo::Scene scene);
+
+    bool photoMode() const;
 
     void setAutoRotation(bool enabled);
 
@@ -335,6 +346,47 @@ private:
 
     void configureFlatAttributes();
 
+    // Photo mode
+    void initializePhotoShaders();
+
+    // the room and the surface of photoScene_ on the graphics card
+    // (context current); false if they could not be loaded
+    bool loadPhotoScene();
+    void destroyPhotoResources();
+
+    // GL texture from a picture in the resources, with mipmaps
+    GLuint loadTexture(const QString &path);
+
+    // pose_ from the shape of rawMesh_, and mesh_ = rawMesh_ in that pose
+    void computePose();
+    void applyPose();
+
+    // applyPose, then the bounds and the mesh on the card
+    void refreshPose();
+
+    // a point of the knot (its own coordinates) in the view, and back
+    QVector3D posed(const QVector3D &point) const;
+    QVector3D unposed(const QVector3D &point) const;
+
+    // meshMin_ and meshMax_ from the fixed bounds (in the pose)
+    void poseFixedBounds();
+
+    // the room, the lights and the exposure, for the photo shaders
+    void setPhotoUniforms(QOpenGLShaderProgram &program);
+
+    // direction towards the room's main light, in the view
+    QVector3D photoKeyDirection() const;
+
+    void drawPhotoBackground(const QMatrix4x4 &viewProjection);
+    void drawPhotoFloor(const QMatrix4x4 &viewProjection);
+
+    // Blurred soft-shadow blobs under the knot (x, z, sigma, weight) for
+    // the ground at height groundY.
+    QVector<QVector4D> contactShadowPoints(float groundY) const;
+
+    // height of the floor in Photo mode: right under the knot
+    float photoFloorLevel() const;
+
     void initializeParticles();
     void respawnParticle(Particle &particle, bool randomAge);
     void updateParticles(float dt);
@@ -460,6 +512,64 @@ private:
 
     QTimer animationTimer_;
     QElapsedTimer frameClock_;
+
+    /*
+     * Photo mode
+     */
+    bool photo_ = false;
+    Photo::Scene photoScene_ = Photo::Scene::StudioTable;
+    Photo::SceneInfo photoInfo_;
+
+    // scene whose textures are loaded (-1: none)
+    int loadedScene_ = -1;
+
+    // the room's light (the pictures themselves are on the card)
+    Photo::Environment environment_;
+
+    // the room (with mipmaps), the room blurred for each roughness (mip
+    // level i is roughness i / 5) and the surface
+    GLuint environmentTexture_ = 0;
+    GLuint specularTexture_ = 0;
+    GLuint floorColorTexture_ = 0;
+    GLuint floorNormalTexture_ = 0;
+    GLuint floorRoughnessTexture_ = 0;
+
+    // reads the shadow map as plain depth (the blocker search of the
+    // contact-hardening shadows)
+    GLuint depthSampler_ = 0;
+
+    // average colour of the surface (linear), the camera's exposure for
+    // the room, and the video memory of the photo pictures
+    QVector3D floorAlbedo_ = QVector3D(0.3f, 0.3f, 0.3f);
+    float photoExposure_ = 1.0f;
+    qint64 photoBytes_ = 0;
+
+    std::unique_ptr<QOpenGLShaderProgram> photoBackgroundProgram_;
+    std::unique_ptr<QOpenGLShaderProgram> photoFloorProgram_;
+    std::unique_ptr<QOpenGLShaderProgram> prefilterProgram_;
+
+    // the shadow map size outside Photo mode (it is larger in it)
+    int normalShadowMapSize_ = Lighting::shadowMapSize(1);
+
+    // light-space depth range and map width in world units (PCSS)
+    float shadowDepthRange_ = 1.0f;
+    float shadowMapWorld_ = 1.0f;
+
+    // the knot as given, and the turn that lays it down in Photo mode
+    KnotMath::Mesh rawMesh_;
+    QMatrix4x4 pose_;
+    bool poseDirty_ = true;
+
+    // fixed bounds as given (the knot's own coordinates)
+    QVector3D rawFixedMin_;
+    QVector3D rawFixedMax_;
+
+    // Photo mode: the table is right under the rope. During an animation
+    // (fixed bounds) it stays where the rope lay when it began.
+    float tableLevel_ = 0.0f;
+
+    // lowest point of the mesh (the view's coordinates)
+    float meshBottom() const;
 };
 
 #endif // KNOTGLWIDGET_H

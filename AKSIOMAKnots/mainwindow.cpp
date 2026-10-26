@@ -13,6 +13,7 @@
 #include "timelineslider.h"
 #include "unknotsummarydialog.h"
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -246,8 +247,44 @@ MainWindow::MainWindow(
     resetCameraButton_->setToolTip(
         tr("Turn to the clearest view of the knot and fit it in the window."));
 
+    // Photo mode: the knot as a real rope lying on a real surface
+    photoButton_ = new QPushButton(tr("Photo"), viewBar);
+
+    photoButton_->setCheckable(true);
+
+    photoButton_->setToolTip(
+        tr("Show the knot as a real rope lying on a real surface, lit by a "
+           "photographed room: the highest quality, with soft shadows."));
+
+    photoSceneCombo_ = new QComboBox(viewBar);
+
+    photoSceneCombo_->addItem(
+        tr("Rope on a studio table"),
+        static_cast<int>(Photo::Scene::StudioTable));
+
+    photoSceneCombo_->addItem(
+        tr("Shoelace on a wooden floor"),
+        static_cast<int>(Photo::Scene::Shoelaces));
+
+    photoSceneCombo_->setToolTip(tr("Where the knot is photographed."));
+    photoSceneCombo_->setVisible(false);
+
+    connect(
+        photoButton_,
+        &QPushButton::toggled,
+        this,
+        [this]() { applyPhotoMode(); });
+
+    connect(
+        photoSceneCombo_,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this]() { applyPhotoMode(); });
+
     viewBarLayout->addWidget(navigationHint);
     viewBarLayout->addStretch(1);
+    viewBarLayout->addWidget(photoSceneCombo_);
+    viewBarLayout->addWidget(photoButton_);
     viewBarLayout->addWidget(resetCameraButton_);
 
     viewportLayout->addWidget(viewBar);
@@ -3262,6 +3299,44 @@ void MainWindow::resetCamera()
     // levels show
     if (glWidget_ != nullptr)
         glWidget_->resetCamera(seifertActive_ ? 45.0f : 75.0f);
+}
+
+void MainWindow::applyPhotoMode()
+{
+    if (glWidget_ == nullptr || photoButton_ == nullptr || photoSceneCombo_ == nullptr)
+        return;
+
+    const bool on = photoButton_->isChecked();
+
+    photoSceneCombo_->setVisible(on);
+
+    const auto scene =
+        static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
+
+    // the room is read and prepared on the graphics card (a moment)
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+
+    const bool ok = glWidget_->setPhotoMode(on, scene);
+
+    QApplication::restoreOverrideCursor();
+
+    if (!ok)
+    {
+        {
+            const QSignalBlocker blocker(photoButton_);
+
+            photoButton_->setChecked(false);
+        }
+
+        photoSceneCombo_->setVisible(false);
+
+        QMessageBox::warning(
+            this,
+            tr("AKSIOMA: Knots"),
+            tr("The photographed room could not be loaded."));
+    }
+
+    resetCamera();
 }
 
 void MainWindow::showError(

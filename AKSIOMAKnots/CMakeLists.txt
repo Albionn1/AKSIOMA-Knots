@@ -43,6 +43,8 @@ qt_add_executable(AKSIOMAKnots
     knotseifert.cpp
     knotjoin.h
     knotjoin.cpp
+    photoscene.h
+    photoscene.cpp
     timelineslider.h
     timelineslider.cpp
     knottable.h
@@ -81,6 +83,22 @@ qt_add_resources(AKSIOMAKnots "knottable"
     PREFIX "/"
     BIG_RESOURCES
     FILES data/knottable.dat
+)
+
+# Photo mode: two rooms (HDRIs) and two surfaces from Poly Haven, CC0
+# (data/photo/CREDITS.txt). About 15 MB, linked in as binary data too.
+qt_add_resources(AKSIOMAKnots "photo"
+    PREFIX "/"
+    BIG_RESOURCES
+    FILES
+        data/photo/brown_photostudio_02_2k.hdr
+        data/photo/lebombo_2k.hdr
+        data/photo/wood_table_001_diff.jpg
+        data/photo/wood_table_001_nor_gl.jpg
+        data/photo/wood_table_001_rough.jpg
+        data/photo/laminate_floor_02_diff.jpg
+        data/photo/laminate_floor_02_nor_gl.jpg
+        data/photo/laminate_floor_02_rough.jpg
 )
 
 target_link_libraries(AKSIOMAKnots PRIVATE
