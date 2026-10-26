@@ -148,6 +148,15 @@ public:
 
     bool photoMode() const;
 
+    // Photo mode: the rope at rest on the table (ropephysics.h), as built
+    // by Photo::buildRopeMesh, and the turn that took the knot onto the
+    // table (the table top is y = 0 after it). The knot keeps this pose
+    // (also for the animations that follow) until clearRestingPose.
+    void setRestingRope(const KnotMath::Mesh &mesh, const QMatrix4x4 &pose);
+
+    // back to laying the knot down by its shape
+    void clearRestingPose();
+
     void setAutoRotation(bool enabled);
 
     // Grab and pull the rope. While it is on, a left press on the tube
@@ -374,18 +383,36 @@ private:
     // the room, the lights and the exposure, for the photo shaders
     void setPhotoUniforms(QOpenGLShaderProgram &program);
 
-    // direction towards the room's main light, in the view
+    // direction towards the sun, in the view
     QVector3D photoKeyDirection() const;
+
+    // millimetres -> the view's units (from the rope's real thickness)
+    float worldPerMm() const;
 
     void drawPhotoBackground(const QMatrix4x4 &viewProjection);
     void drawPhotoFloor(const QMatrix4x4 &viewProjection);
 
-    // Blurred soft-shadow blobs under the knot (x, z, sigma, weight) for
-    // the ground at height groundY.
-    QVector<QVector4D> contactShadowPoints(float groundY) const;
+    // the frame drawn in Photo mode (HDR, multisampled) and its resolved
+    // copy; (re)made at the size of the view
+    bool preparePhotoFrame(int width, int height);
+    void destroyPhotoFrame();
+
+    // the camera: depth of field, exposure and film, into the view
+    void developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &projection);
+
+    // the table top (or floor) and its sides, around the knot
+    void rebuildSurfaceGeometry();
+
+    // How much of the room the table sees past the rope at every point
+    // around the knot (view factors), drawn into occlusionTexture_.
+    void bakeSurfaceOcclusion();
 
     // height of the floor in Photo mode: right under the knot
     float photoFloorLevel() const;
+
+    // Blurred soft-shadow blobs under the knot (x, z, sigma, weight) for
+    // the ground at height groundY.
+    QVector<QVector4D> contactShadowPoints(float groundY) const;
 
     void initializeParticles();
     void respawnParticle(Particle &particle, bool randomAge);
@@ -517,7 +544,7 @@ private:
      * Photo mode
      */
     bool photo_ = false;
-    Photo::Scene photoScene_ = Photo::Scene::StudioTable;
+    Photo::Scene photoScene_ = Photo::Scene::LoungeTable;
     Photo::SceneInfo photoInfo_;
 
     // scene whose textures are loaded (-1: none)
@@ -534,6 +561,42 @@ private:
     GLuint floorNormalTexture_ = 0;
     GLuint floorRoughnessTexture_ = 0;
 
+    // the mesh is the rope at rest (setRestingRope): drawn with its real
+    // strands or yarns; and the pose came with it
+    bool restingRope_ = false;
+    bool restingPose_ = false;
+    QMatrix4x4 restPose_;
+
+    // the frame: multisampled HDR colour and depth, resolved into textures
+    // (the colour with mipmaps, for the blur)
+    GLuint photoFramebuffer_ = 0;
+    GLuint photoColorBuffer_ = 0;
+    GLuint photoDepthBuffer_ = 0;
+    GLuint resolveFramebuffer_ = 0;
+    GLuint resolvedColor_ = 0;
+    GLuint resolvedDepth_ = 0;
+    int photoFrameWidth_ = 0;
+    int photoFrameHeight_ = 0;
+    qint64 photoFrameBytes_ = 0;
+
+    // the table top and its sides: position, normal, tangent, picture
+    // coordinates (11 floats a vertex)
+    QOpenGLVertexArrayObject surfaceVao_;
+    QOpenGLBuffer surfaceBuffer_;
+    int surfaceVertexCount_ = 0;
+    bool surfaceDirty_ = true;
+
+    // the table's view of the room past the rope, over the square
+    // occlusionArea_ (x, z of the middle, half size)
+    GLuint occlusionTexture_ = 0;
+    GLuint occlusionFramebuffer_ = 0;
+    GLuint segmentTexture_ = 0;
+    QVector3D occlusionArea_;
+    bool occlusionDirty_ = true;
+
+    std::unique_ptr<QOpenGLShaderProgram> developProgram_;
+    std::unique_ptr<QOpenGLShaderProgram> occlusionProgram_;
+
     // reads the shadow map as plain depth (the blocker search of the
     // contact-hardening shadows)
     GLuint depthSampler_ = 0;
@@ -542,6 +605,10 @@ private:
     // the room, and the video memory of the photo pictures
     QVector3D floorAlbedo_ = QVector3D(0.3f, 0.3f, 0.3f);
     float photoExposure_ = 1.0f;
+
+    // the room's pictures hold its light divided by this (half floats
+    // cannot hold an unclipped sun)
+    float photoRoomScale_ = 1.0f;
     qint64 photoBytes_ = 0;
 
     std::unique_ptr<QOpenGLShaderProgram> photoBackgroundProgram_;

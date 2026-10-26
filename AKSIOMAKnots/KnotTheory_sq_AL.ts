@@ -68,8 +68,8 @@
         <translation>MËNYRA FOTO</translation>
     </message>
     <message>
-        <source>The rooms and surfaces of Photo mode come from &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; and are free for any use (CC0): the HDRIs Brown Photostudio 02 (Sergej Majboroda) and Lebombo (Greg Zaal), the textures Wood Table 001 (Dimitrios Savva, Rico Cilliers) and Laminate Floor 02 (Charlotte Baglioni, Dario Barresi).</source>
-        <translation>Dhomat dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): fotografitë HDRI Brown Photostudio 02 (Sergej Majboroda) dhe Lebombo (Greg Zaal), teksturat Wood Table 001 (Dimitrios Savva, Rico Cilliers) dhe Laminate Floor 02 (Charlotte Baglioni, Dario Barresi).</translation>
+        <source>The rooms and surfaces of Photo mode come from &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; and are free for any use (CC0): the HDRIs Aft Lounge (Greg Zaal) and Country Club (Sergej Majboroda), the textures Wood Table Large and Wood Floor Worn (Dimitrios Savva). The rope lies down by position based dynamics (XPBD: M. Macklin, M. Müller and N. Chentanez, 2016).</source>
+        <translation>Dhomat dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): HDRI-të Aft Lounge (Greg Zaal) dhe Country Club (Sergej Majboroda), teksturat Wood Table Large dhe Wood Floor Worn (Dimitrios Savva). Litari shtrihet me dinamikë të bazuar në pozicione (XPBD: M. Macklin, M. Müller dhe N. Chentanez, 2016).</translation>
     </message>
     <message>
         <source>About Qt</source>
@@ -1106,6 +1106,18 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>NYJA</translation>
     </message>
     <message>
+        <source>Show the knot as a real rope: it falls onto a table under its own weight and comes to rest, in a sunlit room photographed with its real light.</source>
+        <translation>Shfaq nyjën si një litar të vërtetë: bie mbi një tavolinë nga pesha e vet dhe qetësohet, në një dhomë me diell të fotografuar me dritën e saj të vërtetë.</translation>
+    </message>
+    <message>
+        <source>Hemp rope on a table, low sun</source>
+        <translation>Litar kërpi mbi tavolinë, diell i ulët</translation>
+    </message>
+    <message>
+        <source>Shoelace on a sunlit floor</source>
+        <translation>Lidhëse këpucësh mbi dysheme me diell</translation>
+    </message>
+    <message>
         <source>Unknot</source>
         <translation>Nyja triviale</translation>
     </message>
@@ -1292,18 +1304,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Photo</source>
         <translation>Foto</translation>
-    </message>
-    <message>
-        <source>Show the knot as a real rope lying on a real surface, lit by a photographed room: the highest quality, with soft shadows.</source>
-        <translation>Shfaq nyjën si një litar të vërtetë të shtrirë mbi një sipërfaqe të vërtetë, të ndriçuar nga një dhomë e fotografuar: cilësia më e lartë, me hije të buta.</translation>
-    </message>
-    <message>
-        <source>Rope on a studio table</source>
-        <translation>Litar mbi një tavolinë studioje</translation>
-    </message>
-    <message>
-        <source>Shoelace on a wooden floor</source>
-        <translation>Lidhëse këpucësh mbi dysheme druri</translation>
     </message>
     <message>
         <source>Where the knot is photographed.</source>

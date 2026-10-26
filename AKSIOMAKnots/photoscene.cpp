@@ -247,8 +247,205 @@ Environment loadEnvironment(const QString &path)
     environment.height = height;
 
     /*
-     * The light is found on a small copy of the picture (each texel the
-     * average of a block), with the solid angle every texel covers.
+     * The sun. An unclipped photograph keeps its true brightness: many
+     * thousand times the brightest wall. It is the brightest point above
+     * the horizon, together with everything around it brighter than a
+     * hundredth of that (the disc and the glow of the glass it shines
+     * through), found pixel by pixel at full resolution. What it has above
+     * the room around it becomes the sun's light; the room keeps the rest,
+     * so nothing is counted twice.
+     */
+    auto luminanceAt = [&environment, width](int x, int y)
+    {
+        const float *p = environment.pixels.constData() + (y * width + x) * 3;
+
+        return luminance(QVector3D(p[0], p[1], p[2]));
+    };
+
+    // solid angle of a pixel in row y
+    auto pixelSolidAngle = [width, height](int y)
+    {
+        return (2.0 * Pi / width) * (Pi / height) * std::sin((y + 0.5) / height * Pi);
+    };
+
+    int peakX = 0;
+    int peakY = 0;
+    float peak = -1.0f;
+
+    for (int y = 0; y < height / 2; ++y)
+    {
+        for (int x = 0; x < width; ++x)
+        {
+            const float l = luminanceAt(x, y);
+
+            if (l > peak)
+            {
+                peak = l;
+                peakX = x;
+                peakY = y;
+            }
+        }
+    }
+
+    const float threshold = 0.01f * peak;
+
+    // the region around the peak (the picture wraps around left and right)
+    QVector<unsigned char> inSun(width * height, 0);
+    QVector<int> region;
+    QVector<int> queue;
+
+    queue.push_back(peakY * width + peakX);
+    inSun[peakY * width + peakX] = 1;
+
+    // at most about 4 degrees across: a sun, not a window
+    const int largest = static_cast<int>(0.015 / ((2.0 * Pi / width) * (Pi / height)));
+
+    while (!queue.isEmpty() && region.size() < largest)
+    {
+        const int i = queue.takeLast();
+
+        region.push_back(i);
+
+        const int x = i % width;
+        const int y = i / width;
+
+        const int neighbours[4][2] = {{x + 1, y}, {x - 1, y}, {x, y + 1}, {x, y - 1}};
+
+        for (const auto &n : neighbours)
+        {
+            const int nx = (n[0] + width) % width;
+            const int ny = n[1];
+
+            if (ny < 0 || ny >= height)
+                continue;
+
+            const int j = ny * width + nx;
+
+            if (inSun[j] == 0 && luminanceAt(nx, ny) > threshold)
+            {
+                inSun[j] = 1;
+                queue.push_back(j);
+            }
+        }
+    }
+
+    // the room around it: the median of the pixels next to the region
+    QVector<float> rim;
+
+    for (const int i : region)
+    {
+        const int x = i % width;
+        const int y = i / width;
+
+        for (int dy = -2; dy <= 2; ++dy)
+        {
+            for (int dx = -2; dx <= 2; ++dx)
+            {
+                const int nx = (x + dx + width) % width;
+                const int ny = y + dy;
+
+                if (ny >= 0 && ny < height && inSun[ny * width + nx] == 0)
+                    rim.push_back(luminanceAt(nx, ny));
+            }
+        }
+    }
+
+    float around = 0.0f;
+
+    if (!rim.isEmpty())
+    {
+        std::nth_element(rim.begin(), rim.begin() + rim.size() / 2, rim.end());
+        around = rim.at(rim.size() / 2);
+    }
+
+    // its light, its middle (weighted by brightness) and its size; the
+    // picture keeps the sun (it is seen in the room and in reflections),
+    // the room's soft light is computed without it
+    QVector<QVector3D> taken(region.size());
+
+    QVector3D sunLight;
+    QVector3D middle;
+    double weight = 0.0;
+
+    for (int k = 0; k < region.size(); ++k)
+    {
+        const int i = region.at(k);
+        const int x = i % width;
+        const int y = i / width;
+
+        float *p = environment.pixels.data() + i * 3;
+
+        const QVector3D c(p[0], p[1], p[2]);
+        const float l = luminance(c);
+
+        if (l <= around)
+            continue;
+
+        // what lies above the room, in its own colour
+        const QVector3D above = c * ((l - around) / l);
+        const double omega = pixelSolidAngle(y);
+
+        sunLight += above * static_cast<float>(omega);
+        middle += directionAt((x + 0.5) / width, (y + 0.5) / height) *
+                  static_cast<float>((l - around) * omega);
+        weight += (l - around) * omega;
+
+        // the room is left with the light around the sun
+        const QVector3D rest = c * (around / l);
+
+        taken[k] = c - rest;
+
+        p[0] = rest.x();
+        p[1] = rest.y();
+        p[2] = rest.z();
+    }
+
+    if (weight > 0.0)
+    {
+        environment.sunDirection = middle.normalized();
+
+        // for light spread evenly over a disc of radius r the mean square
+        // angle from its middle is r^2 / 2
+        double spread = 0.0;
+
+        for (const int i : region)
+        {
+            const QVector3D d =
+                directionAt((i % width + 0.5) / width, (i / width + 0.5) / height);
+
+            const double angle = std::acos(std::clamp(
+                static_cast<double>(QVector3D::dotProduct(d, environment.sunDirection)),
+                -1.0,
+                1.0));
+
+            spread += angle * angle * pixelSolidAngle(i / width);
+        }
+
+        // the size of the region itself (each pixel equally): the light is
+        // concentrated in its middle, so this is the most it can be
+        double area = 0.0;
+
+        for (const int i : region)
+            area += pixelSolidAngle(i / width);
+
+        const double meanSquare = spread / std::max(area, 1.0e-12);
+
+        // the sun itself is 0.27 degrees in radius; the glow around it
+        // (glass, haze) makes the light larger and its shadows softer
+        environment.sunRadius = static_cast<float>(std::clamp(
+            std::sqrt(2.0 * meanSquare),
+            0.0047,
+            0.05));
+
+        environment.sunIrradiance = sunLight;
+    }
+
+    /*
+     * The room's light as spherical harmonics, multiplied by the cosine
+     * lobe (pi, 2 pi / 3, pi / 4 for the three orders): irradiance. Only
+     * the upper half: below the horizon the knot sees the surface it lies
+     * on, not the room's floor far below. Done on a small copy of the
+     * picture (each texel the average of a block).
      */
     const int smallWidth = std::min(256, width);
     const int smallHeight = std::min(128, height);
@@ -256,13 +453,10 @@ Environment loadEnvironment(const QString &path)
     const int blockX = width / smallWidth;
     const int blockY = height / smallHeight;
 
-    const int texels = smallWidth * smallHeight;
+    for (QVector3D &c : environment.irradiance)
+        c = QVector3D();
 
-    QVector<QVector3D> color(texels);
-    QVector<QVector3D> direction(texels);
-    QVector<float> solidAngle(texels);
-
-    for (int ty = 0; ty < smallHeight; ++ty)
+    for (int ty = 0; ty < smallHeight / 2; ++ty)
     {
         const double v = (ty + 0.5) / smallHeight;
 
@@ -283,146 +477,15 @@ Environment loadEnvironment(const QString &path)
                     sum += QVector3D(p[bx * 3], p[bx * 3 + 1], p[bx * 3 + 2]);
             }
 
-            const int i = ty * smallWidth + tx;
+            const QVector3D color = sum / static_cast<float>(blockX * blockY);
 
-            color[i] = sum / static_cast<float>(blockX * blockY);
-            direction[i] = directionAt((tx + 0.5) / smallWidth, v);
-            solidAngle[i] = omega;
+            float y[9];
+
+            harmonics(directionAt((tx + 0.5) / smallWidth, v), y);
+
+            for (int k = 0; k < 9; ++k)
+                environment.irradiance[k] += color * (y[k] * omega);
         }
-    }
-
-    /*
-     * The main light: texels much brighter than the room around them. The
-     * cut is the brightest 5% of the texels (a window is large), and at
-     * least twice the average brightness: about as much light comes from
-     * the main light as from the rest of the room together, or more, as in
-     * a photograph lit by a window. The light is the brightest cluster of what lies
-     * above the cut: the 25 degree cone holding most of it, widened to 35
-     * degrees. What it has above the cut becomes the light; the room keeps
-     * the rest (so nothing is counted twice).
-     */
-    QVector<float> lum(texels);
-
-    double average = 0.0;
-    double area = 0.0;
-
-    for (int i = 0; i < texels; ++i)
-    {
-        lum[i] = luminance(color[i]);
-
-        average += lum[i] * solidAngle[i];
-        area += solidAngle[i];
-    }
-
-    average /= std::max(area, 1e-9);
-
-    QVector<float> sorted = lum;
-
-    std::nth_element(sorted.begin(), sorted.begin() + (texels * 95) / 100, sorted.end());
-
-    const float cut =
-        std::max(sorted.at((texels * 95) / 100), static_cast<float>(2.0 * average));
-
-    QVector<int> bright;
-
-    for (int i = 0; i < texels; ++i)
-    {
-        if (lum[i] > cut)
-            bright.push_back(i);
-    }
-
-    auto excess = [&](int i)
-    {
-        return (lum[i] - cut) * solidAngle[i];
-    };
-
-    QVector<QVector3D> room = color;
-
-    if (!bright.isEmpty())
-    {
-        const float narrow = static_cast<float>(std::cos(25.0 * Pi / 180.0));
-        const float wide = static_cast<float>(std::cos(35.0 * Pi / 180.0));
-
-        // the cone of 25 degrees around a bright texel holding the most
-        int best = bright.first();
-        float bestEnergy = -1.0f;
-
-        for (const int centre : bright)
-        {
-            float energy = 0.0f;
-
-            for (const int i : bright)
-            {
-                if (QVector3D::dotProduct(direction[i], direction[centre]) > narrow)
-                    energy += excess(i);
-            }
-
-            if (energy > bestEnergy)
-            {
-                bestEnergy = energy;
-                best = centre;
-            }
-        }
-
-        // its middle, weighted by brightness
-        QVector3D middle;
-
-        for (const int i : bright)
-        {
-            if (QVector3D::dotProduct(direction[i], direction[best]) > narrow)
-                middle += direction[i] * excess(i);
-        }
-
-        const QVector3D key = middle.normalized();
-
-        QVector3D irradiance;
-        double weight = 0.0;
-        double spread = 0.0;
-
-        for (const int i : bright)
-        {
-            const float facing = QVector3D::dotProduct(direction[i], key);
-
-            if (facing <= wide)
-                continue;
-
-            // what lies above the cut, in its own colour
-            const QVector3D above = color[i] * ((lum[i] - cut) / lum[i]);
-
-            irradiance += above * (solidAngle[i] * facing);
-
-            weight += excess(i);
-            spread += excess(i) * std::acos(std::min(facing, 1.0f));
-
-            room[i] = color[i] * (cut / lum[i]);
-        }
-
-        environment.keyDirection = key;
-        environment.keyIrradiance = irradiance;
-
-        // for light spread evenly over a disk of radius r the average angle
-        // from its middle is 2r/3
-        environment.keyRadius = static_cast<float>(std::clamp(
-            1.5 * spread / std::max(weight, 1e-12),
-            0.02,
-            0.35));
-    }
-
-    /*
-     * The room's light as spherical harmonics, multiplied by the cosine
-     * lobe (pi, 2 pi / 3, pi / 4 for the three orders): irradiance.
-     */
-    for (QVector3D &c : environment.irradiance)
-        c = QVector3D();
-
-    for (int i = 0; i < texels; ++i)
-    {
-        float y[9];
-
-        harmonics(direction[i], y);
-
-        for (int k = 0; k < 9; ++k)
-            environment.irradiance[k] += room[i] * (y[k] * solidAngle[i]);
     }
 
     const float lobe[9] = {
@@ -439,9 +502,176 @@ Environment loadEnvironment(const QString &path)
     for (int k = 0; k < 9; ++k)
         environment.irradiance[k] *= lobe[k];
 
+    // the sun back into the picture
+    for (int k = 0; k < region.size(); ++k)
+    {
+        float *p = environment.pixels.data() + region.at(k) * 3;
+
+        p[0] += taken.at(k).x();
+        p[1] += taken.at(k).y();
+        p[2] += taken.at(k).z();
+    }
+
     environment.valid = true;
 
     return environment;
+}
+
+QMatrix4x4 flatPose(const QVector<QVector3D> &points)
+{
+    /*
+     * A rope lies on a table with its thinnest direction up. That is the
+     * direction in which the points spread least: the eigenvector of the
+     * smallest eigenvalue of their covariance (Jacobi rotations). The
+     * longest direction goes along x.
+     */
+    QMatrix4x4 pose;
+
+    const int samples = points.size();
+
+    if (samples < 3)
+        return pose;
+
+    double mean[3] = {0.0, 0.0, 0.0};
+
+    for (const QVector3D &p : points)
+    {
+        mean[0] += p.x();
+        mean[1] += p.y();
+        mean[2] += p.z();
+    }
+
+    for (double &m : mean)
+        m /= samples;
+
+    double a[3][3] = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
+
+    for (const QVector3D &p : points)
+    {
+        const double d[3] = {p.x() - mean[0], p.y() - mean[1], p.z() - mean[2]};
+
+        for (int i = 0; i < 3; ++i)
+        {
+            for (int j = 0; j < 3; ++j)
+                a[i][j] += d[i] * d[j];
+        }
+    }
+
+    // eigenvectors are the columns of v
+    double v[3][3] = {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}};
+
+    for (int sweep = 0; sweep < 50; ++sweep)
+    {
+        // the largest entry off the diagonal
+        int p = 0;
+        int q = 1;
+
+        if (std::abs(a[0][2]) > std::abs(a[p][q]))
+        {
+            p = 0;
+            q = 2;
+        }
+
+        if (std::abs(a[1][2]) > std::abs(a[p][q]))
+        {
+            p = 1;
+            q = 2;
+        }
+
+        const double scale = std::abs(a[0][0]) + std::abs(a[1][1]) + std::abs(a[2][2]);
+
+        if (std::abs(a[p][q]) <= 1.0e-12 * std::max(scale, 1.0e-30))
+            break;
+
+        // the rotation in the (p, q) plane that clears a[p][q]
+        const double theta = 0.5 * std::atan2(2.0 * a[p][q], a[q][q] - a[p][p]);
+        const double c = std::cos(theta);
+        const double s = std::sin(theta);
+
+        for (int k = 0; k < 3; ++k)
+        {
+            const double kp = a[k][p];
+            const double kq = a[k][q];
+
+            a[k][p] = c * kp - s * kq;
+            a[k][q] = s * kp + c * kq;
+        }
+
+        for (int k = 0; k < 3; ++k)
+        {
+            const double pk = a[p][k];
+            const double qk = a[q][k];
+
+            a[p][k] = c * pk - s * qk;
+            a[q][k] = s * pk + c * qk;
+        }
+
+        for (int k = 0; k < 3; ++k)
+        {
+            const double kp = v[k][p];
+            const double kq = v[k][q];
+
+            v[k][p] = c * kp - s * kq;
+            v[k][q] = s * kp + c * kq;
+        }
+    }
+
+    int smallest = 0;
+    int largestAxis = 0;
+
+    for (int i = 1; i < 3; ++i)
+    {
+        if (a[i][i] < a[smallest][smallest])
+            smallest = i;
+
+        if (a[i][i] > a[largestAxis][largestAxis])
+            largestAxis = i;
+    }
+
+    if (smallest == largestAxis)
+        return pose;
+
+    auto column = [&v](int i)
+    {
+        return QVector3D(
+            static_cast<float>(v[0][i]),
+            static_cast<float>(v[1][i]),
+            static_cast<float>(v[2][i])).normalized();
+    };
+
+    QVector3D up = column(smallest);
+    QVector3D along = column(largestAxis);
+
+    // the least turn: the side that faced up (or the camera) stays up
+    if (up.y() + 0.5f * up.z() < 0.0f)
+        up = -up;
+
+    if (along.x() < 0.0f)
+        along = -along;
+
+    // exactly at right angles to up
+    along = (along - up * QVector3D::dotProduct(along, up)).normalized();
+
+    const QVector3D third = QVector3D::crossProduct(along, up);
+
+    // rows: the knot's directions go to x, y (up) and z
+    const QMatrix4x4 rotation(
+        along.x(), along.y(), along.z(), 0.0f,
+        up.x(), up.y(), up.z(), 0.0f,
+        third.x(), third.y(), third.z(), 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f);
+
+    const QVector3D centre(
+        static_cast<float>(mean[0]),
+        static_cast<float>(mean[1]),
+        static_cast<float>(mean[2]));
+
+    // turned about its own middle, so it stays where it was
+    pose.translate(centre);
+    pose *= rotation;
+    pose.translate(-centre);
+
+    return pose;
 }
 
 SceneInfo sceneInfo(Scene scene)
@@ -450,32 +680,56 @@ SceneInfo sceneInfo(Scene scene)
 
     switch (scene)
     {
-    case Scene::Shoelaces:
-        info.environment = QStringLiteral(":/data/photo/lebombo_2k.hdr");
-        info.floorColor = QStringLiteral(":/data/photo/laminate_floor_02_diff.jpg");
-        info.floorNormal = QStringLiteral(":/data/photo/laminate_floor_02_nor_gl.jpg");
-        info.floorRoughness = QStringLiteral(":/data/photo/laminate_floor_02_rough.jpg");
-        info.floorTileMm = 1700.0;
-        info.environmentYaw = 0.0f;
-        info.material = 4;
-        info.color = QColor(236, 232, 224);
-        info.roughness = 0.75f;
-        info.ropeMm = 5.0;
+    case Scene::BallroomFloor:
+        // a Victorian ballroom in the morning sun: tall windows, a worn
+        // board floor
+        info.environment = QStringLiteral(":/data/photo/country_club_4k.hdr");
+        info.cameraHeightM = 1.6;
+        info.roomRadiusM = 9.0;
+
+        info.surfaceColor = QStringLiteral(":/data/photo/wood_floor_worn_diff.jpg");
+        info.surfaceNormal = QStringLiteral(":/data/photo/wood_floor_worn_nor_gl.jpg");
+        info.surfaceRoughness = QStringLiteral(":/data/photo/wood_floor_worn_rough.jpg");
+        info.surfaceTileMm = 2000.0;
+
+        // a round braided cotton lace, 5 mm: it bends under its own weight
+        // within a couple of centimetres
+        info.rope.construction = 2;
+        info.rope.diameterMm = 5.0;
+        info.rope.bendingLengthMm = 20.0;
+        info.rope.frictionSurface = 0.4;
+        info.rope.frictionSelf = 0.5;
+        info.rope.color = QColor(236, 232, 224);
+        info.rope.roughness = 0.8f;
         break;
 
-    case Scene::StudioTable:
+    case Scene::LoungeTable:
     case Scene::Count:
     default:
-        info.environment = QStringLiteral(":/data/photo/brown_photostudio_02_2k.hdr");
-        info.floorColor = QStringLiteral(":/data/photo/wood_table_001_diff.jpg");
-        info.floorNormal = QStringLiteral(":/data/photo/wood_table_001_nor_gl.jpg");
-        info.floorRoughness = QStringLiteral(":/data/photo/wood_table_001_rough.jpg");
-        info.floorTileMm = 1500.0;
-        info.environmentYaw = 0.0f;
-        info.material = 3;
-        info.color = QColor(201, 170, 120);
-        info.roughness = 0.7f;
-        info.ropeMm = 12.0;
+        // a ship's lounge at sunrise: the low sun through the windows
+        info.environment = QStringLiteral(":/data/photo/aft_lounge_4k.hdr");
+        info.cameraHeightM = 1.6;
+        info.roomRadiusM = 12.0;
+
+        // an old plank table, 1.8 m x 0.9 m
+        info.surfaceColor = QStringLiteral(":/data/photo/wood_table_large_diff.jpg");
+        info.surfaceNormal = QStringLiteral(":/data/photo/wood_table_large_nor_gl.jpg");
+        info.surfaceRoughness = QStringLiteral(":/data/photo/wood_table_large_rough.jpg");
+        info.surfaceTileMm = 1550.0;
+        info.tableWidthMm = 1800.0;
+        info.tableDepthMm = 900.0;
+        info.tableThicknessMm = 45.0;
+        info.tableHeightM = 0.75;
+
+        // three-strand hemp rope, 12 mm: stiffer, it bends under its own
+        // weight over some 5 cm
+        info.rope.construction = 1;
+        info.rope.diameterMm = 12.0;
+        info.rope.bendingLengthMm = 50.0;
+        info.rope.frictionSurface = 0.5;
+        info.rope.frictionSelf = 0.7;
+        info.rope.color = QColor(196, 166, 118);
+        info.rope.roughness = 0.75f;
         break;
     }
 

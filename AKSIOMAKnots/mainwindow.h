@@ -6,6 +6,7 @@
 #include "knotmath.h"
 #include "knotrelax.h"
 #include "knotseifert.h"
+#include "ropephysics.h"
 
 #include <QColor>
 #include <QComboBox>
@@ -73,6 +74,13 @@ private slots:
 
     // Photo button and scene list -> the 3D view
     void applyPhotoMode();
+
+    // Photo mode, the knot standing still: it falls onto the table as a
+    // rope of the scene's material (tubes of `radius`) and is shown at
+    // rest. False when it is not shown that way (Photo mode off, an
+    // animation or a pull, several strands, or the rope could not be
+    // laid down as the same knot).
+    bool showRestingRope(double radius);
 
     void updateLearnSection();
 
@@ -414,6 +422,13 @@ private:
 
     QComboBox *photoSceneCombo_ =
         nullptr;
+
+    // the last knot laid on the table, and what it was laid down from
+    // (the same curve, thickness and scene are not simulated again)
+    Photo::RestingRope restingRope_;
+    QVector<KnotMath::Vec3> restingFrom_;
+    double restingRadius_ = 0.0;
+    int restingScene_ = -1;
 
     QPushButton *resetCameraButton_ =
         nullptr;

@@ -115,10 +115,11 @@ AboutDialog::AboutDialog(QWidget *parent)
             .arg(tr("PHOTO MODE"),
                  tr("The rooms and surfaces of Photo mode come from "
                     "<a href='https://polyhaven.com' style='color:#D99B42;'>Poly Haven</a> "
-                    "and are free for any use (CC0): the HDRIs Brown Photostudio 02 "
-                    "(Sergej Majboroda) and Lebombo (Greg Zaal), the textures Wood "
-                    "Table 001 (Dimitrios Savva, Rico Cilliers) and Laminate Floor 02 "
-                    "(Charlotte Baglioni, Dario Barresi)."))));
+                    "and are free for any use (CC0): the HDRIs Aft Lounge (Greg Zaal) "
+                    "and Country Club (Sergej Majboroda), the textures Wood Table "
+                    "Large and Wood Floor Worn (Dimitrios Savva). The rope lies down "
+                    "by position based dynamics (XPBD: M. Macklin, M. Müller and N. "
+                    "Chentanez, 2016)."))));
 
     layout->addWidget(text, 1);
 

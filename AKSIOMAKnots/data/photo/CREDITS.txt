@@ -1,9 +1,11 @@
 Photo mode pictures - all from Poly Haven (https://polyhaven.com), CC0
 (public domain: free for any use, no credit required; credited anyway).
 
-brown_photostudio_02_2k.hdr  HDRI "Brown Photostudio 02" by Sergej Majboroda
-lebombo_2k.hdr               HDRI "Lebombo" by Greg Zaal
-wood_table_001_*.jpg         texture "Wood Table 001", photography Dimitrios Savva,
-                             processing Rico Cilliers (resized)
-laminate_floor_02_*.jpg      texture "Laminate Floor 02", photography Charlotte Baglioni,
-                             processing Dario Barresi (resized)
+aft_lounge_4k.hdr            HDRI "Aft Lounge" by Greg Zaal (unclipped: the
+                             low sun through the windows is in the picture)
+country_club_4k.hdr          HDRI "Country Club" by Sergej Majboroda (unclipped
+                             morning sun through tall windows)
+wood_table_large_*.jpg       texture "Wood Table Large" by Dimitrios Savva
+                             (4k colour and normal map, 2k roughness, re-encoded)
+wood_floor_worn_*.jpg        texture "Wood Floor Worn" by Dimitrios Savva
+                             (4k colour and normal map, 2k roughness, re-encoded)

@@ -45,6 +45,8 @@ qt_add_executable(AKSIOMAKnots
     knotjoin.cpp
     photoscene.h
     photoscene.cpp
+    ropephysics.h
+    ropephysics.cpp
     timelineslider.h
     timelineslider.cpp
     knottable.h
@@ -85,20 +87,21 @@ qt_add_resources(AKSIOMAKnots "knottable"
     FILES data/knottable.dat
 )
 
-# Photo mode: two rooms (HDRIs) and two surfaces from Poly Haven, CC0
-# (data/photo/CREDITS.txt). About 15 MB, linked in as binary data too.
+# Photo mode: two sunlit rooms (unclipped 4k HDRIs) and two wood surfaces
+# from Poly Haven, CC0 (data/photo/CREDITS.txt). About 70 MB, linked in as
+# binary data too.
 qt_add_resources(AKSIOMAKnots "photo"
     PREFIX "/"
     BIG_RESOURCES
     FILES
-        data/photo/brown_photostudio_02_2k.hdr
-        data/photo/lebombo_2k.hdr
-        data/photo/wood_table_001_diff.jpg
-        data/photo/wood_table_001_nor_gl.jpg
-        data/photo/wood_table_001_rough.jpg
-        data/photo/laminate_floor_02_diff.jpg
-        data/photo/laminate_floor_02_nor_gl.jpg
-        data/photo/laminate_floor_02_rough.jpg
+        data/photo/aft_lounge_4k.hdr
+        data/photo/country_club_4k.hdr
+        data/photo/wood_table_large_diff.jpg
+        data/photo/wood_table_large_nor_gl.jpg
+        data/photo/wood_table_large_rough.jpg
+        data/photo/wood_floor_worn_diff.jpg
+        data/photo/wood_floor_worn_nor_gl.jpg
+        data/photo/wood_floor_worn_rough.jpg
 )
 
 target_link_libraries(AKSIOMAKnots PRIVATE

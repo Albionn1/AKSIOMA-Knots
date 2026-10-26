@@ -253,18 +253,19 @@ MainWindow::MainWindow(
     photoButton_->setCheckable(true);
 
     photoButton_->setToolTip(
-        tr("Show the knot as a real rope lying on a real surface, lit by a "
-           "photographed room: the highest quality, with soft shadows."));
+        tr("Show the knot as a real rope: it falls onto a table under its "
+           "own weight and comes to rest, in a sunlit room photographed "
+           "with its real light."));
 
     photoSceneCombo_ = new QComboBox(viewBar);
 
     photoSceneCombo_->addItem(
-        tr("Rope on a studio table"),
-        static_cast<int>(Photo::Scene::StudioTable));
+        tr("Hemp rope on a table, low sun"),
+        static_cast<int>(Photo::Scene::LoungeTable));
 
     photoSceneCombo_->addItem(
-        tr("Shoelace on a wooden floor"),
-        static_cast<int>(Photo::Scene::Shoelaces));
+        tr("Shoelace on a sunlit floor"),
+        static_cast<int>(Photo::Scene::BallroomFloor));
 
     photoSceneCombo_->setToolTip(tr("Where the knot is photographed."));
     photoSceneCombo_->setVisible(false);
@@ -3120,6 +3121,11 @@ void MainWindow::rebuildMesh()
                 part);
         }
     }
+    else if (showRestingRope(radius))
+    {
+        // Photo mode: the knot lies on the table as a real rope
+        return;
+    }
     else
     {
         // Drawn along a smooth spline through the points, so long curves
@@ -3154,6 +3160,9 @@ void MainWindow::rebuildMesh()
     KnotMath::computeAmbientOcclusion(
         mesh,
         0.7);
+
+    // laid down by its shape in Photo mode (not by the physics)
+    glWidget_->clearRestingPose();
 
     glWidget_->setCrossings(
         currentCrossings_);
@@ -3301,6 +3310,135 @@ void MainWindow::resetCamera()
         glWidget_->resetCamera(seifertActive_ ? 45.0f : 75.0f);
 }
 
+bool MainWindow::showRestingRope(double radius)
+{
+    if (glWidget_ == nullptr || !glWidget_->photoMode() || !hasData_ ||
+        currentData_.multiStrand || currentData_.points.size() < 4 ||
+        grabEnabled() || pulling_ || relaxRunning_ ||
+        seifertActive_ || unknotActive_ || joinActive_)
+    {
+        return false;
+    }
+
+    const auto scene =
+        static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
+
+    const Photo::RopeMaterial material = Photo::sceneInfo(scene).rope;
+
+    const bool known =
+        restingRope_.valid &&
+        restingScene_ == static_cast<int>(scene) &&
+        std::abs(restingRadius_ - radius) < 1.0e-9 &&
+        restingFrom_.size() == currentData_.points.size() &&
+        std::equal(
+            restingFrom_.cbegin(),
+            restingFrom_.cend(),
+            currentData_.points.cbegin(),
+            [](const KnotMath::Vec3 &a, const KnotMath::Vec3 &b)
+            {
+                return a.x == b.x && a.y == b.y && a.z == b.z;
+            });
+
+    if (!known)
+    {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+
+        Photo::RestingRope rope =
+            Photo::layOnTable(
+                currentData_.points,
+                currentData_.closed,
+                radius,
+                material);
+
+        /*
+         * The rope never passes through itself, so it is the same knot;
+         * checked anyway with the Alexander polynomial of both centre
+         * lines. A rope that changed is not shown.
+         */
+        if (rope.valid && currentData_.closed)
+        {
+            const KnotMath::AlexanderPolynomial before =
+                KnotMath::computeAlexanderPolynomial(currentData_.points);
+
+            const KnotMath::AlexanderPolynomial after =
+                KnotMath::computeAlexanderPolynomial(rope.points);
+
+            if (before.valid && (!after.valid || after.text != before.text))
+                rope.valid = false;
+        }
+
+        QApplication::restoreOverrideCursor();
+
+        restingRope_ = rope;
+        restingFrom_ = currentData_.points;
+        restingRadius_ = radius;
+        restingScene_ = static_cast<int>(scene);
+    }
+
+    if (!restingRope_.valid)
+        return false;
+
+    const KnotMath::Mesh mesh =
+        Photo::buildRopeMesh(
+            restingRope_.points,
+            currentData_.closed,
+            radius,
+            material);
+
+    if (!mesh.isValid())
+        return false;
+
+    /*
+     * The crossing numbers stay on their crossings: each is at the same
+     * place along the rope (a fraction of its length) as before.
+     */
+    const QVector<KnotMath::Vec3> &rest = restingRope_.points;
+    const int n = rest.size();
+
+    QVector<double> arc(n + 1, 0.0);
+
+    for (int i = 0; i < n; ++i)
+        arc[i + 1] = arc.at(i) + (rest.at((i + 1) % n) - rest.at(i)).length();
+
+    auto pointAt = [&rest, &arc, n](double fraction)
+    {
+        const double target = (fraction - std::floor(fraction)) * arc.at(n);
+
+        const int i = std::clamp(
+            static_cast<int>(std::upper_bound(arc.cbegin(), arc.cend(), target) - arc.cbegin()) - 1,
+            0,
+            n - 1);
+
+        const double piece = arc.at(i + 1) - arc.at(i);
+        const double t = piece > 0.0 ? (target - arc.at(i)) / piece : 0.0;
+
+        return rest.at(i) + (rest.at((i + 1) % n) - rest.at(i)) * t;
+    };
+
+    QVector<KnotMath::CrossingInfo> crossings = currentCrossings_;
+
+    for (KnotMath::CrossingInfo &crossing : crossings)
+    {
+        crossing.pointA = pointAt(crossing.fractionA);
+        crossing.pointB = pointAt(crossing.fractionB);
+        crossing.midpoint = (crossing.pointA + crossing.pointB) * 0.5;
+    }
+
+    glWidget_->setCrossings(crossings);
+    glWidget_->setRestingRope(mesh, restingRope_.pose);
+    glWidget_->setMeshColor(meshColor_);
+
+    applySurface();
+
+    glWidget_->setShowCrossingNumbers(
+        showCrossingNumbersCheck_ != nullptr &&
+        showCrossingNumbersCheck_->isChecked());
+
+    updateGrabCurve();
+
+    return true;
+}
+
 void MainWindow::applyPhotoMode()
 {
     if (glWidget_ == nullptr || photoButton_ == nullptr || photoSceneCombo_ == nullptr)
@@ -3319,6 +3457,9 @@ void MainWindow::applyPhotoMode()
     const bool ok = glWidget_->setPhotoMode(on, scene);
 
     QApplication::restoreOverrideCursor();
+
+    // the knot falls onto the table (or stands up again)
+    rebuildMesh();
 
     if (!ok)
     {
@@ -5895,6 +6036,10 @@ void MainWindow::grabToggled(
         true);
 
     fixPullBounds();
+
+    // Photo mode: the rope is lifted off the table to be pulled
+    if (glWidget_->photoMode())
+        rebuildMesh();
 
     updateGrabCurve();
 
