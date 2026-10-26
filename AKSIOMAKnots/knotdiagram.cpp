@@ -528,9 +528,7 @@ QVector<Vec3> diagramToCurve(
         nodeZ.push_back(over ? height : -height);
     }
 
-    curve.reserve(n);
-
-    for (int i = 0; i < n; ++i)
+    auto heightAt = [&](double s)
     {
         double z = 0.0;
 
@@ -538,9 +536,7 @@ QVector<Vec3> diagramToCurve(
 
         if (m > 0)
         {
-            // find the node pair around s = i (cyclic)
-            const double s = static_cast<double>(i);
-
+            // find the node pair around s (cyclic)
             int next = 0;
 
             while (next < m && nodeS[next] <= s)
@@ -577,7 +573,51 @@ QVector<Vec3> diagramToCurve(
                     : z0;
         }
 
-        curve.push_back(Vec3(diagram.points[i].x, diagram.points[i].y, z));
+        return z;
+    };
+
+    // The heights at the sample points alone are not enough: two passes
+    // less than a sample apart would share one segment, and the height at
+    // a crossing (interpolated along the segment) could come out on the
+    // wrong side. So every pass gets two points of its own, just before and
+    // just after it, at exactly its height: the crossing lies on the short
+    // segment between them, and over and under are always the drawn ones.
+    curve.reserve(n + 2 * passes.size());
+
+    int nextPass = 0;
+
+    for (int i = 0; i < n; ++i)
+    {
+        const Vec3 &a = diagram.points[i];
+        const Vec3 &b = diagram.points[(i + 1) % n];
+
+        curve.push_back(Vec3(a.x, a.y, heightAt(static_cast<double>(i))));
+
+        // the passes on segment i, in order (the passes are sorted by s)
+        const int first = nextPass;
+
+        while (nextPass < passes.size() && passes.at(nextPass).s < i + 1)
+            ++nextPass;
+
+        for (int p = first; p < nextPass; ++p)
+        {
+            const double t = passes.at(p).s - i;
+
+            const double before = (p > first) ? passes.at(p - 1).s - i : 0.0;
+            const double after = (p + 1 < nextPass) ? passes.at(p + 1).s - i : 1.0;
+
+            const double e = std::min({0.1, (t - before) / 3.0, (after - t) / 3.0});
+
+            if (e < 1e-6)
+                continue;
+
+            for (const double u : {t - e, t + e})
+            {
+                curve.push_back(Vec3(a.x + (b.x - a.x) * u,
+                                     a.y + (b.y - a.y) * u,
+                                     nodeZ.at(p)));
+            }
+        }
     }
 
     return curve;

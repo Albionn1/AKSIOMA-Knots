@@ -29,6 +29,8 @@ qt_add_executable(AKSIOMAKnots
     knotrelax.cpp
     knotdiagram.h
     knotdiagram.cpp
+    knotreidemeister.h
+    knotreidemeister.cpp
     diagrameditor.h
     diagrameditor.cpp
     knotpractice.h

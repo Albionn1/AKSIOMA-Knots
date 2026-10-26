@@ -95,12 +95,20 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Vizatoni një nyjë</translation>
     </message>
     <message>
-        <source>Draw one closed loop with the left mouse button. Crossings are found automatically; click a crossing (circle) to swap which strand goes over.</source>
-        <translation>Vizatoni një lak të mbyllur me butonin e majtë të miut. Kryqëzimet gjenden automatikisht; klikoni një kryqëzim (rrethin) për të ndërruar se cila fije kalon sipër.</translation>
+        <source>Draw one closed loop with the left mouse button. Crossings are found automatically; click a crossing (circle) to swap which strand goes over. The shaded regions R1, R2 and R3 are Reidemeister moves: click one to watch it.</source>
+        <translation>Vizatoni një lak të mbyllur me butonin e majtë të miut. Kryqëzimet gjenden automatikisht; klikoni një kryqëzim (rrethin) për të ndërruar se cila fije kalon sipër. Zonat e hijezuara R1, R2 dhe R3 janë lëvizje të Reidemeister-it: klikoni njërën për ta parë.</translation>
     </message>
     <message>
         <source>Clear</source>
         <translation>Pastro</translation>
+    </message>
+    <message>
+        <source>Undo</source>
+        <translation>Zhbëj</translation>
+    </message>
+    <message>
+        <source>Undo the last change (Ctrl+Z).</source>
+        <translation>Zhbëj ndryshimin e fundit (Ctrl+Z).</translation>
     </message>
     <message>
         <source>Alternate</source>
@@ -127,6 +135,22 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>PËRDOR KËTË NYJË</translation>
     </message>
     <message>
+        <source>Reidemeister move I: the twist is gone - the same knot with one crossing fewer.</source>
+        <translation>Lëvizja I e Reidemeister-it: laku u hoq - e njëjta nyjë me një kryqëzim më pak.</translation>
+    </message>
+    <message>
+        <source>Reidemeister move II: the strands are apart - the same knot with two crossings fewer.</source>
+        <translation>Lëvizja II e Reidemeister-it: fijet u ndanë - e njëjta nyjë me dy kryqëzime më pak.</translation>
+    </message>
+    <message>
+        <source>Reidemeister move III: the strand slid across the crossing - the same knot, drawn differently.</source>
+        <translation>Lëvizja III e Reidemeister-it: fija rrëshqiti përtej kryqëzimit - e njëjta nyjë, e vizatuar ndryshe.</translation>
+    </message>
+    <message>
+        <source>That move would change the knot here, so it was not made.</source>
+        <translation>Kjo lëvizje do ta ndryshonte nyjën këtu, prandaj nuk u bë.</translation>
+    </message>
+    <message>
         <source>No knot drawn yet.</source>
         <translation>Ende nuk është vizatuar asnjë nyjë.</translation>
     </message>
@@ -137,6 +161,30 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>%1 crossings. Click a crossing to flip it.</source>
         <translation>%1 kryqëzime. Klikoni një kryqëzim për ta përmbysur.</translation>
+    </message>
+    <message>
+        <source>Reidemeister moves here: %1.</source>
+        <translation>Lëvizje të Reidemeister-it këtu: %1.</translation>
+    </message>
+    <message>
+        <source>R1 - untwist this loop: one crossing fewer.</source>
+        <translation>R1 - zgjidhni këtë lak: një kryqëzim më pak.</translation>
+    </message>
+    <message>
+        <source>R2 - pull this strand off the other one: two crossings fewer.</source>
+        <translation>R2 - tërhiqeni këtë fije nga tjetra: dy kryqëzime më pak.</translation>
+    </message>
+    <message>
+        <source>R3 - slide this strand across the crossing: the same number of crossings.</source>
+        <translation>R3 - rrëshqiteni këtë fije përtej kryqëzimit: i njëjti numër kryqëzimesh.</translation>
+    </message>
+    <message>
+        <source>Click to watch.</source>
+        <translation>Klikoni për ta parë.</translation>
+    </message>
+    <message>
+        <source>Point at a shaded region to see which move it is.</source>
+        <translation>Vendosni miun mbi një zonë të hijezuar për të parë cila lëvizje është.</translation>
     </message>
 </context>
 <context>

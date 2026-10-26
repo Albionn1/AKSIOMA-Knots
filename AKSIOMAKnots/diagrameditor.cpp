@@ -3,11 +3,13 @@
 #include "theme.h"
 
 #include <QHBoxLayout>
+#include <QKeySequence>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QVariantAnimation>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -24,6 +26,15 @@ QColor kAccent() { return Theme::colors().accent; }
 constexpr double kLineWidth = 5.0;
 constexpr double kGapPixels = 12.0;
 constexpr double kHalfExtent = 2.0;
+
+// a press that moves less than this is a click (it makes a move)
+constexpr double kClickPixels = 6.0;
+
+// how long each move takes on screen (ms)
+constexpr int kMoveDuration[4] = {0, 1100, 1300, 1500};
+
+// Undo keeps this many steps
+constexpr int kHistory = 60;
 }
 
 /*
@@ -37,11 +48,68 @@ DiagramCanvas::DiagramCanvas(QWidget *parent)
 {
     setMouseTracking(true);
     setCursor(Qt::CrossCursor);
+
+    animation_ = new QVariantAnimation(this);
+
+    animation_->setStartValue(0.0);
+    animation_->setEndValue(1.0);
+
+    // the frames ease in and out themselves
+    animation_->setEasingCurve(QEasingCurve::Linear);
+
+    connect(animation_, &QVariantAnimation::valueChanged,
+            this, [this](const QVariant &value)
+            {
+                frame_ = KnotMath::reidemeisterFrame(activeMove_, value.toDouble());
+
+                update();
+            });
+
+    connect(animation_, &QVariantAnimation::finished,
+            this, [this]()
+            {
+                const int type = activeMove_.type;
+
+                setDiagram(activeMove_.result, false);
+
+                activeMove_ = KnotMath::ReidemeisterMove();
+                frame_ = KnotMath::KnotDiagram();
+
+                emit diagramChanged();
+                emit moveFinished(type);
+            });
 }
 
 const KnotMath::KnotDiagram &DiagramCanvas::diagram() const
 {
     return diagram_;
+}
+
+const QVector<KnotMath::ReidemeisterMove> &DiagramCanvas::moves() const
+{
+    return moves_;
+}
+
+int DiagramCanvas::hoveredMoveType() const
+{
+    return (hoverMove_ >= 0 && hoverMove_ < moves_.size())
+               ? moves_.at(hoverMove_).type
+               : 0;
+}
+
+int DiagramCanvas::activeMoveType() const
+{
+    return isAnimating() ? activeMove_.type : 0;
+}
+
+bool DiagramCanvas::isAnimating() const
+{
+    return animation_->state() == QAbstractAnimation::Running;
+}
+
+bool DiagramCanvas::canUndo() const
+{
+    return !history_.isEmpty() && !isAnimating();
 }
 
 QSize DiagramCanvas::minimumSizeHint() const
@@ -68,88 +136,239 @@ QPointF DiagramCanvas::toWidget(double x, double y) const
         0.5 * height() - y * scale);
 }
 
+KnotMath::Vec3 DiagramCanvas::toDiagram(const QPointF &pos) const
+{
+    const double scale = widgetScale();
+
+    return KnotMath::Vec3(
+        (pos.x() - 0.5 * width()) / scale,
+        (0.5 * height() - pos.y()) / scale,
+        0.0);
+}
+
+void DiagramCanvas::setDiagram(
+    const KnotMath::KnotDiagram &diagram,
+    bool remember)
+{
+    if (remember && diagram_.isValid())
+    {
+        history_.push_back(diagram_);
+
+        if (history_.size() > kHistory)
+            history_.removeFirst();
+    }
+
+    diagram_ = diagram;
+
+    moves_ = KnotMath::findReidemeisterMoves(diagram_);
+
+    hover_ = -1;
+    hoverMove_ = -1;
+
+    setCursor(Qt::CrossCursor);
+
+    update();
+}
+
 void DiagramCanvas::clearDrawing()
 {
-    diagram_ = KnotMath::KnotDiagram();
+    animation_->stop();
+
+    setDiagram(KnotMath::KnotDiagram(), true);
+
     stroke_.clear();
     drawing_ = false;
     tooShort_ = false;
-    hover_ = -1;
-
-    update();
 
     emit diagramChanged();
 }
 
 void DiagramCanvas::alternate()
 {
-    if (!diagram_.isValid())
+    if (!diagram_.isValid() || isAnimating())
         return;
 
-    KnotMath::alternateDiagram(diagram_);
+    KnotMath::KnotDiagram d = diagram_;
 
-    update();
+    KnotMath::alternateDiagram(d);
+
+    setDiagram(d, true);
 
     emit diagramChanged();
 }
 
 void DiagramCanvas::mirror()
 {
-    if (!diagram_.isValid())
+    if (!diagram_.isValid() || isAnimating())
         return;
 
-    KnotMath::mirrorDiagram(diagram_);
+    KnotMath::KnotDiagram d = diagram_;
+
+    KnotMath::mirrorDiagram(d);
+
+    setDiagram(d, true);
+
+    emit diagramChanged();
+}
+
+void DiagramCanvas::undo()
+{
+    if (!canUndo())
+        return;
+
+    const KnotMath::KnotDiagram previous = history_.takeLast();
+
+    setDiagram(previous, false);
+
+    tooShort_ = false;
+
+    emit diagramChanged();
+}
+
+void DiagramCanvas::startDrawing(const QPointF &pos)
+{
+    beforeDrawing_ = diagram_;
+
+    diagram_ = KnotMath::KnotDiagram();
+    moves_.clear();
+
+    stroke_.clear();
+    stroke_.push_back(pos);
+    drawing_ = true;
+    tooShort_ = false;
+    hover_ = -1;
+    hoverMove_ = -1;
+
+    setCursor(Qt::CrossCursor);
 
     update();
 
     emit diagramChanged();
 }
 
+void DiagramCanvas::startMove(int index)
+{
+    if (index < 0 || index >= moves_.size())
+        return;
+
+    // A last check that the move keeps the knot (the moves are built to,
+    // but the Alexander polynomial costs only a moment).
+    if (!KnotMath::reidemeisterMoveKeepsKnot(diagram_, moves_.at(index)))
+    {
+        emit moveRefused();
+        return;
+    }
+
+    activeMove_ = moves_.at(index);
+    frame_ = KnotMath::reidemeisterFrame(activeMove_, 0.0);
+
+    // remembered for Undo; the moves of the old picture are gone
+    history_.push_back(diagram_);
+
+    if (history_.size() > kHistory)
+        history_.removeFirst();
+
+    moves_.clear();
+    hover_ = -1;
+    hoverMove_ = -1;
+
+    setCursor(Qt::ArrowCursor);
+
+    animation_->setDuration(kMoveDuration[std::clamp(activeMove_.type, 1, 3)]);
+    animation_->start();
+
+    emit hoverChanged();
+}
+
+void DiagramCanvas::updateHover(const QPointF &pos)
+{
+    if (!diagram_.isValid())
+        return;
+
+    const KnotMath::Vec3 p = toDiagram(pos);
+
+    const int k = KnotMath::nearestDiagramCrossing(
+        diagram_, p.x, p.y, 16.0 / widgetScale());
+
+    // a crossing's circle comes before the region around it
+    const int m = (k >= 0) ? -1 : KnotMath::reidemeisterMoveAt(moves_, p.x, p.y);
+
+    if (k == hover_ && m == hoverMove_)
+        return;
+
+    const bool moveChanged = (m != hoverMove_);
+
+    hover_ = k;
+    hoverMove_ = m;
+
+    setCursor((k >= 0 || m >= 0) ? Qt::PointingHandCursor : Qt::CrossCursor);
+
+    update();
+
+    if (moveChanged)
+        emit hoverChanged();
+}
+
 void DiagramCanvas::mousePressEvent(QMouseEvent *event)
 {
-    if (event->button() != Qt::LeftButton)
+    if (event->button() != Qt::LeftButton || isAnimating())
         return;
 
     const QPointF pos = event->position();
 
     if (diagram_.isValid())
     {
-        const double scale = widgetScale();
-
-        const double x = (pos.x() - 0.5 * width()) / scale;
-        const double y = (0.5 * height() - pos.y()) / scale;
+        const KnotMath::Vec3 p = toDiagram(pos);
 
         const int k = KnotMath::nearestDiagramCrossing(
-            diagram_, x, y, 16.0 / scale);
+            diagram_, p.x, p.y, 16.0 / widgetScale());
 
         if (k >= 0)
         {
-            diagram_.crossings[k].aOver = !diagram_.crossings[k].aOver;
+            KnotMath::KnotDiagram d = diagram_;
 
-            update();
+            d.crossings[k].aOver = !d.crossings[k].aOver;
+
+            setDiagram(d, true);
+
+            // the mouse is still over the crossing
+            updateHover(pos);
 
             emit diagramChanged();
+
+            return;
+        }
+
+        // on a move's region: wait - a click makes the move, a drag draws
+        const int m = KnotMath::reidemeisterMoveAt(moves_, p.x, p.y);
+
+        if (m >= 0)
+        {
+            pressedMove_ = m;
+            pressPos_ = pos;
 
             return;
         }
     }
 
     // anything else starts a new drawing
-    diagram_ = KnotMath::KnotDiagram();
-    stroke_.clear();
-    stroke_.push_back(pos);
-    drawing_ = true;
-    tooShort_ = false;
-    hover_ = -1;
-
-    update();
-
-    emit diagramChanged();
+    startDrawing(pos);
 }
 
 void DiagramCanvas::mouseMoveEvent(QMouseEvent *event)
 {
     const QPointF pos = event->position();
+
+    if (pressedMove_ >= 0)
+    {
+        if (std::hypot(pos.x() - pressPos_.x(), pos.y() - pressPos_.y()) <= kClickPixels)
+            return;
+
+        // it is a drag after all: a new drawing from where it started
+        pressedMove_ = -1;
+
+        startDrawing(pressPos_);
+    }
 
     if (drawing_)
     {
@@ -165,96 +384,192 @@ void DiagramCanvas::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
-    if (diagram_.isValid())
-    {
-        const double scale = widgetScale();
-
-        const double x = (pos.x() - 0.5 * width()) / scale;
-        const double y = (0.5 * height() - pos.y()) / scale;
-
-        const int k = KnotMath::nearestDiagramCrossing(
-            diagram_, x, y, 16.0 / scale);
-
-        if (k != hover_)
-        {
-            hover_ = k;
-
-            setCursor(k >= 0 ? Qt::PointingHandCursor : Qt::CrossCursor);
-
-            update();
-        }
-    }
+    if (!isAnimating())
+        updateHover(pos);
 }
 
 void DiagramCanvas::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (event->button() != Qt::LeftButton || !drawing_)
+    if (event->button() != Qt::LeftButton)
+        return;
+
+    if (pressedMove_ >= 0)
+    {
+        const int m = pressedMove_;
+
+        pressedMove_ = -1;
+
+        startMove(m);
+
+        return;
+    }
+
+    if (!drawing_)
         return;
 
     drawing_ = false;
-
-    const double scale = widgetScale();
 
     QVector<KnotMath::Vec3> points;
 
     points.reserve(stroke_.size());
 
     for (const QPointF &p : stroke_)
-    {
-        points.push_back(KnotMath::Vec3(
-            (p.x() - 0.5 * width()) / scale,
-            (0.5 * height() - p.y()) / scale,
-            0.0));
-    }
+        points.push_back(toDiagram(p));
 
-    diagram_ = KnotMath::makeDiagramFromStroke(points, 160, kHalfExtent);
-
-    tooShort_ = !diagram_.isValid();
+    const KnotMath::KnotDiagram drawn =
+        KnotMath::makeDiagramFromStroke(points, 160, kHalfExtent);
 
     stroke_.clear();
 
-    update();
+    // the picture before the drawing can be brought back with Undo
+    diagram_ = beforeDrawing_;
+
+    setDiagram(drawn, true);
+
+    tooShort_ = !drawn.isValid();
 
     emit diagramChanged();
 }
 
-// Appends the part of the polyline around parameter s (in samples) to path.
-void DiagramCanvas::strandRange(
-    QPainterPath &path,
-    double s,
-    double halfSamples) const
+void DiagramCanvas::drawDiagram(
+    QPainter &painter,
+    const KnotMath::KnotDiagram &diagram) const
 {
-    const int n = diagram_.points.size();
+    const int n = diagram.points.size();
 
     if (n < 3)
         return;
 
-    auto pointAt = [&](double u)
+    auto widgetPoint = [&](int i)
     {
-        double w = std::fmod(u, static_cast<double>(n));
+        const KnotMath::Vec3 &p = diagram.points[i % n];
+
+        return toWidget(p.x, p.y);
+    };
+
+    // main curve
+    QPainterPath curve;
+
+    curve.moveTo(widgetPoint(0));
+
+    for (int i = 1; i < n; ++i)
+        curve.lineTo(widgetPoint(i));
+
+    curve.closeSubpath();
+
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(kLine(), kLineWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.drawPath(curve);
+
+    if (diagram.crossings.isEmpty())
+        return;
+
+    // Arc length along the curve, so the gaps are the same size wherever
+    // the points lie closer together (during a move they do).
+    QVector<double> arc(n + 1, 0.0);
+
+    for (int i = 0; i < n; ++i)
+    {
+        const KnotMath::Vec3 &a = diagram.points[i];
+        const KnotMath::Vec3 &b = diagram.points[(i + 1) % n];
+
+        arc[i + 1] = arc[i] + std::hypot(b.x - a.x, b.y - a.y);
+    }
+
+    const double total = arc[n];
+
+    if (total <= 1e-12)
+        return;
+
+    auto lengthAt = [&](int segment, double t)
+    {
+        return arc[segment] + t * (arc[segment + 1] - arc[segment]);
+    };
+
+    auto pointAtLength = [&](double length)
+    {
+        double w = std::fmod(length, total);
 
         if (w < 0.0)
-            w += n;
+            w += total;
 
-        const int i = static_cast<int>(std::floor(w)) % n;
-        const double f = w - std::floor(w);
+        int i = static_cast<int>(std::upper_bound(arc.begin(), arc.end(), w) - arc.begin()) - 1;
 
-        const KnotMath::Vec3 &a = diagram_.points[i];
-        const KnotMath::Vec3 &b = diagram_.points[(i + 1) % n];
+        i = std::clamp(i, 0, n - 1);
+
+        const double span = arc[i + 1] - arc[i];
+        const double f = span > 1e-15 ? (w - arc[i]) / span : 0.0;
+
+        const KnotMath::Vec3 &a = diagram.points[i];
+        const KnotMath::Vec3 &b = diagram.points[(i + 1) % n];
 
         return toWidget(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
     };
 
-    const int steps = std::max(4, static_cast<int>(std::ceil(halfSamples * 2.0)) * 2);
-
-    path.moveTo(pointAt(s - halfSamples));
-
-    for (int i = 1; i <= steps; ++i)
+    // the part of the curve around arc length `centre`
+    auto strand = [&](QPainterPath &path, double centre, double half)
     {
-        const double u = s - halfSamples +
-                         2.0 * halfSamples * static_cast<double>(i) / steps;
+        constexpr int steps = 16;
 
-        path.lineTo(pointAt(u));
+        path.moveTo(pointAtLength(centre - half));
+
+        for (int i = 1; i <= steps; ++i)
+            path.lineTo(pointAtLength(centre - half + 2.0 * half * i / steps));
+    };
+
+    const double gap = kGapPixels / widgetScale();
+
+    // gaps in the under strands
+    for (const KnotMath::DiagramCrossing &c : diagram.crossings)
+    {
+        QPainterPath path;
+
+        strand(path, c.aOver ? lengthAt(c.segB, c.tB) : lengthAt(c.segA, c.tA), gap);
+
+        painter.setPen(QPen(kBackground(), kLineWidth + 9.0, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
+        painter.drawPath(path);
+    }
+
+    // the over strands again, on top of the gaps
+    for (const KnotMath::DiagramCrossing &c : diagram.crossings)
+    {
+        QPainterPath path;
+
+        strand(path, c.aOver ? lengthAt(c.segA, c.tA) : lengthAt(c.segB, c.tB), gap * 1.8);
+
+        painter.setPen(QPen(kLine(), kLineWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawPath(path);
+    }
+}
+
+// The regions of the moves, lightly shaded (the one under the mouse more).
+void DiagramCanvas::drawMoves(QPainter &painter) const
+{
+    for (int i = 0; i < moves_.size(); ++i)
+    {
+        const KnotMath::ReidemeisterMove &move = moves_.at(i);
+
+        QPainterPath region;
+
+        for (int j = 0; j < move.region.size(); ++j)
+        {
+            const QPointF p = toWidget(move.region[j].x, move.region[j].y);
+
+            if (j == 0)
+                region.moveTo(p);
+            else
+                region.lineTo(p);
+        }
+
+        region.closeSubpath();
+
+        QColor fill = kAccent();
+
+        fill.setAlpha(i == hoverMove_ ? 80 : 28);
+
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(fill);
+        painter.drawPath(region);
     }
 }
 
@@ -282,6 +597,13 @@ void DiagramCanvas::paintEvent(QPaintEvent *)
         return;
     }
 
+    if (isAnimating())
+    {
+        drawDiagram(painter, frame_);
+
+        return;
+    }
+
     if (!diagram_.isValid())
     {
         painter.setPen(kMuted());
@@ -301,62 +623,15 @@ void DiagramCanvas::paintEvent(QPaintEvent *)
         return;
     }
 
-    const int n = diagram_.points.size();
+    drawMoves(painter);
 
-    // main curve
-    QPainterPath curve;
+    drawDiagram(painter, diagram_);
 
-    curve.moveTo(toWidget(diagram_.points[0].x, diagram_.points[0].y));
+    // the crossings of the move under the mouse
+    QVector<int> moveCrossings;
 
-    for (int i = 1; i < n; ++i)
-        curve.lineTo(toWidget(diagram_.points[i].x, diagram_.points[i].y));
-
-    curve.closeSubpath();
-
-    painter.setBrush(Qt::NoBrush);
-    painter.setPen(QPen(kLine(), kLineWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.drawPath(curve);
-
-    // pixel length of one sample
-    double perimeter = 0.0;
-
-    for (int i = 0; i < n; ++i)
-    {
-        const QPointF a = toWidget(diagram_.points[i].x, diagram_.points[i].y);
-        const QPointF b = toWidget(diagram_.points[(i + 1) % n].x,
-                                   diagram_.points[(i + 1) % n].y);
-
-        perimeter += std::hypot(a.x() - b.x(), a.y() - b.y());
-    }
-
-    const double pxPerSample = std::max(0.5, perimeter / n);
-    const double gapSamples = std::max(1.5, kGapPixels / pxPerSample);
-
-    // gaps in the under strands
-    for (const KnotMath::DiagramCrossing &c : diagram_.crossings)
-    {
-        const double sUnder = c.aOver ? c.segB + c.tB : c.segA + c.tA;
-
-        QPainterPath gap;
-
-        strandRange(gap, sUnder, gapSamples);
-
-        painter.setPen(QPen(kBackground(), kLineWidth + 9.0, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
-        painter.drawPath(gap);
-    }
-
-    // the over strands again, on top of the gaps
-    for (const KnotMath::DiagramCrossing &c : diagram_.crossings)
-    {
-        const double sOver = c.aOver ? c.segA + c.tA : c.segB + c.tB;
-
-        QPainterPath over;
-
-        strandRange(over, sOver, gapSamples * 1.8);
-
-        painter.setPen(QPen(kLine(), kLineWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.drawPath(over);
-    }
+    if (hoverMove_ >= 0 && hoverMove_ < moves_.size())
+        moveCrossings = moves_.at(hoverMove_).crossings;
 
     // crossing markers
     for (int k = 0; k < diagram_.crossings.size(); ++k)
@@ -367,7 +642,7 @@ void DiagramCanvas::paintEvent(QPaintEvent *)
 
         painter.setBrush(Qt::NoBrush);
 
-        if (k == hover_)
+        if (k == hover_ || moveCrossings.contains(k))
         {
             painter.setPen(QPen(kAccent(), 2.0));
             painter.drawEllipse(centre, 15.0, 15.0);
@@ -377,6 +652,28 @@ void DiagramCanvas::paintEvent(QPaintEvent *)
             painter.setPen(QPen(kMuted(), 1.0));
             painter.drawEllipse(centre, 13.0, 13.0);
         }
+    }
+
+    // the names of the moves, in their regions
+    QFont font = painter.font();
+
+    font.setPointSize(9);
+    font.setBold(true);
+
+    painter.setFont(font);
+
+    for (int i = 0; i < moves_.size(); ++i)
+    {
+        const KnotMath::ReidemeisterMove &move = moves_.at(i);
+
+        const QPointF centre = toWidget(move.centre.x, move.centre.y);
+
+        painter.setPen(i == hoverMove_ ? kAccent() : kMuted());
+
+        painter.drawText(
+            QRectF(centre.x() - 20.0, centre.y() - 10.0, 40.0, 20.0),
+            Qt::AlignCenter,
+            QStringLiteral("R%1").arg(move.type));
     }
 }
 
@@ -401,7 +698,8 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
     QLabel *help = new QLabel(
         tr("Draw one closed loop with the left mouse button. "
            "Crossings are found automatically; click a crossing "
-           "(circle) to swap which strand goes over."),
+           "(circle) to swap which strand goes over. The shaded regions "
+           "R1, R2 and R3 are Reidemeister moves: click one to watch it."),
         this);
 
     help->setObjectName(QStringLiteral("Subtitle"));
@@ -416,12 +714,23 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
     statusLabel_ = new QLabel(this);
 
     statusLabel_->setObjectName(QStringLiteral("Subtitle"));
+    statusLabel_->setWordWrap(true);
 
     layout->addWidget(statusLabel_);
+
+    moveLabel_ = new QLabel(this);
+
+    moveLabel_->setWordWrap(true);
+
+    layout->addWidget(moveLabel_);
 
     QHBoxLayout *buttons = new QHBoxLayout();
 
     QPushButton *clearButton = new QPushButton(tr("Clear"), this);
+
+    undoButton_ = new QPushButton(tr("Undo"), this);
+    undoButton_->setToolTip(tr("Undo the last change (Ctrl+Z)."));
+    undoButton_->setShortcut(QKeySequence::Undo);
 
     alternateButton_ = new QPushButton(tr("Alternate"), this);
     alternateButton_->setToolTip(
@@ -438,6 +747,7 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
     okButton_->setDefault(true);
 
     buttons->addWidget(clearButton);
+    buttons->addWidget(undoButton_);
     buttons->addWidget(alternateButton_);
     buttons->addWidget(mirrorButton_);
     buttons->addStretch(1);
@@ -448,6 +758,9 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
 
     connect(clearButton, &QPushButton::clicked,
             canvas_, &DiagramCanvas::clearDrawing);
+
+    connect(undoButton_, &QPushButton::clicked,
+            canvas_, &DiagramCanvas::undo);
 
     connect(alternateButton_, &QPushButton::clicked,
             canvas_, &DiagramCanvas::alternate);
@@ -461,10 +774,58 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
     connect(okButton_, &QPushButton::clicked,
             this, &QDialog::accept);
 
+    // any change of the picture ends the note about the last move (a
+    // finished move sets its own note right after)
     connect(canvas_, &DiagramCanvas::diagramChanged,
-            this, [this]() { updateStatus(); });
+            this, [this]()
+            {
+                lastMove_.clear();
 
-    resize(760, 680);
+                updateStatus();
+            });
+
+    connect(canvas_, &DiagramCanvas::hoverChanged,
+            this, [this]()
+            {
+                // pointing at another move: its description replaces the
+                // note about the last one
+                if (canvas_->hoveredMoveType() != 0)
+                    lastMove_.clear();
+
+                updateStatus();
+            });
+
+    connect(canvas_, &DiagramCanvas::moveFinished,
+            this, [this](int type)
+            {
+                if (type == 1)
+                {
+                    lastMove_ = tr("Reidemeister move I: the twist is gone - "
+                                   "the same knot with one crossing fewer.");
+                }
+                else if (type == 2)
+                {
+                    lastMove_ = tr("Reidemeister move II: the strands are apart - "
+                                   "the same knot with two crossings fewer.");
+                }
+                else
+                {
+                    lastMove_ = tr("Reidemeister move III: the strand slid across "
+                                   "the crossing - the same knot, drawn differently.");
+                }
+
+                updateStatus();
+            });
+
+    connect(canvas_, &DiagramCanvas::moveRefused,
+            this, [this]()
+            {
+                lastMove_ = tr("That move would change the knot here, so it was not made.");
+
+                updateStatus();
+            });
+
+    resize(760, 720);
 
     updateStatus();
 }
@@ -479,12 +840,18 @@ void DiagramEditorDialog::updateStatus()
     const KnotMath::KnotDiagram &d = canvas_->diagram();
 
     const bool valid = d.isValid();
+    const bool busy = canvas_->isAnimating();
 
-    okButton_->setEnabled(valid);
-    alternateButton_->setEnabled(valid && !d.crossings.isEmpty());
-    mirrorButton_->setEnabled(valid && !d.crossings.isEmpty());
+    okButton_->setEnabled(valid && !busy);
+    undoButton_->setEnabled(canvas_->canUndo());
+    alternateButton_->setEnabled(valid && !busy && !d.crossings.isEmpty());
+    mirrorButton_->setEnabled(valid && !busy && !d.crossings.isEmpty());
 
-    if (!valid)
+    if (busy)
+    {
+        // the canvas shows the move; the text below says what it is
+    }
+    else if (!valid)
     {
         statusLabel_->setText(tr("No knot drawn yet."));
     }
@@ -495,8 +862,61 @@ void DiagramEditorDialog::updateStatus()
     }
     else
     {
-        statusLabel_->setText(
-            tr("%1 crossings. Click a crossing to flip it.")
-                .arg(d.crossings.size()));
+        // how many moves of each kind there are
+        int count[4] = {0, 0, 0, 0};
+
+        for (const KnotMath::ReidemeisterMove &move : canvas_->moves())
+            ++count[std::clamp(move.type, 1, 3)];
+
+        QStringList kinds;
+
+        for (int type = 1; type <= 3; ++type)
+        {
+            if (count[type] == 1)
+                kinds << QStringLiteral("R%1").arg(type);
+            else if (count[type] > 1)
+                kinds << QStringLiteral("R%1 ×%2").arg(type).arg(count[type]);
+        }
+
+        QString text = tr("%1 crossings. Click a crossing to flip it.")
+                           .arg(d.crossings.size());
+
+        if (!kinds.isEmpty())
+        {
+            text += QLatin1Char(' ') +
+                    tr("Reidemeister moves here: %1.").arg(kinds.join(QStringLiteral(", ")));
+        }
+
+        statusLabel_->setText(text);
     }
+
+    // second line: the move being made or under the mouse, or what the
+    // last one did
+    const int shown = busy ? canvas_->activeMoveType() : canvas_->hoveredMoveType();
+
+    QString line;
+
+    if (shown == 1)
+        line = tr("R1 - untwist this loop: one crossing fewer.");
+    else if (shown == 2)
+        line = tr("R2 - pull this strand off the other one: two crossings fewer.");
+    else if (shown == 3)
+        line = tr("R3 - slide this strand across the crossing: the same number of crossings.");
+
+    if (shown != 0)
+    {
+        if (!busy)
+            line += QLatin1Char(' ') + tr("Click to watch.");
+    }
+    else if (!lastMove_.isEmpty())
+    {
+        line = lastMove_;
+    }
+    else if (valid && !busy && !canvas_->moves().isEmpty())
+    {
+        line = tr("Point at a shaded region to see which move it is.");
+    }
+
+    moveLabel_->setText(line);
+    moveLabel_->setVisible(!line.isEmpty());
 }

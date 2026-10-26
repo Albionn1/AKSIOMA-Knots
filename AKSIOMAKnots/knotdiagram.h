@@ -85,7 +85,9 @@ int nearestDiagramCrossing(
 
 // 3D curve above the diagram: over-passes are lifted by +height, under-passes
 // lowered by -height, smoothly interpolated in between. Seen from +z it has
-// exactly the drawn diagram.
+// exactly the drawn diagram. Each pass gets two extra points close to it
+// (at exactly its height), so the curve has 2 points more per pass than the
+// diagram and over and under come out right however close passes are.
 QVector<Vec3> diagramToCurve(
     const KnotDiagram &diagram,
     double height = 0.3);
