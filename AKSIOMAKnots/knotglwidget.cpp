@@ -16,6 +16,7 @@
 #include <QRadialGradient>
 #include <QPen>
 #include <QShowEvent>
+#include <QTextDocument>
 #include <QSurfaceFormat>
 #include <QVector2D>
 #include <QVector4D>
@@ -62,6 +63,10 @@ namespace
 {
 
 constexpr float FieldOfView = 45.0f;
+
+// Photo mode's calm stage (setPhotoStage): the room behind the knot a
+// little darker and softer, its colours kept
+constexpr float CalmStage = 0.7f;
 constexpr float NearPlane = 0.1f;
 constexpr float FarPlane = 100.0f;
 
@@ -1456,6 +1461,10 @@ uniform float uFadeRadius;
 
 uniform float uReflections;
 
+// how much of a modern dark stone the wood is (always for the table, on
+// the stage of the unknotting for a floor), so the light rope stands out
+uniform float uStage;
+
 // the share of the room the sneaker leaves the floor (baked in Blender),
 // over the rectangle uShoeArea (x0, z0, x1, z1)
 uniform sampler2D uShoeShade;
@@ -1480,6 +1489,24 @@ void main()
 
     // a waxed, not a lacquered finish
     float rough = clamp(0.3 + 0.7 * texture(uFloorRoughness, uv).r, 0.35, 1.0);
+
+    /*
+     * On stage: a top of dark engineered stone instead of the wood: deep
+     * charcoal with a fine speckle of lighter grains (about a millimetre)
+     * and a faint cloudiness, satin smooth, no grain to catch the eye
+     * (vUv is in millimetres).
+     */
+    if (uStage > 0.0)
+    {
+        float speckle = smoothstep(0.78, 0.95, noise2(vUv * 1.1));
+        float cloud = noise2(vUv * 0.012) * 0.6 + noise2(vUv * 0.05) * 0.4;
+
+        vec3 stone = vec3(0.034, 0.036, 0.040) * (0.8 + 0.4 * cloud) + vec3(0.10, 0.10, 0.11) * speckle;
+
+        albedo = mix(albedo, stone, uStage);
+        n = normalize(mix(n, geometric, uStage));
+        rough = mix(rough, 0.38 + 0.1 * speckle, uStage);
+    }
 
     vec3 v = normalize(uCameraPosition - vWorld);
     float nv = max(dot(n, v), 1.0e-3);
@@ -1576,6 +1603,13 @@ uniform float uCocScale;
 uniform float uMaxCoc;
 uniform float uExposure;
 
+// The stage (0..1 as it fades in): what lies well behind the knot sinks
+// into a dark blur and the light falls off towards the edges of the
+// picture, as under a spotlight. Plain Photo mode is a calm stage (0.7,
+// the room keeps its colours), the unknotting the full one (the room
+// grey as well).
+uniform float uStage;
+
 out vec4 fragColor;
 
 // distance of what is seen at uv along the view; the room's distance from
@@ -1664,7 +1698,29 @@ void main()
         }
     }
 
-    fragColor = develop(sum / weight * uExposure, vUv);
+    vec3 light = sum / weight * uExposure;
+
+    if (uStage > 0.0)
+    {
+        // behind the knot (beyond its own depth): darker and greyer
+        float behind = smoothstep(1.08, 1.9, centreDistance / max(uFocus, 1.0e-4));
+
+        // the spotlight: brightest in the middle of the picture
+        vec2 off = (vUv - vec2(0.5, 0.47)) * vec2(uAspect, 1.0);
+        float spot = 1.0 - smoothstep(0.25, 0.95, length(off));
+
+        float grey = dot(light, vec3(0.2126, 0.7152, 0.0722));
+
+        // colourless only on the full stage (beyond the calm one of plain
+        // Photo mode, which keeps the room's colours)
+        float colourless = clamp((uStage - 0.7) / 0.3, 0.0, 1.0);
+
+        light = mix(light, vec3(grey), colourless * 0.75 * behind);
+        light *= mix(1.0, 0.12, uStage * behind);
+        light *= mix(1.0, mix(0.3, 1.0, spot), uStage);
+    }
+
+    fragColor = develop(light, vUv);
 }
 )";
 
@@ -2796,6 +2852,101 @@ void KnotGLWidget::clearDiagramInset()
     update();
 }
 
+void KnotGLWidget::setCaption(const QString &title, const QString &body)
+{
+    if (title == captionTitle_ && body == captionBody_)
+        return;
+
+    // a new caption fades in; the same one with other words stays
+    if (title != captionTitle_)
+        captionClock_.restart();
+
+    captionTitle_ = title;
+    captionBody_ = body;
+
+    update();
+}
+
+void KnotGLWidget::setPhotoAperture(float fNumber)
+{
+    photoFNumberTarget_ = std::clamp(fNumber, 1.4f, 22.0f);
+
+    update();
+}
+
+void KnotGLWidget::setPhotoStage(bool on)
+{
+    stageTarget_ = on ? 1.0f : CalmStage;
+
+    update();
+}
+
+void KnotGLWidget::setRopeTinted(bool tinted)
+{
+    ropeTinted_ = tinted;
+
+    update();
+}
+
+void KnotGLWidget::flyWithSunBehind(const QVector3D &centre, float radius, float aside, float pitch)
+{
+    const QVector3D sun = photo_ ? photoKeyDirection() : QVector3D(0.0f, 0.0f, 1.0f);
+
+    // the camera on the sun's side of the knot (yaw as in
+    // computeCameraPosition), turned a little aside
+    const float yaw = qRadiansToDegrees(std::atan2(sun.x(), sun.z())) + aside;
+
+    flyCameraTo(yaw, pitch, sphereDistance(radius), posed(centre));
+}
+
+void KnotGLWidget::drawCaption(QPainter &painter)
+{
+    // to the right of the diagram in the lower left corner, at the foot
+    const double inset = showInset_ ? std::clamp(0.32 * std::min(width(), height()), 180.0, 300.0) + 32.0 : 16.0;
+
+    const double room = width() - inset - 16.0;
+    const double wide = std::min(room, 640.0);
+
+    if (wide < 120.0)
+        return;
+
+    QTextDocument text;
+
+    QFont font = painter.font();
+    font.setPointSizeF(10.0);
+    text.setDefaultFont(font);
+    text.setDocumentMargin(14.0);
+    text.setTextWidth(wide);
+    text.setDefaultStyleSheet(QStringLiteral("body { color: #E8E6E0; } b { color: #FFFFFF; }"));
+    text.setHtml(QStringLiteral("<body><b>%1</b><br>%2</body>").arg(captionTitle_.toHtmlEscaped(), captionBody_));
+
+    const double tall = text.size().height();
+
+    const QRectF panel(inset + 0.5 * (room - wide), height() - tall - 16.0, wide, tall);
+
+    // fades in over a third of a second
+    const double fade =
+        captionClock_.isValid()
+            ? std::clamp(static_cast<double>(captionClock_.elapsed()) / 350.0, 0.0, 1.0)
+            : 1.0;
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setOpacity(fade);
+
+    painter.setPen(QPen(QColor(255, 255, 255, 40), 1.0));
+    painter.setBrush(QColor(10, 10, 10, 190));
+    painter.drawRoundedRect(panel, 6.0, 6.0);
+
+    painter.translate(panel.topLeft());
+    text.drawContents(&painter);
+
+    painter.restore();
+
+    if (fade < 1.0)
+        update();
+}
+
 void KnotGLWidget::drawDiagramInset(QPainter &painter)
 {
     const QVector<QPointF> &points = inset_.points;
@@ -3608,7 +3759,7 @@ void KnotGLWidget::drawMesh(
 
     meshProgram_->setUniformValue(
         "uUseVertexColors",
-        useVertexColors_ && !(photo_ && restingRope_) ? 1 : 0);
+        useVertexColors_ && (!(photo_ && restingRope_) || ropeTinted_) ? 1 : 0);
 
     meshProgram_->setUniformValue("uMetallic", photo_ ? 0.0f : metallic_);
     // Photo mode: the rope at rest has its real strands (5) or yarns (6);
@@ -3937,8 +4088,9 @@ void KnotGLWidget::paintGL()
     // One QPainter per frame, only for the 2D overlays.
     const bool labels = showCrossingNumbers_ && !crossings_.isEmpty();
     const bool flashes = !flashPositions_.isEmpty();
+    const bool caption = !captionTitle_.isEmpty();
 
-    if (labels || flashes || showInset_)
+    if (labels || flashes || showInset_ || caption)
     {
         QPainter painter(this);
 
@@ -3950,6 +4102,9 @@ void KnotGLWidget::paintGL()
 
         if (showInset_)
             drawDiagramInset(painter);
+
+        if (caption)
+            drawCaption(painter);
     }
 }
 
@@ -4302,6 +4457,12 @@ void KnotGLWidget::mousePressEvent(QMouseEvent *event)
 
         emit ropeGrabbed(unposed(point));
 
+        // (the hand's level is known now) the rope moves by as much as the
+        // mouse does from here: it does not jump to where the line of
+        // sight meets the hand's level
+        if (!std::isnan(handLevel_))
+            grabLevelStart_ = pointOnLevel(event->position(), handLevel_, grabPoint_);
+
         event->accept();
 
         return;
@@ -4326,8 +4487,9 @@ void KnotGLWidget::mouseMoveEvent(QMouseEvent *event)
 
     if (ropeDragging_ && !std::isnan(handLevel_))
     {
-        // the hand moves over the table, the point under the mouse
-        emit ropeDragged(unposed(pointOnLevel(event->position(), handLevel_, grabPoint_)));
+        // the hand moves over the table as the mouse does
+        emit ropeDragged(unposed(
+            grabPoint_ + pointOnLevel(event->position(), handLevel_, grabLevelStart_) - grabLevelStart_));
 
         event->accept();
 
@@ -5693,11 +5855,12 @@ void KnotGLWidget::setPhotoUniforms(QOpenGLShaderProgram &program)
     program.setUniformValue("uRoomFloor", roomFloor);
 
     // The camera is set for the light on the table: white paper there
-    // comes out a light grey, as a photographer would expose it.
+    // comes out a mid grey (a little under, for a moody picture in which
+    // the light rope stands out).
     const float lightOnTable =
         0.2126f * onTable.x() + 0.7152f * onTable.y() + 0.0722f * onTable.z();
 
-    photoExposure_ = 1.9f / std::max(lightOnTable, 1.0e-3f);
+    photoExposure_ = 1.45f / std::max(lightOnTable, 1.0e-3f);
 
     /*
      * The white balance: the colour of the light on the table made grey,
@@ -6267,6 +6430,10 @@ void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
 
     photoFloorProgram_->setUniformValue("uViewProjection", viewProjection);
     photoFloorProgram_->setUniformValue("uTile", static_cast<float>(photoInfo_.surfaceTileMm));
+    // the table is dark stone; a floor turns into it only on the full stage
+    photoFloorProgram_->setUniformValue(
+        "uStage",
+        photoInfo_.tableWidthMm > 0.0 ? 1.0f : std::clamp((stage_ - CalmStage) / (1.0f - CalmStage), 0.0f, 1.0f));
     photoFloorProgram_->setUniformValue("uCameraPosition", eye);
 
     photoFloorProgram_->setUniformValue("uOcclusionArea", occlusionArea_);
@@ -6379,10 +6546,51 @@ void KnotGLWidget::developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &p
     /*
      * The camera: a full-frame sensor (24 mm high) behind a lens with the
      * view's angle (f = 12 mm / tan(half the angle), about 29 mm) at f/8,
-     * focused on the knot. Everything in millimetres, from the rope.
+     * focused on the knot. Everything in millimetres, from the rope. Opened
+     * wider (setPhotoAperture) the room behind melts away; the lens turns
+     * there over a second or so, as a photographer's would.
      */
     constexpr float SensorHeight = 24.0f;
-    constexpr float FNumber = 8.0f;
+
+    {
+        const float seconds =
+            apertureClock_.isValid() ? static_cast<float>(apertureClock_.restart()) / 1000.0f : 0.0f;
+
+        if (!apertureClock_.isValid())
+            apertureClock_.start();
+
+        // the f-number moves in equal stops (as its logarithm)
+        const float stops = std::log2(photoFNumberTarget_ / photoFNumber_);
+        const float step = std::min(seconds * 2.5f, 1.0f);
+
+        photoFNumber_ *= std::exp2(stops * step);
+
+        if (std::abs(stops) < 0.01f)
+            photoFNumber_ = photoFNumberTarget_;
+        else
+            update();
+    }
+
+    const float FNumber = photoFNumber_;
+
+    // the stage fades in and out over a second or so
+    {
+        const float seconds =
+            stageClock_.isValid() ? static_cast<float>(stageClock_.restart()) / 1000.0f : 0.0f;
+
+        if (!stageClock_.isValid())
+            stageClock_.start();
+
+        const float gap = stageTarget_ - stage_;
+        const float step = std::min(seconds * 1.2f, 1.0f);
+
+        stage_ = std::abs(gap) < 0.005f ? stageTarget_ : stage_ + gap * std::max(step, 0.02f);
+
+        if (stage_ != stageTarget_)
+            update();
+    }
+
+    developProgram_->setUniformValue("uStage", stage_);
 
     const float focal = 0.5f * SensorHeight / std::tan(qDegreesToRadians(0.5f * FieldOfView));
     const float focus = std::max(distance_, 0.01f);
@@ -6394,7 +6602,10 @@ void KnotGLWidget::developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &p
 
     developProgram_->setUniformValue("uFocus", focus);
     developProgram_->setUniformValue("uCocScale", cocScale);
-    developProgram_->setUniformValue("uMaxCoc", 0.03f * static_cast<float>(height));
+    // (wider open, the far room may blur more)
+    developProgram_->setUniformValue(
+        "uMaxCoc",
+        (FNumber < 5.0f ? 0.045f : 0.03f) * (1.0f + 0.5f * stage_) * static_cast<float>(height));
     developProgram_->setUniformValue("uAspect", static_cast<float>(width) / std::max(height, 1));
     developProgram_->setUniformValue("uHalfFieldTan", std::tan(qDegreesToRadians(0.5f * FieldOfView)));
     developProgram_->setUniformValue(

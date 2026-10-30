@@ -383,8 +383,11 @@ void RopeSimulation::step()
     // little wider than the reach of a contact
     constexpr double Cell = 2.6;
 
-    // the hand carries its point towards it, a safe distance per step
+    // the hand carries its point towards it, a safe distance per step;
+    // up and down it moves gently, as a hand lifts a rope (about half a
+    // second to the full height), so the rope never jumps
     constexpr double HandStep = 0.1;
+    constexpr double HandRise = 0.012;
 
     // gravity, damping, predicted positions
     const double keep = std::exp(-Damping * dt);
@@ -394,6 +397,8 @@ void RopeSimulation::step()
         if (i == held_)
         {
             Vec3 move = hand_ - X[i];
+
+            move.y = std::clamp(move.y, -HandRise, HandRise);
 
             const double distance = move.length();
 
@@ -1300,7 +1305,7 @@ const std::vector<StrandSample> &strandTable()
  * them (w = -1, x = from root to tip). A braided cotton lace has far fewer
  * and shorter ones. The same rope always gets the same fibres.
  */
-void addLooseFibres(KnotMath::Mesh &mesh, bool closed, double radius, bool braided)
+void addLooseFibres(KnotMath::Mesh &mesh, bool closed, double radius, bool braided, bool quick)
 {
     const int n = mesh.ringCount;
     const int segments = mesh.ringSegments;
@@ -1318,7 +1323,8 @@ void addLooseFibres(KnotMath::Mesh &mesh, bool closed, double radius, bool braid
         : mesh.strandLength.value(0, mesh.centerlineArc.last());
 
     // fibres per radius of rope, their length and thickness (in radii)
-    const double density = braided ? 1.2 : 5.0;
+    // (a moving rope: half of them, the same ones)
+    const double density = (braided ? 1.2 : 5.0) * (quick ? 0.5 : 1.0);
     const double shortest = braided ? 0.12 : 0.2;
     const double longest = braided ? 0.45 : 1.3;
     const double thickness = braided ? 0.012 : 0.02;
@@ -1508,9 +1514,16 @@ KnotMath::Mesh buildRopeMesh(
 {
     const bool braided = material.construction == 2;
 
-    // rings close enough to follow the strands or yarns, and around
-    const double ringSpacing = (braided ? 0.12 : 0.2) * radius;
-    const int segments = braided ? 96 : 72;
+    /*
+     * Rings close enough to follow the strands or yarns, and around. A
+     * rope that moves (quick, built for every frame) is drawn lighter: in
+     * motion the grooves need fewer points, and a long rope (a knot of a
+     * dozen crossings) keeps to a budget of vertices.
+     */
+    double ringSpacing = (braided ? 0.12 : 0.2) * radius * (quick ? 1.4 : 1.0);
+    const int segments = braided ? (quick ? 64 : 96) : (quick ? 48 : 72);
+
+    constexpr double QuickVertices = 60000.0;
 
     const QVector<Vec3> smooth = KnotMath::refineCurve(curve, 4, closed);
 
@@ -1521,6 +1534,9 @@ KnotMath::Mesh buildRopeMesh(
 
     if (closed)
         length += (smooth.first() - smooth.last()).length();
+
+    if (quick)
+        ringSpacing = std::max(ringSpacing, length * segments / QuickVertices);
 
     const int rings = std::clamp(
         static_cast<int>(std::lround(length / ringSpacing)),
@@ -1826,7 +1842,7 @@ KnotMath::Mesh buildRopeMesh(
     for (int k = ringVertices; k < mesh.occlusion.size(); ++k)
         mesh.occlusion[k] = 1.0f;
 
-    addLooseFibres(mesh, closed, radius, braided);
+    addLooseFibres(mesh, closed, radius, braided, quick);
 
     return mesh;
 }

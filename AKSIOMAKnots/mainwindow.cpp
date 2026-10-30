@@ -1275,7 +1275,8 @@ QWidget *MainWindow::createLeftPanel()
     unknotSpeedCombo_->addItem(QStringLiteral("1×"), 1.0);
     unknotSpeedCombo_->addItem(QStringLiteral("2×"), 2.0);
     unknotSpeedCombo_->addItem(QStringLiteral("4×"), 4.0);
-    unknotSpeedCombo_->setCurrentIndex(2);
+    // slowly enough to follow every step
+    unknotSpeedCombo_->setCurrentIndex(1);
 
     speedLayout->addWidget(makeFieldLabel(tr("Speed"), unknotGroup_));
     speedLayout->addWidget(unknotSpeedCombo_, 1);
@@ -3479,50 +3480,34 @@ bool MainWindow::showRestingRope(double radius)
 
     if (!known)
     {
-        QApplication::setOverrideCursor(Qt::WaitCursor);
-
-        Photo::TiedLace tied;
-
-        if (sneaker)
-        {
-            tied = Photo::tieOnSneaker(currentData_.points, radius, material);
-        }
-        else
-        {
-            tied.rope = Photo::layOnTable(
-                currentData_.points,
-                currentData_.closed,
-                radius,
-                material);
-        }
-
-        // (the lace through the eyelets is the same knot as well)
-        Photo::RestingRope rope = tied.rope;
-
         /*
-         * The rope never passes through itself, so it is the same knot;
-         * checked anyway with the Alexander polynomial of both centre
-         * lines. A rope that changed is not shown.
+         * The rope takes a second or two to fall and come to rest (more
+         * for a long one, a knot of a dozen crossings): worked out on a
+         * worker thread, so the window never freezes. Meanwhile the knot
+         * is shown as before; once the rope lies still it is drawn again.
          */
-        if (rope.valid && currentData_.closed)
-        {
-            const KnotMath::AlexanderPolynomial before =
-                KnotMath::computeAlexanderPolynomial(currentData_.points);
+        const bool asked =
+            restingLaying_ &&
+            restingJobScene_ == static_cast<int>(scene) &&
+            std::abs(restingJobRadius_ - radius) < 1.0e-9 &&
+            restingJobFrom_.size() == currentData_.points.size() &&
+            std::equal(
+                restingJobFrom_.cbegin(),
+                restingJobFrom_.cend(),
+                currentData_.points.cbegin(),
+                [](const KnotMath::Vec3 &a, const KnotMath::Vec3 &b)
+                {
+                    return a.x == b.x && a.y == b.y && a.z == b.z;
+                });
 
-            const KnotMath::AlexanderPolynomial after =
-                KnotMath::computeAlexanderPolynomial(rope.points);
+        if (!asked)
+            layRestingRope(radius);
 
-            if (before.valid && (!after.valid || after.text != before.text))
-                rope.valid = false;
-        }
+        glWidget_->setCaption(
+            tr("Laying the rope on the table"),
+            tr("It falls and comes to rest by its own weight."));
 
-        QApplication::restoreOverrideCursor();
-
-        restingRope_ = rope;
-        restingTied_ = tied;
-        restingFrom_ = currentData_.points;
-        restingRadius_ = radius;
-        restingScene_ = static_cast<int>(scene);
+        return false;
     }
 
     if (!restingRope_.valid)
@@ -3612,6 +3597,87 @@ bool MainWindow::showRestingRope(double radius)
     return true;
 }
 
+void MainWindow::layRestingRope(double radius)
+{
+    const auto scene =
+        static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
+
+    const Photo::RopeMaterial material = Photo::sceneInfo(scene).rope;
+    const bool sneaker = Photo::sceneInfo(scene).sneaker;
+
+    const QVector<KnotMath::Vec3> points = currentData_.points;
+    const bool closed = currentData_.closed;
+
+    const quint64 job = ++restingJob_;
+
+    restingLaying_ = true;
+    restingJobFrom_ = points;
+    restingJobRadius_ = radius;
+    restingJobScene_ = static_cast<int>(scene);
+
+    auto result = std::make_shared<Photo::TiedLace>();
+
+    QThread *worker = QThread::create(
+        [points, closed, radius, material, sneaker, result]()
+        {
+            Photo::TiedLace tied;
+
+            // tied in the sneaker's lace, or dropped on the table
+            if (sneaker)
+                tied = Photo::tieOnSneaker(points, radius, material);
+            else
+                tied.rope = Photo::layOnTable(points, closed, radius, material);
+
+            /*
+             * The rope never passes through itself, so it is the same knot
+             * (the lace through the eyelets as well); checked anyway with
+             * the Alexander polynomial of both centre lines. A rope that
+             * changed is not shown.
+             */
+            if (tied.rope.valid && closed)
+            {
+                const KnotMath::AlexanderPolynomial before =
+                    KnotMath::computeAlexanderPolynomial(points);
+
+                const KnotMath::AlexanderPolynomial after =
+                    KnotMath::computeAlexanderPolynomial(tied.rope.points);
+
+                if (before.valid && (!after.valid || after.text != before.text))
+                    tied.rope.valid = false;
+            }
+
+            *result = tied;
+        });
+
+    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+
+    connect(
+        worker,
+        &QThread::finished,
+        this,
+        [this, job, result, points, radius, scene]()
+        {
+            // a newer rope was asked for meanwhile
+            if (job != restingJob_)
+                return;
+
+            restingLaying_ = false;
+
+            restingRope_ = result->rope;
+            restingTied_ = *result;
+            restingFrom_ = points;
+            restingRadius_ = radius;
+            restingScene_ = static_cast<int>(scene);
+
+            glWidget_->setCaption(QString(), QString());
+
+            // the rope lying still, drawn where the knot was
+            rebuildMesh();
+        });
+
+    worker->start();
+}
+
 void MainWindow::applyPhotoMode()
 {
     if (glWidget_ == nullptr || photoButton_ == nullptr || photoSceneCombo_ == nullptr)
@@ -3629,6 +3695,9 @@ void MainWindow::applyPhotoMode()
         grabButton_->setChecked(false);
 
     stopPhotoRope();
+
+    // (a rope still being laid down says so until it lies still)
+    glWidget_->setCaption(QString(), QString());
 
     const auto scene =
         static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
@@ -3924,6 +3993,9 @@ void MainWindow::finishUnknotting(
     unknotT_ =
         0.0;
 
+    // Photo mode: the rope of the scene is lifted off the table
+    startPhotoUnknot();
+
     // The user pressed play to get here.
     unknotPlaying_ =
         true;
@@ -3967,6 +4039,11 @@ void MainWindow::stopUnknotting(
     unknotActive_ =
         false;
 
+    const bool wasPhoto =
+        photoUnknot_;
+
+    stopPhotoUnknot();
+
     unknotAnimation_ =
         KnotMath::UnknottingAnimation();
 
@@ -4008,6 +4085,10 @@ void MainWindow::stopUnknotting(
 
     if (restoreMesh)
         rebuildMesh();
+
+    // the rope lies on the table again: the usual view of it
+    if (wasPhoto && restoreMesh)
+        glWidget_->resetCamera();
 }
 
 void MainWindow::unknotPlayPause()
@@ -4039,6 +4120,10 @@ void MainWindow::unknotPlayPause()
     {
         unknotT_ =
             0.0;
+
+        // the loop that fell onto the table goes back up
+        unknotDrop_.reset();
+        unknotLanded_.clear();
     }
 
     unknotCelebrate_ =
@@ -4062,6 +4147,58 @@ void MainWindow::unknotReset()
     stopUnknotting(
         true);
 }
+
+namespace
+{
+
+// Photo mode: seconds to lift the rope off the table before unknotting
+constexpr double UnknotLiftSeconds = 2.4;
+
+/*
+ * A rope keeps its length: the unknotting animation draws its curve
+ * shorter as the knot comes undone (it rounds and shrinks it), so in
+ * Photo mode every frame is scaled about its middle back to the rope's
+ * `length` (closed curve). `middle` and `scale` tell how, for the points
+ * that go with the curve (the flashes).
+ */
+QVector<KnotMath::Vec3> keepLength(
+    const QVector<KnotMath::Vec3> &curve,
+    double length,
+    KnotMath::Vec3 *middle = nullptr,
+    double *scale = nullptr)
+{
+    const int n = curve.size();
+
+    KnotMath::Vec3 centre;
+    double now = 0.0;
+
+    for (int i = 0; i < n; ++i)
+    {
+        centre += curve.at(i);
+        now += (curve.at((i + 1) % n) - curve.at(i)).length();
+    }
+
+    centre = centre / std::max(1, n);
+
+    const double factor = now > 1.0e-9 && length > 0.0 ? length / now : 1.0;
+
+    if (middle != nullptr)
+        *middle = centre;
+
+    if (scale != nullptr)
+        *scale = factor;
+
+    QVector<KnotMath::Vec3> scaled;
+
+    scaled.reserve(n);
+
+    for (const KnotMath::Vec3 &p : curve)
+        scaled.push_back(centre + (p - centre) * factor);
+
+    return scaled;
+}
+
+} // namespace
 
 void MainWindow::unknotTick()
 {
@@ -4099,6 +4236,41 @@ void MainWindow::unknotTick()
         return;
     }
 
+    // Photo mode: the finished loop falls onto the table, then the
+    // celebration
+    if (photoUnknot_ && unknotDrop_ != nullptr)
+    {
+        const double seconds =
+            std::min(static_cast<double>(unknotClock_.restart()) / 1000.0, 0.1);
+
+        if (!advanceUnknotDrop(seconds))
+        {
+            unknotCelebrate_ = 0.0;
+
+            // a closer look at the loop where it lies
+            KnotMath::Vec3 low(1.0e30, 1.0e30, 1.0e30);
+            KnotMath::Vec3 high(-1.0e30, -1.0e30, -1.0e30);
+
+            for (const KnotMath::Vec3 &p : unknotLanded_)
+            {
+                low = KnotMath::Vec3(std::min(low.x, p.x), std::min(low.y, p.y), std::min(low.z, p.z));
+                high = KnotMath::Vec3(std::max(high.x, p.x), std::max(high.y, p.y), std::max(high.z, p.z));
+            }
+
+            const KnotMath::Vec3 middle = (low + high) * 0.5;
+
+            glWidget_->flyWithSunBehind(
+                QVector3D(static_cast<float>(middle.x), static_cast<float>(middle.y), static_cast<float>(middle.z)),
+                static_cast<float>(0.6 * (high - low).length()),
+                35.0f,
+                45.0f);
+        }
+
+        renderUnknotFrame();
+
+        return;
+    }
+
     if (!unknotPlaying_)
         return;
 
@@ -4106,6 +4278,17 @@ void MainWindow::unknotTick()
         static_cast<double>(
             unknotClock_.restart()) /
         1000.0;
+
+    // Photo mode: first the rope is lifted off the table
+    if (photoUnknot_ && unknotLift_ < 1.0)
+    {
+        unknotLift_ =
+            std::min(1.0, unknotLift_ + dt / UnknotLiftSeconds);
+
+        renderUnknotFrame();
+
+        return;
+    }
 
     const double speed =
         unknotSpeedCombo_->currentData().toDouble();
@@ -4158,9 +4341,13 @@ void MainWindow::unknotTick()
         unknotPlaying_ =
             false;
 
-        // the timer keeps running for the celebration
+        // the timer keeps running for the celebration (in Photo mode for
+        // the loop falling onto the table first)
+        if (photoUnknot_)
+            startUnknotDrop();
+
         unknotCelebrate_ =
-            0.0;
+            photoUnknot_ && unknotDrop_ != nullptr ? -1.0 : 0.0;
 
         setUnknotControlsEnabled(
             false);
@@ -4198,6 +4385,11 @@ void MainWindow::unknotScrubbed(
     unknotT_ =
         static_cast<double>(value) /
         1000.0;
+
+    // Photo mode: the moment in the air
+    unknotLift_ = 1.0;
+    unknotDrop_.reset();
+    unknotLanded_.clear();
 
     renderUnknotFrame();
 }
@@ -4301,8 +4493,88 @@ void MainWindow::renderUnknotFrame()
     constexpr int refine =
         2;
 
+    /*
+     * Photo mode: the rope where it is: rising from the table (the rope
+     * as it lay, blended into the knot in the air), in the air, or fallen
+     * back onto the table at the end.
+     */
+    KnotMath::Vec3 air;
+    KnotMath::Vec3 flashMiddle;
+    double flashScale = 1.0;
+
+    if (photoUnknot_)
+    {
+        air = unknotAir_;
+
+        // as long as the rope (the animation shrinks it as it goes)
+        const QVector<KnotMath::Vec3> full =
+            keepLength(curve, unknotRopeLength_, &flashMiddle, &flashScale);
+
+        QVector<KnotMath::Vec3> rope;
+
+        if (!unknotLanded_.isEmpty())
+        {
+            rope = unknotLanded_;
+        }
+        else if (unknotLift_ < 1.0)
+        {
+            const QVector<KnotMath::Vec3> from =
+                KnotMath::resampleClosedCurve(unknotLiftFrom_, full.size(), true);
+
+            const double e = unknotLift_ * unknotLift_ * (3.0 - 2.0 * unknotLift_);
+
+            for (int i = 0; i < full.size(); ++i)
+                rope.push_back(from.value(i, full.at(i)) * (1.0 - e) + (full.at(i) + air) * e);
+
+            air = air * e;
+        }
+        else
+        {
+            for (const KnotMath::Vec3 &p : full)
+                rope.push_back(p + air);
+        }
+
+        if (!unknotLanded_.isEmpty())
+        {
+            centre = KnotMath::Vec3();
+
+            for (const KnotMath::Vec3 &p : rope)
+                centre += p;
+
+            centre = centre / std::max(1.0, static_cast<double>(rope.size()));
+            air = KnotMath::Vec3();
+        }
+
+        // the second camera shot for the opened loop (and back, when the
+        // bar is dragged back)
+        if (unknotLanded_.isEmpty() && unknotLift_ >= 1.0)
+        {
+            const bool wide = unknotT_ >= unknotWideFrom_;
+
+            if (wide != unknotWideShot_)
+            {
+                unknotWideShot_ = wide;
+
+                glWidget_->flyWithSunBehind(
+                    wide ? unknotWideCentre_ : unknotCloseCentre_,
+                    wide ? unknotWideRadius_ : unknotCloseRadius_,
+                    35.0f,
+                    22.0f);
+            }
+        }
+
+        showPhotoUnknotRope(
+            rope,
+            highlight,
+            curve.size(),
+            glow > 0.0 ? QColor(108, 192, 139) : QColor(91, 155, 255),
+            QColor(217, 155, 66));
+    }
+
     KnotMath::Mesh mesh =
-        KnotMath::buildTubeMesh(
+        photoUnknot_
+            ? KnotMath::Mesh()
+            : KnotMath::buildTubeMesh(
             KnotMath::refineCurve(
                 curve,
                 refine,
@@ -4314,7 +4586,7 @@ void MainWindow::renderUnknotFrame()
             2,
             &unknotFrameHint_);
 
-    if (mesh.isValid())
+    if (mesh.isValid() && !photoUnknot_)
     {
         KnotMath::computeAmbientOcclusion(
             mesh,
@@ -4359,7 +4631,7 @@ void MainWindow::renderUnknotFrame()
             p < 1.0)
         {
             positions.push_back(
-                event.position);
+                flashMiddle + (event.position - flashMiddle) * flashScale + air);
 
             progress.push_back(
                 static_cast<float>(p));
@@ -4396,9 +4668,16 @@ void MainWindow::renderUnknotFrame()
 
     QString text;
 
-    // A title and a short explanation for every stage.
-    auto explain = [](const QString &title, const QString &body)
+    // A title and a short explanation for every stage (in Photo mode
+    // also as a caption on the picture).
+    QString captionTitle;
+    QString captionBody;
+
+    auto explain = [&captionTitle, &captionBody](const QString &title, const QString &body)
     {
+        captionTitle = title;
+        captionBody = body;
+
         return QStringLiteral("<b>%1</b><br>%2").arg(title, body);
     };
 
@@ -4517,8 +4796,33 @@ void MainWindow::renderUnknotFrame()
                    "overlap.)");
     }
 
+    // Photo mode: what the rope does before and after the animation
+    if (photoUnknot_)
+    {
+        if (unknotLift_ < 1.0)
+        {
+            text = explain(
+                tr("Lifting the rope"),
+                tr("The knot is lifted off the table and turned towards "
+                   "us, so every crossing can be seen. The picture in the "
+                   "corner is its diagram: the knot seen from above, a "
+                   "gap where a strand passes under another."));
+        }
+        else if (unknotDrop_ != nullptr)
+        {
+            text = explain(
+                tr("Back on the table"),
+                tr("Let go, the loop falls by its own weight. However it "
+                   "lands, it can be laid out as a plain ring without "
+                   "cutting it: it is the unknot."));
+        }
+    }
+
     unknotStatusLabel_->setText(
         Theme::html(text));
+
+    if (photoUnknot_)
+        glWidget_->setCaption(captionTitle, captionBody);
 
     // 2D diagram in the corner, up to the end of the "downhill" stage
     // (after that the curve no longer has this diagram).
@@ -7051,6 +7355,332 @@ void MainWindow::updatePhotoRopeButtons()
 
     cutRopeButton_->setEnabled(on && closed && !holding);
     tieEndsButton_->setEnabled(on && !closed && !holding);
+}
+
+/*
+ * =============================================================
+ * PHOTO MODE: UNKNOTTING THE ROPE
+ * =============================================================
+ */
+
+namespace
+{
+
+// the longest the finished loop may take to come to rest when it falls
+// back onto the table
+constexpr double UnknotLongestDrop = 6.0;
+
+// the rope's own colour blended towards `hot` by w (0..1)
+QColor blendColour(const QColor &base, const QColor &hot, double w)
+{
+    return QColor::fromRgbF(
+        static_cast<float>(base.redF() + (hot.redF() - base.redF()) * w),
+        static_cast<float>(base.greenF() + (hot.greenF() - base.greenF()) * w),
+        static_cast<float>(base.blueF() + (hot.blueF() - base.blueF()) * w));
+}
+
+} // namespace
+
+bool MainWindow::startPhotoUnknot()
+{
+    photoUnknot_ = false;
+
+    if (glWidget_ == nullptr || !glWidget_->photoMode())
+        return false;
+
+    const auto scene =
+        static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
+
+    // the lace on the sneaker is held by its eyelets: the usual tube there
+    if (Photo::sceneInfo(scene).sneaker)
+        return false;
+
+    if (!restingRope_.valid ||
+        restingScene_ != static_cast<int>(scene) ||
+        !sameCurve(restingFrom_, currentData_.points))
+    {
+        return false;
+    }
+
+    // a rope in the hand is put down
+    stopPhotoRope();
+
+    unknotPose_ = restingRope_.pose;
+    unknotRopeRadius_ = restingRadius_;
+    unknotMaterial_ = Photo::sceneInfo(scene).rope;
+
+    /*
+     * How high: the box of every frame of the animation, turned onto the
+     * table, clear of it by a third of its size (the table top is y = 0).
+     */
+    // the rope's length: the knot's curve as the animation begins
+    {
+        const QVector<KnotMath::Vec3> first = unknotAnimation_.curveAt(0.0);
+
+        unknotRopeLength_ = 0.0;
+
+        for (int i = 0; i < first.size(); ++i)
+            unknotRopeLength_ += (first.at((i + 1) % first.size()) - first.at(i)).length();
+    }
+
+    // where the knot is pulled open
+    unknotWideFrom_ = 1.0;
+
+    for (const KnotMath::UnknottingAnimation::TimelineMark &mark : unknotAnimation_.timeline())
+    {
+        if (mark.stage == KnotMath::UnknottingAnimation::Stage::Untangle)
+            unknotWideFrom_ = mark.time;
+    }
+
+    // the box of all the frames, at the rope's length, and of the frames
+    // before and after it is pulled open (the two camera shots)
+    KnotMath::Vec3 lo(1.0e30, 1.0e30, 1.0e30);
+    KnotMath::Vec3 hi(-1.0e30, -1.0e30, -1.0e30);
+
+    KnotMath::Vec3 closeLo = lo;
+    KnotMath::Vec3 closeHi = hi;
+    KnotMath::Vec3 wideLo = lo;
+    KnotMath::Vec3 wideHi = hi;
+
+    auto grow = [](KnotMath::Vec3 &low, KnotMath::Vec3 &high, const KnotMath::Vec3 &p)
+    {
+        low = KnotMath::Vec3(std::min(low.x, p.x), std::min(low.y, p.y), std::min(low.z, p.z));
+        high = KnotMath::Vec3(std::max(high.x, p.x), std::max(high.y, p.y), std::max(high.z, p.z));
+    };
+
+    for (int k = 0; k <= 100; ++k)
+    {
+        const double t = k / 100.0;
+
+        for (const KnotMath::Vec3 &p : keepLength(unknotAnimation_.curveAt(t), unknotRopeLength_))
+        {
+            grow(lo, hi, p);
+
+            if (t < unknotWideFrom_)
+                grow(closeLo, closeHi, p);
+            else
+                grow(wideLo, wideHi, p);
+        }
+    }
+
+    if (closeLo.x > closeHi.x)
+    {
+        closeLo = lo;
+        closeHi = hi;
+    }
+
+    if (wideLo.x > wideHi.x)
+    {
+        wideLo = lo;
+        wideHi = hi;
+    }
+
+    double lowest = std::numeric_limits<double>::max();
+
+    for (int corner = 0; corner < 8; ++corner)
+    {
+        const QVector3D p = unknotPose_.map(QVector3D(
+            static_cast<float>((corner & 1) ? hi.x : lo.x),
+            static_cast<float>((corner & 2) ? hi.y : lo.y),
+            static_cast<float>((corner & 4) ? hi.z : lo.z)));
+
+        lowest = std::min(lowest, static_cast<double>(p.y()));
+    }
+
+    const double size = (hi - lo).length();
+    const double rise = -lowest + unknotRopeRadius_ + 0.3 * size;
+
+    const QVector3D up = unknotPose_.inverted().mapVector(QVector3D(0.0f, static_cast<float>(rise), 0.0f));
+
+    unknotAir_ = KnotMath::Vec3(up.x(), up.y(), up.z());
+
+    unknotLiftFrom_ = restingRope_.points;
+    unknotLift_ = 0.0;
+    unknotDrop_.reset();
+    unknotLanded_.clear();
+
+    photoUnknot_ = true;
+
+    // the rope on the table and the knot in the air are all in view
+    KnotMath::Vec3 low = lo;
+    KnotMath::Vec3 high = hi + unknotAir_;
+
+    for (const KnotMath::Vec3 &p : unknotLiftFrom_)
+    {
+        low = KnotMath::Vec3(std::min(low.x, p.x), std::min(low.y, p.y), std::min(low.z, p.z));
+        high = KnotMath::Vec3(std::max(high.x, p.x), std::max(high.y, p.y), std::max(high.z, p.z));
+    }
+
+    const float margin = static_cast<float>(unknotRopeRadius_);
+
+    glWidget_->setFixedBounds(
+        QVector3D(static_cast<float>(low.x) - margin, static_cast<float>(low.y) - margin, static_cast<float>(low.z) - margin),
+        QVector3D(static_cast<float>(high.x) + margin, static_cast<float>(high.y) + margin, static_cast<float>(high.z) + margin));
+
+    // the camera goes round so the sun is behind it (the rope lit from
+    // the front and a little from the side, no glare), a little above,
+    // close on the knot
+    auto shot = [this](const KnotMath::Vec3 &low, const KnotMath::Vec3 &high, QVector3D &centre, float &radius)
+    {
+        const KnotMath::Vec3 middle = (low + high) * 0.5 + unknotAir_;
+
+        centre = QVector3D(static_cast<float>(middle.x), static_cast<float>(middle.y), static_cast<float>(middle.z));
+        radius = static_cast<float>(0.5 * (high - low).length() + unknotRopeRadius_);
+    };
+
+    shot(closeLo, closeHi, unknotCloseCentre_, unknotCloseRadius_);
+    shot(wideLo, wideHi, unknotWideCentre_, unknotWideRadius_);
+
+    // (the box holds the loop turning as it opens: a little less is enough)
+    unknotWideRadius_ *= 0.8f;
+
+    unknotWideShot_ = false;
+
+    glWidget_->flyWithSunBehind(unknotCloseCentre_, unknotCloseRadius_, 35.0f, 22.0f);
+
+    glWidget_->setRopeTinted(true);
+
+    // a portrait of the rope: the room behind out of focus and in the
+    // dark, a spotlight on the knot
+    glWidget_->setPhotoAperture(2.0f);
+    glWidget_->setPhotoStage(true);
+
+    return true;
+}
+
+void MainWindow::stopPhotoUnknot()
+{
+    if (!photoUnknot_)
+        return;
+
+    photoUnknot_ = false;
+    unknotLift_ = 1.0;
+    unknotDrop_.reset();
+    unknotLanded_.clear();
+
+    glWidget_->setRopeTinted(false);
+    glWidget_->setCaption(QString(), QString());
+    glWidget_->setPhotoAperture(8.0f);
+    glWidget_->setPhotoStage(false);
+}
+
+void MainWindow::showPhotoUnknotRope(
+    const QVector<KnotMath::Vec3> &curve,
+    const QVector<float> &highlight,
+    int along,
+    const QColor &over,
+    const QColor &under)
+{
+    KnotMath::Mesh mesh =
+        Photo::buildRopeMesh(curve, true, unknotRopeRadius_, unknotMaterial_, true);
+
+    if (!mesh.isValid())
+        return;
+
+    /*
+     * Every ring, and the fibres on it, takes the tint of the point of the
+     * animation at the same place along the rope (the strands of a
+     * crossing change: blue on top, amber below, as in the diagram).
+     */
+    const int vertices = mesh.positions.size() / 3;
+    const float length = mesh.strandLength.value(0, 1.0f);
+
+    mesh.colors.resize(3 * vertices);
+
+    for (int v = 0; v < vertices; ++v)
+    {
+        const int ring = mesh.vertexSample.value(v, 0);
+        const float fraction = mesh.centerlineArc.value(ring, 0.0f) / std::max(length, 1.0e-6f);
+
+        const int k = std::clamp(static_cast<int>(fraction * along), 0, std::max(along - 1, 0));
+        const float w = std::clamp(highlight.value(k, 0.0f), -1.0f, 1.0f);
+
+        const QColor colour = blendColour(unknotMaterial_.color, w >= 0.0f ? over : under, 0.85 * std::abs(w));
+
+        mesh.colors[3 * v] = static_cast<float>(colour.redF());
+        mesh.colors[3 * v + 1] = static_cast<float>(colour.greenF());
+        mesh.colors[3 * v + 2] = static_cast<float>(colour.blueF());
+    }
+
+    // the table stays where it is; only the rope moves above it
+    glWidget_->setRestingRope(std::move(mesh), unknotPose_, true);
+}
+
+void MainWindow::startUnknotDrop()
+{
+    // the finished loop (as long as the rope), where it is in the air, on
+    // the table in radii
+    const QVector<KnotMath::Vec3> loop = keepLength(unknotAnimation_.curveAt(1.0), unknotRopeLength_);
+
+    QVector<KnotMath::Vec3> table;
+
+    table.reserve(loop.size());
+
+    for (const KnotMath::Vec3 &p : loop)
+    {
+        const KnotMath::Vec3 q = p + unknotAir_;
+        const QVector3D w = unknotPose_.map(QVector3D(
+            static_cast<float>(q.x),
+            static_cast<float>(q.y),
+            static_cast<float>(q.z)));
+
+        table.push_back(KnotMath::Vec3(w.x(), w.y(), w.z()) / unknotRopeRadius_);
+    }
+
+    // points half a radius apart, as the rope physics wants them
+    double length = 0.0;
+
+    for (int i = 0; i < table.size(); ++i)
+        length += (table.at((i + 1) % table.size()) - table.at(i)).length();
+
+    const int n = std::clamp(static_cast<int>(std::lround(length / 0.5)), 16, 6000);
+
+    unknotDrop_ = std::make_unique<Photo::RopeSimulation>(
+        KnotMath::resampleClosedCurve(table, n, true), QVector<bool>(), true, unknotMaterial_);
+
+    unknotDropTime_ = 0.0;
+
+    if (!unknotDrop_->isValid())
+        unknotDrop_.reset();
+}
+
+bool MainWindow::advanceUnknotDrop(double seconds)
+{
+    if (unknotDrop_ == nullptr)
+        return false;
+
+    // as much rope time as real time has passed
+    const int steps = std::min(
+        static_cast<int>(std::lround(seconds / unknotDrop_->secondsPerStep())),
+        40);
+
+    for (int k = 0; k < steps && !unknotDrop_->atRest(); ++k)
+        unknotDrop_->step();
+
+    unknotDropTime_ += seconds;
+
+    // where it is now, in the knot's coordinates
+    const QMatrix4x4 back = unknotPose_.inverted();
+
+    unknotLanded_.clear();
+
+    for (const KnotMath::Vec3 &p : unknotDrop_->points())
+    {
+        const QVector3D q = back.map(QVector3D(
+            static_cast<float>(p.x * unknotRopeRadius_),
+            static_cast<float>(p.y * unknotRopeRadius_),
+            static_cast<float>(p.z * unknotRopeRadius_)));
+
+        unknotLanded_.push_back(KnotMath::Vec3(q.x(), q.y(), q.z()));
+    }
+
+    if (unknotDrop_->atRest() || unknotDropTime_ > UnknotLongestDrop)
+    {
+        unknotDrop_.reset();
+        return false;
+    }
+
+    return true;
 }
 
 /*

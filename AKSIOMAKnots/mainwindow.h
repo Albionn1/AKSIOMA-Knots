@@ -85,6 +85,10 @@ private slots:
     // laid down as the same knot).
     bool showRestingRope(double radius);
 
+    // lays the current knot on the table (as a rope of tubes of `radius`)
+    // on a worker thread; rebuildMesh draws it once it lies still
+    void layRestingRope(double radius);
+
     /*
      * Photo mode, the rope in the hand. With Grab on, the rope lying on
      * the table is picked up with the mouse and moves by its own physics
@@ -154,6 +158,32 @@ private slots:
     void unknotPlayPause();
     void unknotReset();
     void unknotTick();
+
+    /*
+     * Photo mode: the unknotting is done with the rope of the scene. It is
+     * lifted off the table, the camera turns so the sun is behind it, the
+     * knot is undone in the air with a caption on the picture telling
+     * what happens and why, and at the end the loop falls back onto the
+     * table by its own weight. False (the usual tube) when the rope is
+     * not lying on a table.
+     */
+    bool startPhotoUnknot();
+    void stopPhotoUnknot();
+
+    // the rope (centre line in the knot's coordinates, where it is) with
+    // the strands of a crossing change tinted: signed `highlight` per
+    // point of `along` points, towards `over` or `under`
+    void showPhotoUnknotRope(
+        const QVector<KnotMath::Vec3> &curve,
+        const QVector<float> &highlight,
+        int along,
+        const QColor &over,
+        const QColor &under);
+
+    // the finished loop let go: it falls onto the table (false once it
+    // lies still)
+    void startUnknotDrop();
+    bool advanceUnknotDrop(double seconds);
     void unknotScrubbed(
         int value);
 
@@ -482,6 +512,14 @@ private:
     // the Sneaker scene: where the knot lies in the whole lace
     Photo::TiedLace restingTied_;
 
+    // a rope being laid down on a worker thread (layRestingRope): which
+    // job is the newest, and what it was asked for
+    bool restingLaying_ = false;
+    quint64 restingJob_ = 0;
+    QVector<KnotMath::Vec3> restingJobFrom_;
+    double restingJobRadius_ = 0.0;
+    int restingJobScene_ = -1;
+
     // the rope in the hand (see startPhotoRope), what it was picked up
     // from, and the hand's height above the table (radii)
     std::unique_ptr<Photo::RopeInHand> photoRope_;
@@ -735,6 +773,32 @@ private:
     // step-by-step mode pauses
     KnotMath::UnknottingAnimation::Diagram unknotDiagram_;
     QVector<double> unknotStops_;
+
+    // Photo mode's unknotting (startPhotoUnknot): on; how far the rope has
+    // been lifted (0..1) from where it lay; how far up it is unknotted (in
+    // the knot's coordinates); the loop falling at the end, and where it
+    // came to lie; the rope's thickness, turn and material
+    bool photoUnknot_ = false;
+    double unknotLift_ = 1.0;
+    QVector<KnotMath::Vec3> unknotLiftFrom_;
+    KnotMath::Vec3 unknotAir_;
+    std::unique_ptr<Photo::RopeSimulation> unknotDrop_;
+    double unknotDropTime_ = 0.0;
+    QVector<KnotMath::Vec3> unknotLanded_;
+    double unknotRopeRadius_ = 0.0;
+    double unknotRopeLength_ = 0.0;
+
+    // the camera: close on the knot while it is undone, further out from
+    // the moment it is pulled open (unknotWideFrom_) for the opened loop
+    // (unknotWideCentre_, unknotWideRadius_ in the knot's coordinates)
+    double unknotWideFrom_ = 1.0;
+    QVector3D unknotCloseCentre_;
+    float unknotCloseRadius_ = 1.0f;
+    QVector3D unknotWideCentre_;
+    float unknotWideRadius_ = 1.0f;
+    bool unknotWideShot_ = false;
+    QMatrix4x4 unknotPose_;
+    Photo::RopeMaterial unknotMaterial_;
 
     bool unknotActive_ =
         false;

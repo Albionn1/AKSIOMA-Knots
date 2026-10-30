@@ -1784,6 +1784,14 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Zgjidh ngjyrën e tubit</translation>
     </message>
     <message>
+        <source>Laying the rope on the table</source>
+        <translation>Litari vendoset mbi tavolinë</translation>
+    </message>
+    <message>
+        <source>It falls and comes to rest by its own weight.</source>
+        <translation>Bie dhe qetësohet nga pesha e vet.</translation>
+    </message>
+    <message>
         <source>The photographed room could not be loaded.</source>
         <translation>Dhoma e fotografuar nuk mund të ngarkohej.</translation>
     </message>
@@ -1798,6 +1806,22 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Preparing...</source>
         <translation>Po përgatitet...</translation>
+    </message>
+    <message>
+        <source>Lifting the rope</source>
+        <translation>Litari ngrihet</translation>
+    </message>
+    <message>
+        <source>The knot is lifted off the table and turned towards us, so every crossing can be seen. The picture in the corner is its diagram: the knot seen from above, a gap where a strand passes under another.</source>
+        <translation>Nyja ngrihet nga tavolina dhe kthehet nga ne, që të shihet çdo kryqëzim. Figura në cep është diagrami i saj: nyja e parë nga sipër, me një ndërprerje aty ku një fije kalon nën një tjetër.</translation>
+    </message>
+    <message>
+        <source>Back on the table</source>
+        <translation>Përsëri mbi tavolinë</translation>
+    </message>
+    <message>
+        <source>Let go, the loop falls by its own weight. However it lands, it can be laid out as a plain ring without cutting it: it is the unknot.</source>
+        <translation>E lëshuar, laku bie nga pesha e vet. Si do që të bjerë, mund të shtrihet si një unazë e thjeshtë pa e prerë: është nyja triviale.</translation>
     </message>
     <message>
         <source>STOP</source>

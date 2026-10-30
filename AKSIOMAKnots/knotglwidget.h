@@ -96,6 +96,31 @@ public:
     void setDiagramInset(const DiagramInset &inset);
     void clearDiagramInset();
 
+    // A caption over the picture, at its foot: a title and a line or two
+    // of explanation (rich text) that fade in when they change; an empty
+    // title takes it away. Photo mode's unknotting tells with it what the
+    // rope is doing and why.
+    void setCaption(const QString &title, const QString &body);
+
+    // Photo mode: the rope at rest keeps the scene's colour unless it is
+    // tinted (its vertex colours: the strands of a crossing change)
+    void setRopeTinted(bool tinted);
+
+    // Photo mode: the camera's f-number (8: the room fairly sharp; 2.8:
+    // only what is in focus sharp, the room behind blurred away)
+    void setPhotoAperture(float fNumber);
+
+    // Photo mode: the knot on a stage (fades in and out): the room behind
+    // it sinks into a dark, colourless blur and a spotlight falls on it;
+    // off, the calm stage of plain Photo mode (darker, colours kept)
+    void setPhotoStage(bool on);
+
+    // Photo mode: a camera flight to the ball (`centre` in the knot's
+    // coordinates, `radius`) with the sun behind the camera, turned
+    // `aside` degrees from it (light from the side shows the rope's
+    // shape), from `pitch` degrees above the table.
+    void flyWithSunBehind(const QVector3D &centre, float radius, float aside, float pitch);
+
     // Draws the diagram of `inset` (no panel, no caption) fitted into
     // `area`; `background` is the colour behind it (the gaps where a
     // strand runs below another are painted with it).
@@ -367,6 +392,7 @@ private:
     void drawCrossingLabels(QPainter &painter);
     void drawFlashes(QPainter &painter);
     void drawDiagramInset(QPainter &painter);
+    void drawCaption(QPainter &painter);
 
     void configureFlatAttributes();
 
@@ -514,6 +540,19 @@ private:
     DiagramInset inset_;
     bool showInset_ = false;
 
+    QString captionTitle_;
+    QString captionBody_;
+    QElapsedTimer captionClock_;
+    bool ropeTinted_ = false;
+
+    float photoFNumber_ = 8.0f;
+    float photoFNumberTarget_ = 8.0f;
+    QElapsedTimer apertureClock_;
+
+    float stage_ = 0.7f;
+    float stageTarget_ = 0.7f;
+    QElapsedTimer stageClock_;
+
     QVector<KnotMath::Vec3> flashPositions_;
     QVector<float> flashProgress_;
     QVector<int> flashNumbers_;
@@ -550,6 +589,7 @@ private:
     bool grabClosed_ = true;
     bool grabUnder_ = false;
     float handLevel_ = std::numeric_limits<float>::quiet_NaN();
+    QVector3D grabLevelStart_;
     QVector3D grabPoint_;
     QVector3D grabStart_;
 
