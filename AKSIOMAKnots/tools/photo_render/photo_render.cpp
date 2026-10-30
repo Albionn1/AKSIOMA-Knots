@@ -15,6 +15,7 @@
 #include <QElapsedTimer>
 #include <QImage>
 
+#include <cmath>
 #include <cstdio>
 
 using namespace KnotMath;
@@ -39,6 +40,126 @@ int main(int argc, char **argv)
                         e.sunIrradiance.x(), e.sunIrradiance.y(), e.sunIrradiance.z(),
                         e.sunRadius * 57.2958, up.x(), up.y(), up.z(), qPrintable(e.error));
         }
+
+        return 0;
+    }
+
+    /*
+     * photo_render bench <knot> <scene> [width height]: frames of the rope
+     * lying still, then frames of the rope held and dragged across the
+     * table as with the mouse (physics, mesh and frame timed apart). Run
+     * with AKSIOMA_PROFILE=1 for the stages of the frame.
+     */
+    if (argc >= 4 && QString(argv[1]) == QStringLiteral("bench"))
+    {
+        const KnotTable &knots = KnotTable::instance();
+        const int index = knots.indexOf(QString(argv[2]));
+        const auto scene = static_cast<Photo::Scene>(QString(argv[3]).toInt());
+        const int width = argc >= 6 ? QString(argv[4]).toInt() : 1600;
+        const int height = argc >= 6 ? QString(argv[5]).toInt() : 1000;
+
+        if (index < 0)
+            return 1;
+
+        const QVector<Vec3> curve = knots.curve(index);
+
+        CurveData data;
+        data.points = curve;
+
+        const double radius = safeTubeRadius(data, 0.16);
+        const Photo::RopeMaterial material = Photo::sceneInfo(scene).rope;
+        const Photo::RestingRope rope = Photo::layOnTable(curve, true, radius, material);
+
+        KnotGLWidget view;
+
+        view.setAttribute(Qt::WA_DontShowOnScreen);
+        view.resize(width, height);
+        view.show();
+
+        if (!view.setPhotoMode(true, scene))
+            return 1;
+
+        view.setRestingRope(Photo::buildRopeMesh(rope.points, true, radius, material), rope.pose);
+        view.fitNewKnot(45.0f);
+        view.resetCamera(45.0f, false);
+
+        view.grabFramebuffer();
+
+        QElapsedTimer clock;
+
+        clock.start();
+
+        for (int frame = 0; frame < 120; ++frame)
+            view.grabFramebuffer();
+
+        std::printf("still: %.2f ms a frame (with reading it back)\n", clock.nsecsElapsed() / 1.0e6 / 120.0);
+
+        // the rope in the hand, carried across the table and back
+        QVector<Vec3> points;
+
+        for (const Vec3 &p : rope.points)
+        {
+            const QVector3D q = rope.pose.map(QVector3D(float(p.x), float(p.y), float(p.z)));
+
+            points.push_back(Vec3(q.x(), q.y(), q.z()) / radius);
+        }
+
+        Photo::RopeSimulation hand(points, {}, true, material);
+
+        const Vec3 start = points.first();
+
+        hand.hold(0, Vec3(start.x, 6.5, start.z), false);
+
+        const QMatrix4x4 back = rope.pose.inverted();
+        const int steps = std::max(1, static_cast<int>(std::lround(1.0 / 60.0 / hand.secondsPerStep())));
+
+        double physics = 0.0;
+        double meshing = 0.0;
+        double handing = 0.0;
+        double drawing = 0.0;
+
+        for (int frame = 0; frame < 120; ++frame)
+        {
+            const double t = frame / 119.0;
+
+            hand.moveHand(Vec3(start.x + 30.0 * std::sin(3.14159 * t), 6.5, start.z + 10.0 * t));
+
+            clock.restart();
+
+            for (int k = 0; k < steps; ++k)
+                hand.step();
+
+            physics += clock.nsecsElapsed() / 1.0e6;
+            clock.restart();
+
+            QVector<Vec3> knot;
+
+            for (const Vec3 &p : hand.points())
+            {
+                const QVector3D q = back.map(QVector3D(float(p.x * radius), float(p.y * radius), float(p.z * radius)));
+
+                knot.push_back(Vec3(q.x(), q.y(), q.z()));
+            }
+
+            Mesh moving = Photo::buildRopeMesh(knot, true, radius, material, true);
+
+            meshing += clock.nsecsElapsed() / 1.0e6;
+            clock.restart();
+
+            view.setRestingRope(std::move(moving), rope.pose, true);
+
+            handing += clock.nsecsElapsed() / 1.0e6;
+            clock.restart();
+
+            view.grabFramebuffer();
+
+            drawing += clock.nsecsElapsed() / 1.0e6;
+        }
+
+        std::printf("moving: physics %.2f ms (%d steps), mesh %.2f ms, to the view %.2f ms, frame %.2f ms\n",
+                    physics / 120.0, steps, meshing / 120.0, handing / 120.0, drawing / 120.0);
+
+        view.grabFramebuffer().save(QStringLiteral("bench_last.png"));
 
         return 0;
     }
@@ -97,6 +218,10 @@ int main(int argc, char **argv)
         const Mesh mesh = Photo::buildRopeMesh(rope.points, true, radius, material);
         const qint64 building = clock.restart();
 
+        // as while the rope is in the hand (built for every frame)
+        Photo::buildRopeMesh(rope.points, true, radius, material, true);
+        const qint64 quick = clock.restart();
+
         if (!view.setPhotoMode(true, scene))
         {
             std::printf("the room could not be loaded\n");
@@ -119,7 +244,7 @@ int main(int argc, char **argv)
         picture.save(file);
 
         std::printf(
-            "%s: rope %d points, rest %s in %.2f s (%lld ms), mesh %d vertices (%lld ms), "
+            "%s: rope %d points, rest %s in %.2f s (%lld ms), mesh %d vertices (%lld ms, quick %lld ms), "
             "room %lld ms, two frames %lld ms\n",
             qPrintable(file),
             static_cast<int>(rope.points.size()),
@@ -128,6 +253,7 @@ int main(int argc, char **argv)
             physics,
             static_cast<int>(mesh.positions.size() / 3),
             building,
+            quick,
             loading,
             drawing);
 

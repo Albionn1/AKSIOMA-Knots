@@ -25,6 +25,8 @@
 #include <QElapsedTimer>
 #include <QPair>
 
+#include <future>
+#include <memory>
 #include <map>
 
 class QCheckBox;
@@ -82,6 +84,44 @@ private slots:
     // animation or a pull, several strands, or the rope could not be
     // laid down as the same knot).
     bool showRestingRope(double radius);
+
+    /*
+     * Photo mode, the rope in the hand. With Grab on, the rope lying on
+     * the table is picked up with the mouse and moves by its own physics
+     * (Photo::RopeSimulation, in units of its radius on the table of
+     * restingRope_.pose). Held up it goes over the other strands, pushed
+     * down with Shift under them. Cut, it has two ends and can be tied
+     * into another knot: after every move its ends are joined over the
+     * top and the knot is named; "Tie the ends" makes it the knot shown.
+     * The rope stays as it was left while the knot, its thickness and
+     * the scene stay the same.
+     */
+    bool startPhotoRope();
+    void stopPhotoRope();
+
+    // the rope in the hand instead of the knot laid down afresh (false if
+    // there is none for this knot, thickness and scene)
+    bool showKeptPhotoRope(double radius);
+
+    // draws the rope where it is now (`quick` while it moves)
+    void showPhotoRope(bool quick);
+
+    void photoRopeTick();
+
+    // waits for the helper thread's surface of the rope and drops it
+    void finishPhotoRopeJob();
+    void photoRopeGrabbed(const QVector3D &point);
+    void photoRopeDragged(const QVector3D &point);
+    void photoRopeReleased();
+    void cutPhotoRope();
+    void tiePhotoRopeEnds();
+    void requestPhotoRopeAnalysis();
+    void updatePhotoRopeButtons();
+
+    // the rope `table` (on the table, in radii) in the knot's
+    // coordinates; open and `joined`, its ends joined by an arch over
+    // everything else
+    QVector<KnotMath::Vec3> photoRopeCurve(QVector<KnotMath::Vec3> table, bool closed, bool joined) const;
 
     // The Sneaker scene takes knots of up to 7 crossings (one closed
     // strand): larger knots do not fit on a shoe.
@@ -441,6 +481,40 @@ private:
 
     // the Sneaker scene: where the knot lies in the whole lace
     Photo::TiedLace restingTied_;
+
+    // the rope in the hand (see startPhotoRope), what it was picked up
+    // from, and the hand's height above the table (radii)
+    std::unique_ptr<Photo::RopeInHand> photoRope_;
+    bool photoRopeOn_ = false;
+    QVector<KnotMath::Vec3> photoRopeFrom_;
+    double photoRopeRadius_ = 0.0;
+    int photoRopeScene_ = -1;
+    QMatrix4x4 photoRopePose_;
+    Photo::RopeMaterial photoRopeMaterial_;
+    QTimer *photoRopeTimer_ = nullptr;
+    QElapsedTimer photoRopeClock_;
+    quint64 photoRopeShown_ = 0;
+    double photoRopeLoose_ = 0.0;
+    bool photoRopeAnalysing_ = false;
+    bool photoRopeAnalysisWanted_ = false;
+    quint64 photoRopeSession_ = 0;
+
+    /*
+     * While the rope moves, its surface is built on a helper thread from
+     * the newest copy of it (photoRopeShown_: the version of the rope
+     * last sent) while the view draws the last one.
+     */
+    struct PhotoRopeFrame
+    {
+        KnotMath::Mesh mesh;
+        QVector<KnotMath::Vec3> curve;
+        bool closed = true;
+    };
+
+    std::future<PhotoRopeFrame> photoRopeJob_;
+
+    QPushButton *cutRopeButton_ = nullptr;
+    QPushButton *tieEndsButton_ = nullptr;
 
     QPushButton *resetCameraButton_ =
         nullptr;

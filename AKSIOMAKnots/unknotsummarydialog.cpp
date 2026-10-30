@@ -1,5 +1,6 @@
 #include "unknotsummarydialog.h"
 
+#include "icons.h"
 #include "theme.h"
 
 #include <QDialogButtonBox>
@@ -188,8 +189,11 @@ UnknotSummaryDialog::UnknotSummaryDialog(
 
     QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
 
-    previousButton_ = buttons->addButton(tr("◀  Previous"), QDialogButtonBox::ActionRole);
-    nextButton_ = buttons->addButton(tr("Next  ▶"), QDialogButtonBox::ActionRole);
+    previousButton_ = buttons->addButton(tr("Previous"), QDialogButtonBox::ActionRole);
+    nextButton_ = buttons->addButton(tr("Next"), QDialogButtonBox::ActionRole);
+
+    Icons::set(previousButton_, QStringLiteral("chevron_left"));
+    Icons::set(nextButton_, QStringLiteral("chevron_right"), true);
 
     QPushButton *show3d = buttons->addButton(tr("Show in 3D"), QDialogButtonBox::ActionRole);
 

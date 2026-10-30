@@ -1094,14 +1094,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Rreth</translation>
     </message>
     <message>
-        <source>▸  More options</source>
-        <translation>▸  Më shumë opsione</translation>
-    </message>
-    <message>
-        <source>▾  Fewer options</source>
-        <translation>▾  Më pak opsione</translation>
-    </message>
-    <message>
         <source>KNOT</source>
         <translation>NYJA</translation>
     </message>
@@ -1250,10 +1242,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Shikoni si zgjidhet nyja duke i kaluar fijet nëpër njëra-tjetrën.</translation>
     </message>
     <message>
-        <source>▶  UNKNOT</source>
-        <translation>▶  ZGJIDHE</translation>
-    </message>
-    <message>
         <source>Reset</source>
         <translation>Rikthe</translation>
     </message>
@@ -1330,20 +1318,34 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Lëreni nyjën të marrë formën e saj natyrore, ose ngatërrojeni më parë. Fijet nuk kalojnë kurrë nëpër njëra-tjetrën, kështu që mbetet e njëjta nyjë.</translation>
     </message>
     <message>
-        <source>▶  RELAX</source>
-        <translation>▶  RELAKSO</translation>
+        <source>RELAX</source>
+        <comment>button</comment>
+        <translation>RELAKSO</translation>
     </message>
     <message>
         <source>Scramble</source>
         <translation>Ngatërro</translation>
     </message>
     <message>
-        <source>✋  Grab the rope</source>
-        <translation>✋  Kap litarin</translation>
-    </message>
-    <message>
         <source>Pull the knot about with the mouse: drag the rope with the left button.</source>
         <translation>Tërhiqeni nyjën me miun: zvarritni litarin me butonin e majtë.</translation>
+    </message>
+    <message>
+        <source>Cut the rope on the table open: with two free ends it can be tied into another knot.</source>
+        <translation>Prisni litarin mbi tavolinë: me dy skaje të lira mund të lidhet në një nyjë tjetër.</translation>
+    </message>
+    <message>
+        <source>Tie the ends</source>
+        <translation>Lidh skajet</translation>
+    </message>
+    <message>
+        <source>Join the two ends of the rope: the knot tied in it becomes the knot shown and studied.</source>
+        <translation>Bashkoni dy skajet e litarit: nyja e lidhur në të bëhet nyja që shfaqet dhe studiohet.</translation>
+    </message>
+    <message>
+        <source>UNKNOT</source>
+        <comment>button</comment>
+        <translation>ZGJIDHE</translation>
     </message>
     <message>
         <source>Steps</source>
@@ -1390,20 +1392,12 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Dy nyje trefletëshe me të njëjtin drejtim japin nyjën “granny”; me pasqyrimin japin nyjën katrore.</translation>
     </message>
     <message>
-        <source>▶  JOIN</source>
-        <translation>▶  BASHKO</translation>
-    </message>
-    <message>
         <source>SEIFERT SURFACE</source>
         <translation>SIPËRFAQJA E SEIFERTIT</translation>
     </message>
     <message>
         <source>Every knot is the edge of a surface with two sides, a Seifert surface. Seifert&apos;s algorithm builds one from the knot diagram in four steps.</source>
         <translation>Çdo nyjë është buza e një sipërfaqeje me dy anë, një sipërfaqeje të Seifertit. Algoritmi i Seifertit e ndërton një të tillë nga diagrami i nyjës në katër hapa.</translation>
-    </message>
-    <message>
-        <source>▶  BUILD SURFACE</source>
-        <translation>▶  NDËRTO SIPËRFAQEN</translation>
     </message>
     <message>
         <source>Go back and forth through the four steps.</source>
@@ -1806,16 +1800,8 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Po përgatitet...</translation>
     </message>
     <message>
-        <source>❚❚  PAUSE</source>
-        <translation>❚❚  PAUZË</translation>
-    </message>
-    <message>
-        <source>▶  NEXT</source>
-        <translation>▶  HAPI TJETËR</translation>
-    </message>
-    <message>
-        <source>▶  PLAY</source>
-        <translation>▶  LUAJ</translation>
+        <source>STOP</source>
+        <translation>NDALO</translation>
     </message>
     <message>
         <source>Unknotting needs a single closed curve. Choose a knot preset or a custom curve.</source>
@@ -2022,10 +2008,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Sipërfaqja e Seifertit ndërtohet këtu për një nyjë të vetme të mbyllur. Zgjidhni një nyjë të gatshme, një nyjë nga tabela ose një kurbë të personalizuar.</translation>
     </message>
     <message>
-        <source>■  BACK TO THE KNOT</source>
-        <translation>■  KTHEHU TE NYJA</translation>
-    </message>
-    <message>
         <source>1 / 4   THE KNOT DIAGRAM</source>
         <translation>1 / 4   DIAGRAMI I NYJËS</translation>
     </message>
@@ -2170,6 +2152,46 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Kap litarin</translation>
     </message>
     <message>
+        <source>Fewer options</source>
+        <translation>Më pak opsione</translation>
+    </message>
+    <message>
+        <source>More options</source>
+        <translation>Më shumë opsione</translation>
+    </message>
+    <message>
+        <source>Cut the rope</source>
+        <translation>Prite litarin</translation>
+    </message>
+    <message>
+        <source>JOIN</source>
+        <translation>BASHKO</translation>
+    </message>
+    <message>
+        <source>BUILD SURFACE</source>
+        <translation>NDËRTO SIPËRFAQEN</translation>
+    </message>
+    <message>
+        <source>PAUSE</source>
+        <translation>PAUZË</translation>
+    </message>
+    <message>
+        <source>NEXT</source>
+        <translation>HAPI TJETËR</translation>
+    </message>
+    <message>
+        <source>PLAY</source>
+        <translation>LUAJ</translation>
+    </message>
+    <message>
+        <source>BACK TO THE KNOT</source>
+        <translation>KTHEHU TE NYJA</translation>
+    </message>
+    <message>
+        <source>Pick the rope up with the left mouse button and move it: held up, it goes over the other strands; hold Shift while grabbing to push it under them. Cut the rope to tie another knot.</source>
+        <translation>Ngrini litarin me butonin e majtë të miut dhe lëvizeni: i ngritur, ai kalon mbi fijet e tjera; mbani Shift kur e kapni për ta shtyrë nën to. Prisni litarin për të lidhur një nyjë tjetër.</translation>
+    </message>
+    <message>
         <source>Drag the rope with the left mouse button: the rest follows, and no strand can pass through another. Drag next to the rope to turn the view.</source>
         <translation>Zvarritni litarin me butonin e majtë të miut: pjesa tjetër e ndjek, dhe asnjë fije nuk mund të kalojë nëpër një tjetër. Zvarritni pranë litarit për të rrotulluar pamjen.</translation>
     </message>
@@ -2190,6 +2212,58 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Asnjë fije nuk kaloi nëpër një tjetër, kështu që kjo është ende e njëjta nyjë. Tërhiqeni përsëri, shtypni Relakso që të qetësohet, ose Rikthe për t&apos;u kthyer te origjinali.</translation>
     </message>
     <message>
+        <source>Pushing the rope under</source>
+        <translation>Litari shtyhet poshtë</translation>
+    </message>
+    <message>
+        <source>The part in your hand slides along the table, and the strands it meets are lifted over it.</source>
+        <translation>Pjesa në dorën tuaj rrëshqet mbi tavolinë, dhe fijet që takon ngrihen mbi të.</translation>
+    </message>
+    <message>
+        <source>Holding the rope</source>
+        <translation>Litari në dorë</translation>
+    </message>
+    <message>
+        <source>The part in your hand is lifted over the other strands; the rest of the rope follows across the table. Hold Shift while grabbing to push it under them instead.</source>
+        <translation>Pjesa në dorën tuaj ngrihet mbi fijet e tjera; pjesa tjetër e litarit e ndjek nëpër tavolinë. Mbani Shift kur e kapni për ta shtyrë nën to.</translation>
+    </message>
+    <message>
+        <source>The rope falls back onto the table. Once it lies still, its knot is named.</source>
+        <translation>Litari bie përsëri mbi tavolinë. Sapo të qëndrojë i qetë, emërtohet nyja e tij.</translation>
+    </message>
+    <message>
+        <source>The rope is cut</source>
+        <translation>Litari u pre</translation>
+    </message>
+    <message>
+        <source>Now it has two ends. Drag them about: lifted, a part of the rope goes over the others, with Shift held while grabbing it goes under them. After every move the ends are joined over the top and the knot is named.</source>
+        <translation>Tani ka dy skaje. Lëvizini: e ngritur, një pjesë e litarit kalon mbi të tjerat, me Shift të mbajtur kur e kapni kalon nën to. Pas çdo lëvizjeje skajet bashkohen nga sipër dhe emërtohet nyja.</translation>
+    </message>
+    <message>
+        <source>The ends are tied</source>
+        <translation>Skajet u lidhën</translation>
+    </message>
+    <message>
+        <source>The knot in the rope is now the knot shown: every analysis works on it, and it is laid on the table afresh.</source>
+        <translation>Nyja në litar tani është nyja që shfaqet: çdo analizë punon me të, dhe ajo vendoset përsëri mbi tavolinë.</translation>
+    </message>
+    <message>
+        <source>not recognised</source>
+        <translation>e panjohur</translation>
+    </message>
+    <message>
+        <source>The rope on the table</source>
+        <translation>Litari mbi tavolinë</translation>
+    </message>
+    <message>
+        <source>With its ends joined over the top: %1. Tie the ends to make it the knot shown.</source>
+        <translation>Me skajet e bashkuara nga sipër: %1. Lidhni skajet që ajo të bëhet nyja që shfaqet.</translation>
+    </message>
+    <message>
+        <source>Still the same knot: %1. No strand can pass through another; cut the rope to tie a different knot.</source>
+        <translation>Ende e njëjta nyjë: %1. Asnjë fije nuk mund të kalojë nëpër një tjetër; prisni litarin për të lidhur një nyjë tjetër.</translation>
+    </message>
+    <message>
         <source>Stopped.</source>
         <translation>U ndal.</translation>
     </message>
@@ -2208,10 +2282,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>the same knot as the second one: joining the unknot changes nothing</source>
         <translation>e njëjta nyjë si e dyta: bashkimi me nyjën triviale nuk ndryshon asgjë</translation>
-    </message>
-    <message>
-        <source>■  STOP</source>
-        <translation>■  NDALO</translation>
     </message>
     <message>
         <source>1 / 4  Two knots</source>
@@ -2649,12 +2719,12 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Diagrami zbritës: nyja triviale</translation>
     </message>
     <message>
-        <source>◀  Previous</source>
-        <translation>◀  Prapa</translation>
+        <source>Previous</source>
+        <translation>Prapa</translation>
     </message>
     <message>
-        <source>Next  ▶</source>
-        <translation>Para  ▶</translation>
+        <source>Next</source>
+        <translation>Para</translation>
     </message>
     <message>
         <source>Show in 3D</source>

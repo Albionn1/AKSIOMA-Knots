@@ -19,6 +19,7 @@
 #include <QVector3D>
 #include <QVector>
 
+#include <limits>
 #include <memory>
 #include <random>
 
@@ -152,7 +153,9 @@ public:
     // by Photo::buildRopeMesh, and the turn that took the knot onto the
     // table (the table top is y = 0 after it). The knot keeps this pose
     // (also for the animations that follow) until clearRestingPose.
-    void setRestingRope(const KnotMath::Mesh &mesh, const QMatrix4x4 &pose);
+    // `sameTable`: the same rope moved (picked up with the mouse): the
+    // table, the room and their light stay where they are.
+    void setRestingRope(KnotMath::Mesh mesh, const QMatrix4x4 &pose, bool sameTable = false);
 
     // back to laying the knot down by its shape
     void clearRestingPose();
@@ -166,7 +169,15 @@ public:
     // faces the camera) and ropeReleased the end of the pull. A press next
     // to the rope turns the view as usual.
     void setRopeGrab(bool enabled);
-    void setGrabCurve(const QVector<KnotMath::Vec3> &curve, double radius);
+    void setGrabCurve(const QVector<KnotMath::Vec3> &curve, double radius, bool closed = true);
+
+    // Photo mode, the rope on the table in the hand: the grabbed point
+    // follows the mouse on the level `height` (world, above the table)
+    // instead of in the plane facing the camera; NaN for that plane.
+    void setRopeHandLevel(float level);
+
+    // Shift was held when the rope was grabbed (push it under the rest)
+    bool ropeGrabUnder() const;
 
     // ends a pull without ropeReleased (the caller has stopped it)
     void cancelRopeGrab();
@@ -333,6 +344,10 @@ private:
     // `through` that faces the camera
     QVector3D pointOnViewPlane(const QPointF &position, const QVector3D &through) const;
 
+    // where the line of sight through `position` meets the level y =
+    // `height` (world); `fallback` if it never does
+    QVector3D pointOnLevel(const QPointF &position, float level, const QVector3D &fallback) const;
+
     // depth of the scene seen from the key light (self-shadowing)
     void drawShadowMap();
     // `wanted`: this kind of shadow is turned on
@@ -424,6 +439,10 @@ private:
 
     // height of the floor in Photo mode: right under the knot
     float photoFloorLevel() const;
+
+    // the middle of the table (and of the room) in Photo mode: where the
+    // rope was laid down, wherever it is moved to afterwards
+    QVector3D tableMiddle() const;
 
     // Blurred soft-shadow blobs under the knot (x, z, sigma, weight) for
     // the ground at height groundY.
@@ -528,6 +547,9 @@ private:
     bool ropeDragging_ = false;
     QVector<KnotMath::Vec3> grabCurve_;
     double grabRadius_ = 0.1;
+    bool grabClosed_ = true;
+    bool grabUnder_ = false;
+    float handLevel_ = std::numeric_limits<float>::quiet_NaN();
     QVector3D grabPoint_;
     QVector3D grabStart_;
 
@@ -579,6 +601,11 @@ private:
     // the mesh is the rope at rest (setRestingRope): drawn with its real
     // strands or yarns; and the pose came with it
     bool restingRope_ = false;
+
+    // where the rope was laid down: the table's middle (x, z) and its top
+    // (y); kept while the rope is moved (setRestingRope, sameTable)
+    QVector3D tableAnchor_;
+    bool tableAnchored_ = false;
     bool restingPose_ = false;
     QMatrix4x4 restPose_;
 
@@ -619,7 +646,13 @@ private:
     // average colour of the surface (linear), the camera's exposure for
     // the room, and the video memory of the photo pictures
     QVector3D floorAlbedo_ = QVector3D(0.3f, 0.3f, 0.3f);
+    // AKSIOMA_PROFILE: milliseconds spent in each stage of the frame
+    static constexpr int ProfileStages = 6;
+    double profileTimes_[ProfileStages] = {};
+    int profileFrames_ = 0;
+
     float photoExposure_ = 1.0f;
+    QVector3D photoWhiteBalance_ = QVector3D(1.0f, 1.0f, 1.0f);
 
     // the room's pictures hold its light divided by this (half floats
     // cannot hold an unclipped sun)

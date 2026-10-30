@@ -4,6 +4,7 @@
 #include "appsettings.h"
 #include "diagrameditor.h"
 #include "gpumemory.h"
+#include "icons.h"
 #include "knotbrowser.h"
 #include "knotdiagram.h"
 #include "knotexport.h"
@@ -55,6 +56,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <memory>
 #include <stdexcept>
@@ -601,6 +603,29 @@ MainWindow::MainWindow(
         this,
         &MainWindow::relaxTick);
 
+    photoRopeTimer_ = new QTimer(this);
+
+    photoRopeTimer_->setInterval(16);
+    photoRopeTimer_->setTimerType(Qt::PreciseTimer);
+
+    connect(photoRopeTimer_, &QTimer::timeout, this, &MainWindow::photoRopeTick);
+
+    // A moving rope keeps pace with the screen: as soon as a frame is
+    // shown, the next shape (worked out meanwhile) is taken and the one
+    // after started. The timer only picks up a shape that was late.
+    connect(
+        glWidget_,
+        &QOpenGLWidget::frameSwapped,
+        this,
+        [this]()
+        {
+            if (photoRopeTimer_->isActive())
+                photoRopeTick();
+        });
+
+    connect(cutRopeButton_, &QPushButton::clicked, this, &MainWindow::cutPhotoRope);
+    connect(tieEndsButton_, &QPushButton::clicked, this, &MainWindow::tiePhotoRopeEnds);
+
     connect(
         relaxPlayButton_,
         &QPushButton::clicked,
@@ -1054,7 +1079,9 @@ QWidget *MainWindow::createLeftPanel()
         moreOptions->setVisible(shown);
 
         moreOptionsButton->setText(
-            shown ? tr("▾  Fewer options") : tr("▸  More options"));
+            shown ? tr("Fewer options") : tr("More options"));
+
+        Icons::set(moreOptionsButton, shown ? QStringLiteral("chevron_down") : QStringLiteral("chevron_right"));
     };
 
     showMoreOptions(false);
@@ -1101,7 +1128,9 @@ QWidget *MainWindow::createLeftPanel()
 
     relaxButtons->setSpacing(8);
 
-    relaxPlayButton_ = new QPushButton(tr("▶  RELAX"), relaxGroup);
+    relaxPlayButton_ = new QPushButton(tr("RELAX", "button"), relaxGroup);
+
+    Icons::set(relaxPlayButton_, QStringLiteral("play"));
 
     relaxPlayButton_->setObjectName(QStringLiteral("GenerateButton"));
     relaxPlayButton_->setMinimumHeight(40);
@@ -1121,7 +1150,9 @@ QWidget *MainWindow::createLeftPanel()
 
     relaxLayout->addLayout(relaxButtons);
 
-    grabButton_ = new QPushButton(tr("✋  Grab the rope"), relaxGroup);
+    grabButton_ = new QPushButton(tr("Grab the rope"), relaxGroup);
+
+    Icons::set(grabButton_, QStringLiteral("hand"));
 
     // the same look as a chosen brush in Practice when it is on
     grabButton_->setObjectName(QStringLiteral("BrushButton"));
@@ -1132,6 +1163,37 @@ QWidget *MainWindow::createLeftPanel()
            "left button."));
 
     relaxLayout->addWidget(grabButton_);
+
+    // Photo mode: the rope on the table cut open, and its ends tied
+    QHBoxLayout *ropeButtons = new QHBoxLayout();
+
+    ropeButtons->setSpacing(8);
+
+    cutRopeButton_ = new QPushButton(tr("Cut the rope"), relaxGroup);
+
+    Icons::set(cutRopeButton_, QStringLiteral("scissors"));
+
+    cutRopeButton_->setMinimumHeight(40);
+    cutRopeButton_->setToolTip(
+        tr("Cut the rope on the table open: with two free ends it can be "
+           "tied into another knot."));
+
+    tieEndsButton_ = new QPushButton(tr("Tie the ends"), relaxGroup);
+
+    Icons::set(tieEndsButton_, QStringLiteral("tie"));
+
+    tieEndsButton_->setMinimumHeight(40);
+    tieEndsButton_->setToolTip(
+        tr("Join the two ends of the rope: the knot tied in it becomes "
+           "the knot shown and studied."));
+
+    ropeButtons->addWidget(cutRopeButton_, 1);
+    ropeButtons->addWidget(tieEndsButton_, 1);
+
+    relaxLayout->addLayout(ropeButtons);
+
+    cutRopeButton_->setVisible(false);
+    tieEndsButton_->setVisible(false);
 
     relaxStatusLabel_ = new QLabel(QString(), relaxGroup);
 
@@ -1169,7 +1231,9 @@ QWidget *MainWindow::createLeftPanel()
 
     unknotButtons->setSpacing(8);
 
-    unknotPlayButton_ = new QPushButton(tr("▶  UNKNOT"), unknotGroup_);
+    unknotPlayButton_ = new QPushButton(tr("UNKNOT", "button"), unknotGroup_);
+
+    Icons::set(unknotPlayButton_, QStringLiteral("play"));
 
     unknotPlayButton_->setObjectName(QStringLiteral("GenerateButton"));
     unknotPlayButton_->setMinimumHeight(40);
@@ -1273,7 +1337,9 @@ QWidget *MainWindow::createLeftPanel()
 
     layout->addWidget(joinMirrorCheck_);
 
-    joinButton_ = new QPushButton(tr("▶  JOIN"), panel);
+    joinButton_ = new QPushButton(tr("JOIN"), panel);
+
+    Icons::set(joinButton_, QStringLiteral("play"));
 
     joinButton_->setObjectName(QStringLiteral("GenerateButton"));
     joinButton_->setMinimumHeight(40);
@@ -1322,7 +1388,9 @@ QWidget *MainWindow::createLeftPanel()
 
     layout->addWidget(surfaceIntro);
 
-    seifertButton_ = new QPushButton(tr("▶  BUILD SURFACE"), panel);
+    seifertButton_ = new QPushButton(tr("BUILD SURFACE"), panel);
+
+    Icons::set(seifertButton_, QStringLiteral("play"));
 
     seifertButton_->setObjectName(QStringLiteral("GenerateButton"));
     seifertButton_->setMinimumHeight(40);
@@ -2827,6 +2895,9 @@ void MainWindow::generateMesh()
 {
     stopRelaxation();
 
+    // a new knot (or the same one again) is laid down afresh
+    stopPhotoRope();
+
     // the knot is rebuilt below
     stopJoin(false);
 
@@ -3127,9 +3198,10 @@ void MainWindow::rebuildMesh()
                 part);
         }
     }
-    else if (showRestingRope(radius))
+    else if (showKeptPhotoRope(radius) || showRestingRope(radius))
     {
-        // Photo mode: the knot lies on the table as a real rope
+        // Photo mode: the knot lies on the table as a real rope (as it
+        // was left, if it was picked up)
         return;
     }
     else
@@ -3369,7 +3441,7 @@ bool MainWindow::showRestingRope(double radius)
 {
     if (glWidget_ == nullptr || !glWidget_->photoMode() || !hasData_ ||
         currentData_.multiStrand || currentData_.points.size() < 4 ||
-        grabEnabled() || pulling_ || relaxRunning_ ||
+        pulling_ || relaxRunning_ ||
         seifertActive_ || unknotActive_ || joinActive_)
     {
         return false;
@@ -3377,6 +3449,11 @@ bool MainWindow::showRestingRope(double radius)
 
     const auto scene =
         static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
+
+    // with Grab on, the lace on the sneaker is lifted off to be pulled;
+    // a rope on the table is picked up where it lies
+    if (grabEnabled() && Photo::sceneInfo(scene).sneaker)
+        return false;
 
     const Photo::RopeMaterial material = Photo::sceneInfo(scene).rope;
 
@@ -3521,6 +3598,15 @@ bool MainWindow::showRestingRope(double radius)
         showCrossingNumbersCheck_ != nullptr &&
         showCrossingNumbersCheck_->isChecked());
 
+    // Grab on: the rope is ready to be picked up
+    if (grabEnabled() && startPhotoRope())
+    {
+        glWidget_->setRopeGrab(true);
+        showPhotoRope(false);
+
+        return true;
+    }
+
     updateGrabCurve();
 
     return true;
@@ -3534,6 +3620,15 @@ void MainWindow::applyPhotoMode()
     const bool on = photoButton_->isChecked();
 
     photoSceneCombo_->setVisible(on);
+
+    // Grab goes over to the new scene (or out of Photo mode): let go, and
+    // take hold again below
+    const bool grabbing = grabEnabled();
+
+    if (grabbing)
+        grabButton_->setChecked(false);
+
+    stopPhotoRope();
 
     const auto scene =
         static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
@@ -3563,6 +3658,9 @@ void MainWindow::applyPhotoMode()
             tr("AKSIOMA: Knots"),
             tr("The photographed room could not be loaded."));
     }
+
+    if (grabbing)
+        grabButton_->setChecked(true);
 
     resetCamera();
 }
@@ -3600,12 +3698,16 @@ void MainWindow::setUnknotControlsEnabled(
         unknotPreparing_
             ? tr("Preparing...")
             : playing
-                  ? tr("\u275A\u275A  PAUSE")
+                  ? tr("PAUSE")
                   : (nextStep
-                         ? tr("\u25B6  NEXT")
+                         ? tr("NEXT")
                          : (unknotActive_
-                                ? tr("\u25B6  PLAY")
-                                : tr("\u25B6  UNKNOT"))));
+                                ? tr("PLAY")
+                                : tr("UNKNOT", "button"))));
+
+    Icons::set(
+        unknotPlayButton_,
+        unknotPreparing_ ? QString() : (playing ? QStringLiteral("pause") : QStringLiteral("play")));
 
     unknotPlayButton_->setEnabled(
         !unknotPreparing_);
@@ -5099,7 +5201,8 @@ void MainWindow::toggleSeifert()
     seifertActive_ = true;
     seifertDirty_ = true;
 
-    seifertButton_->setText(tr("■  BACK TO THE KNOT"));
+    seifertButton_->setText(tr("BACK TO THE KNOT"));
+    Icons::set(seifertButton_, QStringLiteral("stop"));
     seifertStepSlider_->setEnabled(true);
 
     setSeifertStep(0);
@@ -5122,7 +5225,8 @@ void MainWindow::stopSeifert()
 
     seifertTimer_->stop();
 
-    seifertButton_->setText(tr("▶  BUILD SURFACE"));
+    seifertButton_->setText(tr("BUILD SURFACE"));
+    Icons::set(seifertButton_, QStringLiteral("play"));
     seifertStepSlider_->setEnabled(false);
 
     // the matrix stays, without its links and loops
@@ -5997,8 +6101,10 @@ void MainWindow::updateRelaxControls()
 
     relaxPlayButton_->setText(
         relaxRunning_
-            ? tr("❚❚  PAUSE")
-            : tr("▶  RELAX"));
+            ? tr("PAUSE")
+            : tr("RELAX", "button"));
+
+    Icons::set(relaxPlayButton_, relaxRunning_ ? QStringLiteral("pause") : QStringLiteral("play"));
 
     relaxResetButton_->setEnabled(
         relaxRunning_ || relaxChanged_);
@@ -6084,6 +6190,21 @@ void MainWindow::updateGrabCurve()
 void MainWindow::grabToggled(
     bool enabled)
 {
+    if (!enabled && photoRopeOn_)
+    {
+        // the rope stays where it was left
+        if (photoRope_ != nullptr && photoRope_->heldPoint() >= 0)
+            photoRopeReleased();
+
+        glWidget_->setRopeGrab(false);
+
+        relaxStatusLabel_->clear();
+
+        updatePhotoRopeButtons();
+
+        return;
+    }
+
     if (!enabled)
     {
         if (pulling_)
@@ -6100,6 +6221,24 @@ void MainWindow::grabToggled(
         }
 
         relaxStatusLabel_->clear();
+
+        return;
+    }
+
+    // Photo mode: the rope lying on the table is picked up as it is
+    if (!relaxRunning_ && glWidget_->photoMode() && startPhotoRope())
+    {
+        glWidget_->setRopeGrab(true);
+
+        showPhotoRope(false);
+
+        relaxStatusLabel_->setText(
+            pullExplanation(
+                tr("Grab the rope"),
+                tr("Pick the rope up with the left mouse button and move "
+                   "it: held up, it goes over the other strands; hold "
+                   "Shift while grabbing to push it under them. Cut the "
+                   "rope to tie another knot.")));
 
         return;
     }
@@ -6144,6 +6283,13 @@ void MainWindow::ropeGrabbed(
     if (!grabEnabled())
     {
         glWidget_->cancelRopeGrab();
+        return;
+    }
+
+    // Photo mode: the rope on the table
+    if (photoRopeOn_)
+    {
+        photoRopeGrabbed(point);
         return;
     }
 
@@ -6196,6 +6342,12 @@ void MainWindow::ropeGrabbed(
 void MainWindow::ropeDragged(
     const QVector3D &point)
 {
+    if (photoRopeOn_)
+    {
+        photoRopeDragged(point);
+        return;
+    }
+
     if (!pulling_)
         return;
 
@@ -6216,6 +6368,12 @@ void MainWindow::ropeDragged(
 
 void MainWindow::ropeReleased()
 {
+    if (photoRopeOn_)
+    {
+        photoRopeReleased();
+        return;
+    }
+
     if (!pulling_)
         return;
 
@@ -6254,6 +6412,645 @@ void MainWindow::ropeReleased()
             tr("No strand passed through another, so this is still the "
                "same knot. Pull again, press Relax to let it settle, or "
                "Reset to go back to the original.")));
+}
+
+/*
+ * =============================================================
+ * PHOTO MODE: THE ROPE IN THE HAND
+ * =============================================================
+ */
+
+namespace
+{
+
+// How high the hand lifts the rope above the table (radii, centre line):
+// clear over two strands lying on each other.
+constexpr double HandHeight = 6.5;
+
+// a rope let go comes to rest in a few seconds; one that still creeps
+// after this long is taken as it lies
+constexpr double LongestFall = 8.0;
+
+bool sameCurve(
+    const QVector<KnotMath::Vec3> &a,
+    const QVector<KnotMath::Vec3> &b)
+{
+    return a.size() == b.size() &&
+           std::equal(
+               a.cbegin(),
+               a.cend(),
+               b.cbegin(),
+               [](const KnotMath::Vec3 &p, const KnotMath::Vec3 &q)
+               {
+                   return p.x == q.x && p.y == q.y && p.z == q.z;
+               });
+}
+
+} // namespace
+
+bool MainWindow::startPhotoRope()
+{
+    if (glWidget_ == nullptr || !glWidget_->photoMode() || !hasData_)
+        return false;
+
+    if (photoRopeOn_)
+        return true;
+
+    const auto scene =
+        static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
+
+    // the lace on the sneaker is held by its eyelets
+    if (Photo::sceneInfo(scene).sneaker)
+        return false;
+
+    // the rope as it lies on the table now
+    if (!restingRope_.valid ||
+        restingScene_ != static_cast<int>(scene) ||
+        !sameCurve(restingFrom_, currentData_.points))
+    {
+        return false;
+    }
+
+    const double radius = restingRadius_;
+
+    QVector<KnotMath::Vec3> points;
+
+    points.reserve(restingRope_.points.size());
+
+    for (const KnotMath::Vec3 &p : restingRope_.points)
+    {
+        const QVector3D q = restingRope_.pose.map(QVector3D(
+            static_cast<float>(p.x),
+            static_cast<float>(p.y),
+            static_cast<float>(p.z)));
+
+        points.push_back(KnotMath::Vec3(q.x(), q.y(), q.z()) / radius);
+    }
+
+    const Photo::RopeMaterial material = Photo::sceneInfo(scene).rope;
+
+    const Photo::RopeSimulation rope(points, {}, currentData_.closed, material);
+
+    if (!rope.isValid())
+        return false;
+
+    photoRope_ = std::make_unique<Photo::RopeInHand>(rope);
+
+    photoRopeOn_ = true;
+    photoRopeFrom_ = currentData_.points;
+    photoRopeRadius_ = radius;
+    photoRopeScene_ = static_cast<int>(scene);
+    photoRopePose_ = restingRope_.pose;
+    photoRopeMaterial_ = material;
+    photoRopeShown_ = 0;
+
+    ++photoRopeSession_;
+
+    updatePhotoRopeButtons();
+
+    return true;
+}
+
+void MainWindow::stopPhotoRope()
+{
+    if (photoRopeTimer_ != nullptr)
+        photoRopeTimer_->stop();
+
+    finishPhotoRopeJob();
+
+    if (photoRopeOn_ && glWidget_ != nullptr)
+    {
+        glWidget_->cancelRopeGrab();
+        glWidget_->setRopeHandLevel(std::numeric_limits<float>::quiet_NaN());
+    }
+
+    photoRopeOn_ = false;
+    photoRope_.reset();
+    photoRopeFrom_.clear();
+
+    // analyses still running are for a rope that is gone
+    ++photoRopeSession_;
+    photoRopeAnalysisWanted_ = false;
+
+    updatePhotoRopeButtons();
+}
+
+bool MainWindow::showKeptPhotoRope(double radius)
+{
+    if (!photoRopeOn_)
+        return false;
+
+    const auto scene =
+        static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
+
+    const bool same =
+        glWidget_ != nullptr && glWidget_->photoMode() && hasData_ &&
+        static_cast<int>(scene) == photoRopeScene_ &&
+        std::abs(radius - photoRopeRadius_) < 1.0e-9 &&
+        sameCurve(photoRopeFrom_, currentData_.points) &&
+        !relaxRunning_ && !pulling_ && !seifertActive_ && !unknotActive_ && !joinActive_;
+
+    if (!same)
+    {
+        stopPhotoRope();
+        return false;
+    }
+
+    showPhotoRope(photoRopeTimer_->isActive());
+
+    return true;
+}
+
+QVector<KnotMath::Vec3> MainWindow::photoRopeCurve(
+    QVector<KnotMath::Vec3> table,
+    bool closed,
+    bool joined) const
+{
+    /*
+     * The knot of a rope with ends: its ends joined far from the rest. Here
+     * by an arch over everything: straight up from one end to above the
+     * highest part of the rope, across, and down to the other end (as a
+     * knot is read from a rope lying on a table).
+     */
+    if (joined && !closed && table.size() >= 2)
+    {
+        double top = 0.0;
+
+        for (const KnotMath::Vec3 &p : table)
+            top = std::max(top, p.y);
+
+        const double bridge = top + 4.0;
+
+        const KnotMath::Vec3 last = table.last();
+        const KnotMath::Vec3 first = table.first();
+
+        const KnotMath::Vec3 corners[4] = {
+            last,
+            KnotMath::Vec3(last.x, bridge, last.z),
+            KnotMath::Vec3(first.x, bridge, first.z),
+            first};
+
+        for (int side = 0; side < 3; ++side)
+        {
+            const KnotMath::Vec3 a = corners[side];
+            const KnotMath::Vec3 b = corners[side + 1];
+
+            const int pieces = std::max(2, static_cast<int>(std::ceil((b - a).length() / 0.5)));
+
+            for (int k = 1; k < pieces; ++k)
+                table.push_back(a + (b - a) * (static_cast<double>(k) / pieces));
+
+            if (side < 2)
+                table.push_back(b);
+        }
+    }
+
+    const QMatrix4x4 back = photoRopePose_.inverted();
+    const double radius = photoRopeRadius_;
+
+    QVector<KnotMath::Vec3> curve;
+
+    curve.reserve(table.size());
+
+    for (const KnotMath::Vec3 &p : table)
+    {
+        const QVector3D q = back.map(QVector3D(
+            static_cast<float>(p.x * radius),
+            static_cast<float>(p.y * radius),
+            static_cast<float>(p.z * radius)));
+
+        curve.push_back(KnotMath::Vec3(q.x(), q.y(), q.z()));
+    }
+
+    return curve;
+}
+
+void MainWindow::showPhotoRope(bool quick)
+{
+    if (!photoRopeOn_ || glWidget_ == nullptr)
+        return;
+
+    finishPhotoRopeJob();
+
+    const bool closed = photoRope_->closed();
+    const QVector<KnotMath::Vec3> curve = photoRopeCurve(photoRope_->points(&photoRopeShown_), closed, false);
+
+    KnotMath::Mesh mesh =
+        Photo::buildRopeMesh(curve, closed, photoRopeRadius_, photoRopeMaterial_, quick);
+
+    if (!mesh.isValid())
+        return;
+
+    // the numbered crossings belong to the knot as it was laid down
+    glWidget_->setShowCrossingNumbers(false);
+    glWidget_->setCrossings({});
+
+    // the table stays where it is; only the rope moves on it
+    glWidget_->setRestingRope(std::move(mesh), photoRopePose_, true);
+
+    if (!quick)
+    {
+        glWidget_->setMeshColor(meshColor_);
+
+        applySurface();
+    }
+
+    glWidget_->setGrabCurve(curve, photoRopeRadius_, closed);
+}
+
+void MainWindow::photoRopeTick()
+{
+    if (!photoRopeOn_ || photoRope_ == nullptr)
+    {
+        photoRopeTimer_->stop();
+        return;
+    }
+
+    // the newest shape, built on the helper thread, goes to the view
+    if (photoRopeJob_.valid())
+    {
+        if (photoRopeJob_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            return;
+
+        PhotoRopeFrame frame = photoRopeJob_.get();
+
+        if (frame.mesh.isValid())
+        {
+            glWidget_->setRestingRope(std::move(frame.mesh), photoRopePose_, true);
+            glWidget_->setGrabCurve(frame.curve, photoRopeRadius_, frame.closed);
+        }
+    }
+
+    const double elapsed = std::min(static_cast<double>(photoRopeClock_.restart()) / 1000.0, 0.1);
+
+    const bool held = photoRope_->heldPoint() >= 0;
+
+    if (!held)
+        photoRopeLoose_ += elapsed;
+
+    // a rope that still creeps after a long while is taken as it lies
+    if (!held && photoRopeLoose_ > LongestFall)
+        photoRope_->rest();
+
+    quint64 version = 0;
+
+    const QVector<KnotMath::Vec3> points = photoRope_->points(&version);
+
+    if (!held && photoRope_->resting())
+    {
+        // at rest: drawn at full quality, and the knot is named
+        photoRopeTimer_->stop();
+
+        showPhotoRope(false);
+
+        requestPhotoRopeAnalysis();
+
+        updatePhotoRopeButtons();
+
+        return;
+    }
+
+    // nothing new since the last shape
+    if (version == photoRopeShown_)
+        return;
+
+    photoRopeShown_ = version;
+
+    /*
+     * The rope moves on its own thread (Photo::RopeInHand); its surface is
+     * built from this copy on a helper thread while the view draws.
+     */
+    const bool closed = photoRope_->closed();
+    const QVector<KnotMath::Vec3> curve = photoRopeCurve(points, closed, false);
+    const double radius = photoRopeRadius_;
+    const Photo::RopeMaterial material = photoRopeMaterial_;
+
+    photoRopeJob_ = std::async(
+        std::launch::async,
+        [curve, closed, radius, material]()
+        {
+            PhotoRopeFrame frame;
+
+            frame.curve = curve;
+            frame.closed = closed;
+            frame.mesh = Photo::buildRopeMesh(curve, closed, radius, material, true);
+
+            return frame;
+        });
+}
+
+void MainWindow::finishPhotoRopeJob()
+{
+    if (photoRopeJob_.valid())
+        photoRopeJob_.get();
+}
+
+void MainWindow::photoRopeGrabbed(const QVector3D &point)
+{
+    if (photoRope_ == nullptr)
+    {
+        glWidget_->cancelRopeGrab();
+        return;
+    }
+
+    const double radius = photoRopeRadius_;
+    const QVector3D onTable = photoRopePose_.map(point) / static_cast<float>(radius);
+
+    // the point of the rope under the mouse
+    const QVector<KnotMath::Vec3> points = photoRope_->points();
+
+    int nearest = 0;
+    double best = std::numeric_limits<double>::max();
+
+    for (int i = 0; i < points.size(); ++i)
+    {
+        const double d =
+            (points.at(i) - KnotMath::Vec3(onTable.x(), onTable.y(), onTable.z())).lengthSquared();
+
+        if (d < best)
+        {
+            best = d;
+            nearest = i;
+        }
+    }
+
+    // lifted, it goes over the rest; with Shift, pressed down, under it
+    const bool under = glWidget_->ropeGrabUnder();
+    const double level = under ? 1.0 : HandHeight;
+
+    glWidget_->setRopeHandLevel(static_cast<float>(level * radius));
+
+    const KnotMath::Vec3 held = points.at(nearest);
+
+    photoRope_->hold(nearest, KnotMath::Vec3(held.x, level, held.z), under);
+
+    photoRopeClock_.restart();
+    photoRopeLoose_ = 0.0;
+
+    // what was being worked out is for the rope before this move
+    ++photoRopeSession_;
+
+    photoRopeTimer_->start();
+
+    updatePhotoRopeButtons();
+
+    relaxStatusLabel_->setText(
+        under
+            ? pullExplanation(
+                  tr("Pushing the rope under"),
+                  tr("The part in your hand slides along the table, and "
+                     "the strands it meets are lifted over it."))
+            : pullExplanation(
+                  tr("Holding the rope"),
+                  tr("The part in your hand is lifted over the other "
+                     "strands; the rest of the rope follows across the "
+                     "table. Hold Shift while grabbing to push it under "
+                     "them instead.")));
+}
+
+void MainWindow::photoRopeDragged(const QVector3D &point)
+{
+    if (photoRope_ == nullptr || photoRope_->heldPoint() < 0)
+        return;
+
+    const QVector3D onTable = photoRopePose_.map(point) / static_cast<float>(photoRopeRadius_);
+
+    const double level = photoRope_->holdsUnder() ? 1.0 : HandHeight;
+
+    photoRope_->moveHand(KnotMath::Vec3(onTable.x(), level, onTable.z()));
+}
+
+void MainWindow::photoRopeReleased()
+{
+    if (photoRope_ == nullptr)
+        return;
+
+    photoRope_->letGo();
+
+    glWidget_->setRopeHandLevel(std::numeric_limits<float>::quiet_NaN());
+
+    photoRopeLoose_ = 0.0;
+
+    if (!photoRopeTimer_->isActive())
+    {
+        photoRopeClock_.restart();
+        photoRopeTimer_->start();
+    }
+
+    updatePhotoRopeButtons();
+
+    relaxStatusLabel_->setText(
+        pullExplanation(
+            tr("Let go"),
+            tr("The rope falls back onto the table. Once it lies still, "
+               "its knot is named.")));
+}
+
+void MainWindow::cutPhotoRope()
+{
+    if (!photoRopeOn_ || photoRope_ == nullptr || !photoRope_->closed() || photoRope_->heldPoint() >= 0)
+        return;
+
+    finishPhotoRopeJob();
+
+    const QVector<KnotMath::Vec3> points = photoRope_->points();
+    const int n = points.size();
+
+    /*
+     * Cut where the rope lies most on its own (farthest across the table
+     * from any other part of it): nothing lies over the cut, so its ends
+     * joined over the top again make the same knot.
+     */
+    const int apart = static_cast<int>(std::ceil(8.0 / 0.5));
+
+    int cut = 0;
+    double loneliest = -1.0;
+
+    for (int i = 0; i < n; ++i)
+    {
+        double nearest = std::numeric_limits<double>::max();
+
+        for (int j = 0; j < n; ++j)
+        {
+            const int gap = std::abs(i - j);
+
+            if (std::min(gap, n - gap) <= apart)
+                continue;
+
+            const double dx = points.at(i).x - points.at(j).x;
+            const double dz = points.at(i).z - points.at(j).z;
+
+            nearest = std::min(nearest, dx * dx + dz * dz);
+        }
+
+        if (nearest > loneliest)
+        {
+            loneliest = nearest;
+            cut = i;
+        }
+    }
+
+    // a gap of a radius and a half between the two ends
+    QVector<KnotMath::Vec3> open;
+
+    open.reserve(n - 3);
+
+    for (int k = 0; k < n - 3; ++k)
+        open.push_back(points.at((cut + 2 + k) % n));
+
+    photoRope_ = std::make_unique<Photo::RopeInHand>(
+        Photo::RopeSimulation(open, {}, false, photoRopeMaterial_));
+
+    ++photoRopeSession_;
+
+    photoRopeClock_.restart();
+    photoRopeLoose_ = 0.0;
+    photoRopeTimer_->start();
+
+    showPhotoRope(true);
+
+    updatePhotoRopeButtons();
+
+    relaxStatusLabel_->setText(
+        pullExplanation(
+            tr("The rope is cut"),
+            tr("Now it has two ends. Drag them about: lifted, a part of the "
+               "rope goes over the others, with Shift held while grabbing "
+               "it goes under them. After every move the ends are joined "
+               "over the top and the knot is named.")));
+}
+
+void MainWindow::tiePhotoRopeEnds()
+{
+    if (!photoRopeOn_ || photoRope_ == nullptr || photoRope_->closed() || photoRope_->heldPoint() >= 0)
+        return;
+
+    const QVector<KnotMath::Vec3> joined = photoRopeCurve(photoRope_->points(), false, true);
+
+    // a point every radius is plenty for the knot's curve
+    QVector<KnotMath::Vec3> curve;
+
+    for (int i = 0; i < joined.size(); i += 2)
+        curve.push_back(joined.at(i));
+
+    if (curve.size() < 8)
+        return;
+
+    stopPhotoRope();
+
+    {
+        const QSignalBlocker blocker(grabButton_);
+
+        grabButton_->setChecked(false);
+    }
+
+    glWidget_->setRopeGrab(false);
+
+    // the knot tied in the rope becomes a knot of its own, as one drawn
+    // by hand does
+    const int customIndex =
+        presetCombo_->findData(static_cast<int>(KnotMath::Preset::CustomCoordinates));
+
+    if (customIndex >= 0)
+        presetCombo_->setCurrentIndex(customIndex);
+
+    customInputEdit_->setPlainText(KnotMath::diagramToCoordinateText(curve));
+
+    generateMesh();
+
+    relaxStatusLabel_->setText(
+        pullExplanation(
+            tr("The ends are tied"),
+            tr("The knot in the rope is now the knot shown: every analysis "
+               "works on it, and it is laid on the table afresh.")));
+}
+
+void MainWindow::requestPhotoRopeAnalysis()
+{
+    if (!photoRopeOn_ || photoRope_ == nullptr)
+        return;
+
+    if (photoRopeAnalysing_)
+    {
+        photoRopeAnalysisWanted_ = true;
+        return;
+    }
+
+    photoRopeAnalysing_ = true;
+    photoRopeAnalysisWanted_ = false;
+
+    const bool open = !photoRope_->closed();
+    const QVector<KnotMath::Vec3> curve = photoRopeCurve(photoRope_->points(), !open, true);
+    const quint64 session = photoRopeSession_;
+
+    auto result = std::make_shared<KnotMath::Invariants>();
+
+    // the polynomials take a moment: worked out on a worker thread
+    QThread *worker = QThread::create(
+        [curve, result]()
+        {
+            *result = KnotMath::computeInvariantsWithCrossings(
+                KnotMath::Preset::CustomCoordinates,
+                curve,
+                KnotMath::detectProjectionCrossings(curve, 2, 700),
+                true);
+        });
+
+    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+
+    connect(
+        worker,
+        &QThread::finished,
+        this,
+        [this, result, session, open]()
+        {
+            photoRopeAnalysing_ = false;
+
+            if (session == photoRopeSession_ && photoRopeOn_)
+            {
+                updateInvariantPanel(*result);
+
+                const QString name =
+                    result->classification.isEmpty()
+                        ? tr("not recognised")
+                        : result->classification;
+
+                relaxStatusLabel_->setText(
+                    open
+                        ? pullExplanation(
+                              tr("The rope on the table"),
+                              tr("With its ends joined over the top: %1. Tie "
+                                 "the ends to make it the knot shown.")
+                                  .arg(name))
+                        : pullExplanation(
+                              tr("The rope on the table"),
+                              tr("Still the same knot: %1. No strand can pass "
+                                 "through another; cut the rope to tie a "
+                                 "different knot.")
+                                  .arg(name)));
+            }
+
+            if (photoRopeAnalysisWanted_)
+                requestPhotoRopeAnalysis();
+        });
+
+    worker->start();
+}
+
+void MainWindow::updatePhotoRopeButtons()
+{
+    if (cutRopeButton_ == nullptr || tieEndsButton_ == nullptr)
+        return;
+
+    const bool on = photoRopeOn_ && photoRope_ != nullptr;
+    const bool holding = on && photoRope_->heldPoint() >= 0;
+    const bool closed = on && photoRope_->closed();
+
+    cutRopeButton_->setVisible(on);
+    tieEndsButton_->setVisible(on);
+
+    cutRopeButton_->setEnabled(on && closed && !holding);
+    tieEndsButton_->setEnabled(on && !closed && !holding);
 }
 
 /*
@@ -6641,7 +7438,8 @@ void MainWindow::startJoin()
         0.0f,
         14.0f);
 
-    joinButton_->setText(tr("■  STOP"));
+    joinButton_->setText(tr("STOP"));
+    Icons::set(joinButton_, QStringLiteral("stop"));
 
     joinClock_.restart();
     joinTimer_->start();
@@ -6663,7 +7461,8 @@ void MainWindow::stopJoin(
     glWidget_->clearFlashes();
     glWidget_->clearFixedBounds();
 
-    joinButton_->setText(tr("▶  JOIN"));
+    joinButton_->setText(tr("JOIN"));
+    Icons::set(joinButton_, QStringLiteral("play"));
 
     if (restoreKnot)
     {
@@ -6940,7 +7739,8 @@ void MainWindow::finishJoin()
     glWidget_->clearFlashes();
     glWidget_->clearFixedBounds();
 
-    joinButton_->setText(tr("▶  JOIN"));
+    joinButton_->setText(tr("JOIN"));
+    Icons::set(joinButton_, QStringLiteral("play"));
 
     // The joined knot becomes the current knot, as a Custom Curve (like a
     // drawn knot): every analysis and animation works on it, and it can be

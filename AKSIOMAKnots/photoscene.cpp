@@ -753,7 +753,7 @@ SceneInfo sceneInfo(Scene scene)
         info.rope.bendingLengthMm = 50.0;
         info.rope.frictionSurface = 0.5;
         info.rope.frictionSelf = 0.7;
-        info.rope.color = QColor(196, 166, 118);
+        info.rope.color = QColor(184, 152, 104);
         info.rope.roughness = 0.75f;
         break;
     }

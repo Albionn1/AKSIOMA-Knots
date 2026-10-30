@@ -22,6 +22,7 @@
 #include <QWheelEvent>
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <limits>
 
@@ -289,16 +290,71 @@ vec3 roomReflectance(vec3 f0, float r, float nv)
     return f0 * ab.x + ab.y;
 }
 
-// filmic tone mapping (ACES fit), display gamma and a trace of noise
-// against banding
-vec4 develop(vec3 c)
+/*
+ * The film. The camera first balances its white to the light of the room
+ * (partly, as a camera does, so a sunrise stays a little warm), then the
+ * light becomes the picture through AgX (Sobotka; the polynomial fit of
+ * Wrensch): a log curve over 16.5 stops that rolls the highlights off
+ * gently and, unlike a curve per channel, keeps the hues of strong
+ * colours instead of pushing them towards orange and yellow. The lens
+ * darkens the corners a little (natural vignetting, cos^4 of the angle
+ * off the axis) and the sensor adds a fine grain, stronger in the shadows.
+ */
+uniform vec3 uWhiteBalance;
+uniform float uAspect;           // width / height of the picture
+uniform float uHalfFieldTan;     // tangent of half the vertical field of view
+
+vec3 agxContrast(vec3 x)
 {
-    c = (c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14);
-    c = pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));
+    vec3 x2 = x * x;
+    vec3 x4 = x2 * x2;
 
+    return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x +
+           0.4298 * x2 + 0.1191 * x - 0.00232;
+}
+
+vec4 develop(vec3 c, vec2 uv)
+{
+    c *= uWhiteBalance;
+
+    // the corners of the picture see the lens at an angle
+    vec2 off = (uv * 2.0 - 1.0) * vec2(uAspect, 1.0) * uHalfFieldTan;
+    float cos2 = 1.0 / (1.0 + dot(off, off));
+
+    c *= mix(1.0, cos2 * cos2, 0.55);
+
+    const mat3 inset = mat3(
+        0.842479062253094, 0.0423282422610123, 0.0423756549057051,
+        0.0784335999999992, 0.878468636469772, 0.0784336,
+        0.0792237451477643, 0.0791661274605434, 0.879142973793104);
+
+    const mat3 outset = mat3(
+        1.19687900512017, -0.0528968517574562, -0.0529716355144438,
+        -0.0980208811401368, 1.15190312990417, -0.0980434501171241,
+        -0.0990297440797205, -0.0989611768448433, 1.15107367264116);
+
+    const float lowest = -12.47393;
+    const float highest = 4.026069;
+
+    c = inset * max(c, vec3(1.0e-10));
+    c = (clamp(log2(c), lowest, highest) - lowest) / (highest - lowest);
+    c = agxContrast(c);
+
+    // a touch more contrast and colour than the neutral base (a print)
+    c = pow(max(c, vec3(0.0)), vec3(1.12));
+
+    float grey = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = mix(vec3(grey), c, 1.08);
+
+    c = clamp(outset * c, 0.0, 1.0);
+
+    // grain: a fixed pattern a pixel fine, more visible in dark places
     float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    float fine = fract(sin(dot(gl_FragCoord.xy, vec2(39.3468, 11.135))) * 24634.6345);
 
-    return vec4(c + (noise - 0.5) / 255.0, 1.0);
+    c += ((noise + fine) - 1.0) * mix(0.022, 0.008, sqrt(grey));
+
+    return vec4(c, 1.0);
 }
 
 // value noise in 2D and 3D (for the fibres of the rope)
@@ -367,7 +423,7 @@ KnotGLWidget::KnotGLWidget(QWidget *parent)
     // Precise: the coarse timer ticks unevenly on Windows (auto-rotation
     // stutters).
     animationTimer_.setTimerType(Qt::PreciseTimer);
-    animationTimer_.setInterval(33);
+    animationTimer_.setInterval(16);
 
     connect(
         &animationTimer_,
@@ -616,7 +672,11 @@ vec3 bumped(vec3 n, float height)
 
     vec3 gradient = sign(det) * (dFdx(height) * r1 + dFdy(height) * r2);
 
-    return normalize(abs(det) * n - gradient);
+    // seen exactly edge on (at the outline) there is no gradient to take
+    vec3 b = abs(det) * n - gradient;
+    float l = length(b);
+
+    return l > 1.0e-30 && !isnan(l) && !isinf(l) ? b / l : n;
 }
 
 vec3 fresnelSchlick(float cosine, vec3 f0)
@@ -816,6 +876,19 @@ void main()
         // cotton: matte, with a soft sheen at grazing angles
         s.sheen = 0.6 * mix(albedo, vec3(1.0), 0.2);
         s.sheenRough = 0.6;
+    }
+    else if (uMaterial >= 5 && vTexcoord.w < -0.5)
+    {
+        /*
+         * A loose fibre (Photo::buildRopeMesh): a thin, slightly
+         * translucent hair, a little paler than the yarns it came from and
+         * each a little different; at grazing angles it shines (the halo
+         * of fuzz around a rope against the light).
+         */
+        albedo *= 1.08 + 0.2 * (vTexcoord.z - 0.5);
+
+        s.sheen = 0.9 * mix(albedo, vec3(1.0), 0.15);
+        s.sheenRough = 0.45;
     }
     else if (uMaterial == 5)
     {
@@ -1539,8 +1612,16 @@ void main()
     float centreDistance = distanceAt(vUv);
     float centreCircle = circleAt(centreDistance);
 
-    vec3 sum = textureLod(uColor, vUv, 0.0).rgb / max(centreCircle * centreCircle, 1.0);
+    vec3 centre = textureLod(uColor, vUv, 0.0).rgb;
     float weight = 1.0 / max(centreCircle * centreCircle, 1.0);
+
+    if (any(isnan(centre)) || any(isinf(centre)))
+    {
+        centre = vec3(0.0);
+        weight = 1.0e-6;
+    }
+
+    vec3 sum = centre * weight;
 
     if (centreCircle > 0.5)
     {
@@ -1572,12 +1653,18 @@ void main()
             float cover = clamp(circle - r + 1.0, 0.0, 1.0);
             float w = cover / max(circle * circle, 1.0);
 
-            sum += textureLod(uColor, uv, level).rgb * w;
+            vec3 tap = textureLod(uColor, uv, level).rgb;
+
+            // a broken sample is left out rather than spread around
+            if (any(isnan(tap)) || any(isinf(tap)))
+                continue;
+
+            sum += tap * w;
             weight += w;
         }
     }
 
-    fragColor = develop(sum / weight * uExposure);
+    fragColor = develop(sum / weight * uExposure, vUv);
 }
 )";
 
@@ -3030,8 +3117,9 @@ void KnotGLWidget::uploadMesh()
 
     const int vertexCount = mesh_.positions.size() / 3;
 
-    QVector<Vertex> vertices;
-    vertices.reserve(vertexCount);
+    // interleaved, written straight into one array (a moving rope is
+    // uploaded every frame)
+    QVector<Vertex> vertices(vertexCount);
 
     useVertexColors_ = mesh_.colors.size() == vertexCount * 3;
 
@@ -3039,23 +3127,32 @@ void KnotGLWidget::uploadMesh()
     const bool hasOcclusion = mesh_.occlusion.size() == vertexCount;
     const bool hasSheet = mesh_.sheet.size() == vertexCount;
 
+    const float *positions = mesh_.positions.constData();
+    const float *normals = mesh_.normals.constData();
+    const float *colors = mesh_.colors.constData();
+    const float *texcoords = mesh_.texcoords.constData();
+    const float *occlusion = mesh_.occlusion.constData();
+    const float *sheet = mesh_.sheet.constData();
+
+    Vertex *out = vertices.data();
+
     for (int i = 0; i < vertexCount; ++i)
     {
-        Vertex vertex;
+        Vertex &vertex = out[i];
 
-        vertex.px = mesh_.positions.at(i * 3);
-        vertex.py = mesh_.positions.at(i * 3 + 1);
-        vertex.pz = mesh_.positions.at(i * 3 + 2);
+        vertex.px = positions[i * 3];
+        vertex.py = positions[i * 3 + 1];
+        vertex.pz = positions[i * 3 + 2];
 
-        vertex.nx = mesh_.normals.at(i * 3);
-        vertex.ny = mesh_.normals.at(i * 3 + 1);
-        vertex.nz = mesh_.normals.at(i * 3 + 2);
+        vertex.nx = normals[i * 3];
+        vertex.ny = normals[i * 3 + 1];
+        vertex.nz = normals[i * 3 + 2];
 
         if (useVertexColors_)
         {
-            vertex.cr = mesh_.colors.at(i * 3);
-            vertex.cg = mesh_.colors.at(i * 3 + 1);
-            vertex.cb = mesh_.colors.at(i * 3 + 2);
+            vertex.cr = colors[i * 3];
+            vertex.cg = colors[i * 3 + 1];
+            vertex.cb = colors[i * 3 + 2];
         }
         else
         {
@@ -3064,15 +3161,13 @@ void KnotGLWidget::uploadMesh()
             vertex.cb = 1.0f;
         }
 
-        vertex.t0 = hasTexcoords ? mesh_.texcoords.at(i * 4) : 1.0f;
-        vertex.t1 = hasTexcoords ? mesh_.texcoords.at(i * 4 + 1) : 0.0f;
-        vertex.t2 = hasTexcoords ? mesh_.texcoords.at(i * 4 + 2) : 1.0f;
-        vertex.t3 = hasTexcoords ? mesh_.texcoords.at(i * 4 + 3) : 0.0f;
+        vertex.t0 = hasTexcoords ? texcoords[i * 4] : 1.0f;
+        vertex.t1 = hasTexcoords ? texcoords[i * 4 + 1] : 0.0f;
+        vertex.t2 = hasTexcoords ? texcoords[i * 4 + 2] : 1.0f;
+        vertex.t3 = hasTexcoords ? texcoords[i * 4 + 3] : 0.0f;
 
-        vertex.ao = hasOcclusion ? mesh_.occlusion.at(i) : 1.0f;
-        vertex.sheet = hasSheet ? mesh_.sheet.at(i) : 0.0f;
-
-        vertices.push_back(vertex);
+        vertex.ao = hasOcclusion ? occlusion[i] : 1.0f;
+        vertex.sheet = hasSheet ? sheet[i] : 0.0f;
     }
 
     meshVao_.create();
@@ -3708,8 +3803,34 @@ void KnotGLWidget::paintGL()
     if (photo_ && loadedScene_ != static_cast<int>(photoScene_) && !loadPhotoScene())
         photo_ = false;
 
+    /*
+     * AKSIOMA_PROFILE=1: the time of every stage of the frame (each waits
+     * for the graphics card to finish it), averaged and printed every 60
+     * frames. For finding what makes a frame slow; off otherwise.
+     */
+    static const bool profiling = qEnvironmentVariableIntValue("AKSIOMA_PROFILE") != 0;
+
+    QElapsedTimer stageClock;
+
+    auto stage = [this, &stageClock](int index)
+    {
+        if (!profiling)
+            return;
+
+        glFinish();
+
+        if (index >= 0)
+            profileTimes_[index] += static_cast<double>(stageClock.nsecsElapsed()) / 1.0e6;
+
+        stageClock.restart();
+    };
+
+    stage(-1);
+
     // first the shadow map (its own framebuffer and viewport)
     drawShadowMap();
+
+    stage(0);
 
     const float dpr = static_cast<float>(devicePixelRatioF());
 
@@ -3747,6 +3868,8 @@ void KnotGLWidget::paintGL()
         if (occlusionDirty_)
             bakeSurfaceOcclusion();
 
+        stage(1);
+
         // the light of the scene as it is, then the camera
         glBindFramebuffer(GL_FRAMEBUFFER, photoFramebuffer_);
         glViewport(0, 0, frameWidth, frameHeight);
@@ -3756,11 +3879,43 @@ void KnotGLWidget::paintGL()
         glClearColor(0.0235f, 0.0235f, 0.0235f, 1.0f);
 
         drawPhotoBackground(projection * view);
+        stage(2);
         drawPhotoFloor(projection * view);
+        stage(3);
         drawShoe(projection * view * model);
         drawMesh(model, view, projection);
+        stage(4);
 
         developPhotoFrame(view, projection);
+        stage(5);
+
+        if (profiling && ++profileFrames_ == 60)
+        {
+            const char *names[ProfileStages] = {"shadow map", "table, shade", "room", "table", "rope (shoe)", "camera"};
+
+            QString line = QStringLiteral("frame %1x%2:").arg(frameWidth).arg(frameHeight);
+            double total = 0.0;
+
+            for (int k = 0; k < ProfileStages; ++k)
+            {
+                line += QStringLiteral("  %1 %2").arg(QString::fromLatin1(names[k])).arg(profileTimes_[k] / 60.0, 0, 'f', 2);
+                total += profileTimes_[k] / 60.0;
+                profileTimes_[k] = 0.0;
+            }
+
+            // frames drawn per second of real time since the last line
+            static QElapsedTimer wall;
+
+            const double seconds = wall.isValid() ? static_cast<double>(wall.restart()) / 1000.0 : 0.0;
+
+            if (!wall.isValid())
+                wall.start();
+
+            std::fprintf(stderr, "%s  = %.2f ms, %.0f frames a second\n", qPrintable(line), total, seconds > 0.0 ? 60.0 / seconds : 0.0);
+            std::fflush(stderr);
+
+            profileFrames_ = 0;
+        }
     }
     else
     {
@@ -3902,11 +4057,13 @@ void KnotGLWidget::onAnimationTick()
 
     updateParticles(dt);
 
+    const bool turning = autoRotation_ && !ropeDragging_;
+
     if (cameraFlight_)
     {
         advanceCameraFlight(dt);
     }
-    else if (autoRotation_ && !ropeDragging_)
+    else if (turning)
     {
         // 18 degrees per second
         yaw_ += 18.0f * dt;
@@ -3915,7 +4072,9 @@ void KnotGLWidget::onAnimationTick()
             yaw_ -= 360.0f;
     }
 
-    update();
+    // Photo mode has no particles: a still picture is not drawn again
+    if (!photo_ || cameraFlight_ || turning)
+        update();
 }
 
 void KnotGLWidget::showEvent(QShowEvent *event)
@@ -3937,8 +4096,6 @@ void KnotGLWidget::hideEvent(QHideEvent *event)
 void KnotGLWidget::setAutoRotation(bool enabled)
 {
     autoRotation_ = enabled;
-
-    animationTimer_.setInterval(enabled || cameraFlight_ ? 16 : 33);
 
     update();
 }
@@ -3969,10 +4126,21 @@ void KnotGLWidget::setRopeGrab(bool enabled)
     }
 }
 
-void KnotGLWidget::setGrabCurve(const QVector<KnotMath::Vec3> &curve, double radius)
+void KnotGLWidget::setGrabCurve(const QVector<KnotMath::Vec3> &curve, double radius, bool closed)
 {
     grabCurve_ = curve;
     grabRadius_ = radius;
+    grabClosed_ = closed;
+}
+
+void KnotGLWidget::setRopeHandLevel(float height)
+{
+    handLevel_ = height;
+}
+
+bool KnotGLWidget::ropeGrabUnder() const
+{
+    return grabUnder_;
 }
 
 void KnotGLWidget::cancelRopeGrab()
@@ -4001,7 +4169,7 @@ bool KnotGLWidget::pickRope(const QPointF &position, QVector3D &point) const
     bool found = false;
     float nearest = std::numeric_limits<float>::max();
 
-    for (int i = 0; i < n; ++i)
+    for (int i = 0; i < (grabClosed_ ? n : n - 1); ++i)
     {
         const KnotMath::Vec3 &a = grabCurve_.at(i);
         const KnotMath::Vec3 &b = grabCurve_.at((i + 1) % n);
@@ -4079,6 +4247,38 @@ QVector3D KnotGLWidget::pointOnViewPlane(
            direction * (QVector3D::dotProduct(through - nearPoint, forward) / along);
 }
 
+QVector3D KnotGLWidget::pointOnLevel(
+    const QPointF &position,
+    float level,
+    const QVector3D &fallback) const
+{
+    const QMatrix4x4 inverse = lastViewProjection_.inverted();
+
+    const float x = static_cast<float>(2.0 * position.x() / std::max(1, width()) - 1.0);
+    const float y = static_cast<float>(1.0 - 2.0 * position.y() / std::max(1, height()));
+
+    auto unproject = [&](float z)
+    {
+        const QVector4D p = inverse * QVector4D(x, y, z, 1.0f);
+
+        return std::abs(p.w()) > 1.0e-9f ? p.toVector3D() / p.w() : p.toVector3D();
+    };
+
+    const QVector3D nearPoint = unproject(-1.0f);
+    const QVector3D direction = unproject(1.0f) - nearPoint;
+
+    // looking up, or along the level: the mouse is above the horizon
+    if (std::abs(direction.y()) < 1.0e-9f)
+        return fallback;
+
+    const float t = (level - nearPoint.y()) / direction.y();
+
+    if (t <= 0.0f || t > 1.0f)
+        return fallback;
+
+    return nearPoint + direction * t;
+}
+
 void KnotGLWidget::mousePressEvent(QMouseEvent *event)
 {
     lastMousePosition_ = event->position().toPoint();
@@ -4096,6 +4296,7 @@ void KnotGLWidget::mousePressEvent(QMouseEvent *event)
         ropeDragging_ = true;
         grabPoint_ = point;
         grabStart_ = pointOnViewPlane(event->position(), point);
+        grabUnder_ = (event->modifiers() & Qt::ShiftModifier) != 0;
 
         setCursor(Qt::ClosedHandCursor);
 
@@ -4122,6 +4323,16 @@ void KnotGLWidget::mouseMoveEvent(QMouseEvent *event)
     const QPoint delta = current - lastMousePosition_;
 
     lastMousePosition_ = current;
+
+    if (ropeDragging_ && !std::isnan(handLevel_))
+    {
+        // the hand moves over the table, the point under the mouse
+        emit ropeDragged(unposed(pointOnLevel(event->position(), handLevel_, grabPoint_)));
+
+        event->accept();
+
+        return;
+    }
 
     if (ropeDragging_)
     {
@@ -4687,8 +4898,6 @@ void KnotGLWidget::flyCameraTo(
     flightProgress_ = 0.0f;
     cameraFlight_ = true;
 
-    animationTimer_.setInterval(16);
-
     update();
 }
 
@@ -4698,8 +4907,6 @@ void KnotGLWidget::stopCameraFlight()
         return;
 
     cameraFlight_ = false;
-
-    animationTimer_.setInterval(autoRotation_ ? 16 : 33);
 }
 
 void KnotGLWidget::advanceCameraFlight(
@@ -4797,7 +5004,7 @@ bool KnotGLWidget::photoMode() const
     return photo_;
 }
 
-void KnotGLWidget::setRestingRope(const KnotMath::Mesh &mesh, const QMatrix4x4 &pose)
+void KnotGLWidget::setRestingRope(KnotMath::Mesh mesh, const QMatrix4x4 &pose, bool sameTable)
 {
     restPose_ = pose;
     restingPose_ = true;
@@ -4806,20 +5013,45 @@ void KnotGLWidget::setRestingRope(const KnotMath::Mesh &mesh, const QMatrix4x4 &
     pose_ = pose;
     poseDirty_ = false;
 
-    rawMesh_ = mesh;
+    rawMesh_ = std::move(mesh);
 
     surfaceDirty_ = true;
     occlusionDirty_ = true;
     shoeShadeDirty_ = true;
 
     refreshPose();
+
+    if (sameTable && tableAnchored_)
+    {
+        // the table stays; only the rope and its shade on it move
+        tableLevel_ = tableAnchor_.y();
+        surfaceDirty_ = false;
+    }
+    else
+    {
+        tableAnchor_ = QVector3D(
+            0.5f * (meshMin_.x() + meshMax_.x()),
+            tableLevel_,
+            0.5f * (meshMin_.z() + meshMax_.z()));
+
+        tableAnchored_ = true;
+    }
 }
 
 void KnotGLWidget::clearRestingPose()
 {
     restingPose_ = false;
     restingRope_ = false;
+    tableAnchored_ = false;
     poseDirty_ = true;
+}
+
+QVector3D KnotGLWidget::tableMiddle() const
+{
+    if (restingRope_ && tableAnchored_)
+        return QVector3D(tableAnchor_.x(), 0.0f, tableAnchor_.z());
+
+    return QVector3D(0.5f * (meshMin_.x() + meshMax_.x()), 0.0f, 0.5f * (meshMin_.z() + meshMax_.z()));
 }
 
 QVector3D KnotGLWidget::posed(const QVector3D &point) const
@@ -4867,32 +5099,46 @@ void KnotGLWidget::applyPose()
     if (!photo_)
         return;
 
+    // the pose is a turn and a shift: applied as a 3 x 3 matrix and a
+    // vector (no division), straight on the arrays
+    const float *m = pose_.constData();
+
+    const float r00 = m[0], r01 = m[4], r02 = m[8], tx = m[12];
+    const float r10 = m[1], r11 = m[5], r12 = m[9], ty = m[13];
+    const float r20 = m[2], r21 = m[6], r22 = m[10], tz = m[14];
+
     const int vertexCount = mesh_.positions.size() / 3;
+
+    float *positions = mesh_.positions.data();
 
     for (int i = 0; i < vertexCount; ++i)
     {
-        const QVector3D p = pose_.map(QVector3D(
-            mesh_.positions.at(3 * i),
-            mesh_.positions.at(3 * i + 1),
-            mesh_.positions.at(3 * i + 2)));
+        float *p = positions + 3 * i;
 
-        mesh_.positions[3 * i] = p.x();
-        mesh_.positions[3 * i + 1] = p.y();
-        mesh_.positions[3 * i + 2] = p.z();
+        const float x = p[0];
+        const float y = p[1];
+        const float z = p[2];
+
+        p[0] = r00 * x + r01 * y + r02 * z + tx;
+        p[1] = r10 * x + r11 * y + r12 * z + ty;
+        p[2] = r20 * x + r21 * y + r22 * z + tz;
     }
 
     const int normalCount = mesh_.normals.size() / 3;
 
+    float *normals = mesh_.normals.data();
+
     for (int i = 0; i < normalCount; ++i)
     {
-        const QVector3D n = pose_.mapVector(QVector3D(
-            mesh_.normals.at(3 * i),
-            mesh_.normals.at(3 * i + 1),
-            mesh_.normals.at(3 * i + 2)));
+        float *n = normals + 3 * i;
 
-        mesh_.normals[3 * i] = n.x();
-        mesh_.normals[3 * i + 1] = n.y();
-        mesh_.normals[3 * i + 2] = n.z();
+        const float x = n[0];
+        const float y = n[1];
+        const float z = n[2];
+
+        n[0] = r00 * x + r01 * y + r02 * z;
+        n[1] = r10 * x + r11 * y + r12 * z;
+        n[2] = r20 * x + r21 * y + r22 * z;
     }
 
     const int samples = mesh_.centerline.size() / 4;
@@ -5438,9 +5684,9 @@ void KnotGLWidget::setPhotoUniforms(QOpenGLShaderProgram &program)
     const float roomFloor = top - static_cast<float>(photoInfo_.tableHeightM) * metre;
 
     const QVector3D middle(
-        0.5f * (meshMin_.x() + meshMax_.x()),
+        tableMiddle().x(),
         roomFloor + static_cast<float>(photoInfo_.cameraHeightM) * metre,
-        0.5f * (meshMin_.z() + meshMax_.z()));
+        tableMiddle().z());
 
     program.setUniformValue("uRoomCentre", middle);
     program.setUniformValue("uRoomRadius", static_cast<float>(photoInfo_.roomRadiusM) * metre);
@@ -5452,6 +5698,22 @@ void KnotGLWidget::setPhotoUniforms(QOpenGLShaderProgram &program)
         0.2126f * onTable.x() + 0.7152f * onTable.y() + 0.0722f * onTable.z();
 
     photoExposure_ = 1.9f / std::max(lightOnTable, 1.0e-3f);
+
+    /*
+     * The white balance: the colour of the light on the table made grey,
+     * three quarters of the way (a camera's automatic white balance leaves
+     * some of the warmth of a sunrise in the picture).
+     */
+    const float grey = std::max(lightOnTable, 1.0e-3f);
+
+    for (int k = 0; k < 3; ++k)
+    {
+        const float channel = std::max(onTable[k], 1.0e-3f);
+
+        photoWhiteBalance_[k] = std::pow(grey / channel, 0.75f);
+    }
+
+    program.setUniformValue("uWhiteBalance", photoWhiteBalance_);
 }
 
 float KnotGLWidget::photoFloorLevel() const
@@ -5471,10 +5733,7 @@ void KnotGLWidget::rebuildSurfaceGeometry()
     const float mm = worldPerMm();
     const float top = photoFloorLevel();
 
-    const QVector3D middle(
-        0.5f * (meshMin_.x() + meshMax_.x()),
-        top,
-        0.5f * (meshMin_.z() + meshMax_.z()));
+    const QVector3D middle(tableMiddle().x(), top, tableMiddle().z());
 
     QVector<float> data;
 
@@ -6025,7 +6284,7 @@ void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
             std::pow(static_cast<float>(rope.blueF()), 2.2f)));
 
     // the room's own floor takes over where the room's picture has it
-    const QVector3D middle(0.5f * (meshMin_.x() + meshMax_.x()), 0.0f, 0.5f * (meshMin_.z() + meshMax_.z()));
+    const QVector3D middle = tableMiddle();
 
     float fade = 0.0f;
 
@@ -6136,6 +6395,8 @@ void KnotGLWidget::developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &p
     developProgram_->setUniformValue("uFocus", focus);
     developProgram_->setUniformValue("uCocScale", cocScale);
     developProgram_->setUniformValue("uMaxCoc", 0.03f * static_cast<float>(height));
+    developProgram_->setUniformValue("uAspect", static_cast<float>(width) / std::max(height, 1));
+    developProgram_->setUniformValue("uHalfFieldTan", std::tan(qDegreesToRadians(0.5f * FieldOfView)));
     developProgram_->setUniformValue(
         "uExposure",
         photoExposure_ * static_cast<float>(lighting_.brightness) / 100.0f);

@@ -6,6 +6,15 @@
         <file>icons/light/arrow_down.png</file>
         <file>icons/light/arrow_up.png</file>
         <file>icons/light/check.png</file>
+        <file>icons/svg/chevron_down.svg</file>
+        <file>icons/svg/chevron_left.svg</file>
+        <file>icons/svg/chevron_right.svg</file>
+        <file>icons/svg/hand.svg</file>
+        <file>icons/svg/pause.svg</file>
+        <file>icons/svg/play.svg</file>
+        <file>icons/svg/scissors.svg</file>
+        <file>icons/svg/stop.svg</file>
+        <file>icons/svg/tie.svg</file>
         <file>icons/app_icon.png</file>
         <file>icons/aksioma_logo.png</file>
     </qresource>

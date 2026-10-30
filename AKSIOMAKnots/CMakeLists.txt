@@ -65,6 +65,8 @@ qt_add_executable(AKSIOMAKnots
     lighting.cpp
     gpumemory.h
     gpumemory.cpp
+    icons.h
+    icons.cpp
     theme.h
     theme.cpp
     resources.qrc
@@ -125,9 +127,11 @@ if(MSVC)
 else()
     target_compile_options(AKSIOMAKnots PRIVATE -Wall -Wextra)
 
-    # The relaxation runs tens of thousands of steps while you watch, so it
-    # is optimised in Debug builds too (about ten times faster).
-    set_source_files_properties(knotrelax.cpp PROPERTIES
+    # The relaxation runs tens of thousands of steps while you watch, and
+    # the rope in Photo mode is simulated and rebuilt for every frame while
+    # it is in the hand, so these are optimised in Debug builds too (about
+    # ten times faster).
+    set_source_files_properties(knotrelax.cpp ropephysics.cpp knotmath.cpp knotglwidget.cpp PROPERTIES
         COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
 endif()
 
