@@ -3,6 +3,9 @@
 // table by the rope physics and photographed in each scene.
 //
 //   photo_render <knot name> <out folder> [width height [scene]]
+//
+// PHOTO_CAM="yaw pitch radius along": the camera at yaw, pitch degrees on a
+// ball of `radius` rope radii around the point `along` (0..1) of the rope.
 
 #include "knotglwidget.h"
 #include "knotmath.h"
@@ -23,6 +26,28 @@ using namespace KnotMath;
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
+
+    // photo_render envfile <file.hdr> ...: the sun and the room of pictures
+    if (argc >= 3 && QString(argv[1]) == QStringLiteral("envfile"))
+    {
+        for (int k = 2; k < argc; ++k)
+        {
+            const Photo::Environment e = Photo::loadEnvironment(QString::fromLocal8Bit(argv[k]));
+
+            const QVector3D room = e.irradianceAt(QVector3D(0.0f, 1.0f, 0.0f));
+            const float ground = 0.2126f * room.x() + 0.7152f * room.y() + 0.0722f * room.z();
+            const float sun = (0.2126f * e.sunIrradiance.x() + 0.7152f * e.sunIrradiance.y() +
+                               0.0722f * e.sunIrradiance.z()) * std::max(e.sunDirection.y(), 0.0f);
+
+            std::printf("%-40s valid %d  sun up %5.1f deg  size %.2f deg  sun on table / room %.2f  (room %.2f)\n",
+                        argv[k], e.valid,
+                        std::asin(std::clamp(e.sunDirection.y(), -1.0f, 1.0f)) * 57.2958f,
+                        e.sunRadius * 57.2958f,
+                        sun / std::max(ground, 1.0e-4f), ground);
+        }
+
+        return 0;
+    }
 
     if (argc >= 2 && QString(argv[1]) == QStringLiteral("env"))
     {
@@ -231,6 +256,21 @@ int main(int argc, char **argv)
         view.setRestingRope(mesh, rope.pose);
         view.fitNewKnot(45.0f);
         view.resetCamera(45.0f, false);
+
+        if (qEnvironmentVariableIsSet("PHOTO_CAM"))
+        {
+            const QStringList place = qEnvironmentVariable("PHOTO_CAM").split(' ');
+
+            const int at = std::clamp(static_cast<int>(place.value(3).toDouble() * rope.points.size()),
+                                      0, static_cast<int>(rope.points.size()) - 1);
+
+            const Vec3 p = rope.points.at(at);
+
+            view.placeCamera(rope.pose.map(QVector3D(float(p.x), float(p.y), float(p.z))),
+                             place.value(2).toFloat() * float(radius),
+                             place.value(0).toFloat(),
+                             place.value(1).toFloat());
+        }
 
         const qint64 loading = clock.restart();
 

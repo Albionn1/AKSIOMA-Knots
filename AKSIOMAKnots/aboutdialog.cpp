@@ -113,13 +113,15 @@ AboutDialog::AboutDialog(QWidget *parent)
                  tr("Unknotting animation: crossing changes to a descending "
                     "diagram, which is always an unknot."))
             .arg(tr("PHOTO MODE"),
-                 tr("The rooms and surfaces of Photo mode come from "
+                 tr("The places and surfaces of Photo mode come from "
                     "<a href='https://polyhaven.com' style='color:#D99B42;'>Poly Haven</a> "
-                    "and are free for any use (CC0): the HDRIs Aft Lounge (Greg Zaal) "
-                    "and Country Club (Sergej Majboroda), the textures Wood Table "
-                    "Large and Wood Floor Worn (Dimitrios Savva). The rope lies down "
-                    "by position based dynamics (XPBD: M. Macklin, M. Müller and N. "
-                    "Chentanez, 2016). The sneaker was made for AKSIOMA in Blender."))));
+                    "and are free for any use (CC0): the HDRIs Chinese Garden (Andreas "
+                    "Mischok) and Meadow 2 (Sergej Majboroda), the textures Wood Table "
+                    "Large and Wood Floor Worn (Dimitrios Savva). The rope is a Cosserat "
+                    "rod solved directly (C. Deul, T. Kugelstadt, M. Weiler and J. "
+                    "Bender, 2018) by position based dynamics (XPBD: M. Macklin, M. "
+                    "Müller and N. Chentanez, 2016). The sneaker was made for AKSIOMA "
+                    "in Blender."))));
 
     layout->addWidget(text, 1);
 

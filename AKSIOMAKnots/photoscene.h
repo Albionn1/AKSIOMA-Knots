@@ -53,6 +53,20 @@ struct RopeMaterial
     // under its own weight has a short one.
     double bendingLengthMm = 50.0;
 
+    // stiffness against twisting, as a share of that against bending
+    double twistStiffness = 0.7;
+
+    // Natural fibre takes a set: bent tighter than this radius it creeps
+    // towards the new shape (at this rate, per second) and keeps part of it.
+    double setRadiusMm = 70.0;
+    double setRate = 0.8;
+
+    // the curl left in a relaxed rope by the reel it was wound on
+    double curlRadiusMm = 110.0;
+
+    // how much of the shape it was tied in a rope keeps when let go
+    double tiedSet = 0.55;
+
     // friction on the surface it lies on, and on itself
     double frictionSurface = 0.5;
     double frictionSelf = 0.7;
@@ -91,6 +105,15 @@ struct SceneInfo
     // the room is turned about the vertical by this many degrees (where
     // the knot lies in the room)
     float environmentYaw = 0.0f;
+
+    // What the camera makes of the light on the surface: white paper there
+    // comes out this bright (1.45: a little under, moody; about pi: as a
+    // meter set for daylight has it).
+    float exposure = 1.45f;
+
+    // how much the room is darkened around the knot when nothing is being
+    // shown on stage (0: the picture as the camera took it)
+    float calmStage = 0.7f;
 
     RopeMaterial rope;
 

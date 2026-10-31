@@ -37,22 +37,46 @@ constexpr double Spacing = 0.5;
 constexpr double NeighbourArc = 4.0;
 
 // time step, and the longest a rope may take to come to rest
-constexpr double TimeStep = 0.04;
+constexpr double TimeStep = 0.08;
 constexpr double LongestTime = 200.0;
 
-// at rest: no point faster than this (radii per time unit) for RestSteps
+// at rest: no point has come further than this speed (radii per time unit)
+// would take it, over each of the windows of RestWindow steps in RestSteps.
+// Over a window: what counts is where the rope is going, not the last
+// trembling of a part held tight.
 constexpr double RestSpeed = 0.003;
-constexpr int RestSteps = 150;
+constexpr int RestSteps = 75;
+constexpr int RestWindow = 25;
 
-// constraint passes per step
+// the rod and the contacts in turn, per step
 constexpr int Passes = 3;
 
-// internal damping of the fibres (per time unit)
-constexpr double Damping = 0.8;
+// the rod's factors are used for this many steps (they change slowly)
+constexpr int RodFactorSteps = 1;
+
+// this far along the rope (radii) from where it is held fast, it has taken
+// the shape it is held in
+constexpr double HeldShapeArc = 6.0;
+
+// the most the rod's correction may move a point or turn a piece, per pass
+constexpr double TrustMove = 0.25;
+constexpr double TrustTurn = 0.4;
+
+// a rod all but unstretchable: its compliance in the solved system
+constexpr double StretchCompliance = 1.0e-6;
+
+// how much of the difference from its neighbours a point's velocity loses
+// to the rubbing of the fibres, per sweep and step, and the sweeps
+constexpr double Fibres = 0.12;
+constexpr int DampingSweeps = 2;
 
 // no point moves more than this in one step (no tunnelling through the
 // rope: two radii wide)
-constexpr double MaxStep = 0.12;
+constexpr double MaxStep = 0.4;
+
+// pieces this much beyond contact are still kept in the list of pairs, and
+// the list is renewed before anything can have moved that far
+constexpr double PairMargin = 1.2;
 
 // closest points of the segments a0-a1 and b0-b1: parameters s, t (0..1)
 void closestPoints(
@@ -87,6 +111,128 @@ void closestPoints(
     {
         t = 1.0;
         s = std::clamp((b - c) / a, 0.0, 1.0);
+    }
+}
+
+Quaternion multiply(const Quaternion &a, const Quaternion &b)
+{
+    return Quaternion{
+        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w};
+}
+
+Quaternion conjugate(const Quaternion &q)
+{
+    return Quaternion{q.w, -q.x, -q.y, -q.z};
+}
+
+// the vector v of the piece's own frame, in the world
+Vec3 rotated(const Quaternion &q, const Vec3 &v)
+{
+    const Vec3 u(q.x, q.y, q.z);
+    const Vec3 t = Vec3::cross(u, v) * 2.0;
+
+    return v + t * q.w + Vec3::cross(u, t);
+}
+
+// the direction of the piece (d3 of its frame)
+Vec3 axisOf(const Quaternion &q)
+{
+    return Vec3(
+        2.0 * (q.x * q.z + q.w * q.y),
+        2.0 * (q.y * q.z - q.w * q.x),
+        1.0 - 2.0 * (q.x * q.x + q.y * q.y));
+}
+
+// turned by the small rotation `by` (a vector in the world)
+void turnBy(Quaternion &q, const Vec3 &by)
+{
+    const double w = q.w;
+    const double x = q.x;
+    const double y = q.y;
+    const double z = q.z;
+
+    q.w += 0.5 * (-by.x * x - by.y * y - by.z * z);
+    q.x += 0.5 * (by.x * w + by.y * z - by.z * y);
+    q.y += 0.5 * (-by.x * z + by.y * w + by.z * x);
+    q.z += 0.5 * (by.x * y - by.y * x + by.z * w);
+
+    const double scale = 1.0 / std::sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
+
+    q.w *= scale;
+    q.x *= scale;
+    q.y *= scale;
+    q.z *= scale;
+}
+
+// the shortest turn taking the unit vector a to the unit vector b
+Quaternion turnBetween(const Vec3 &a, const Vec3 &b)
+{
+    const Vec3 c = Vec3::cross(a, b);
+    const double w = 1.0 + Vec3::dot(a, b);
+
+    if (w < 1.0e-9)
+    {
+        const Vec3 side = std::abs(a.x) < 0.9 ? Vec3::cross(a, Vec3(1.0, 0.0, 0.0)).normalized()
+                                              : Vec3::cross(a, Vec3(0.0, 1.0, 0.0)).normalized();
+
+        return Quaternion{0.0, side.x, side.y, side.z};
+    }
+
+    const double scale = 1.0 / std::sqrt(w * w + c.x * c.x + c.y * c.y + c.z * c.z);
+
+    return Quaternion{w * scale, c.x * scale, c.y * scale, c.z * scale};
+}
+
+// A = L L^T in place (6 x 6, row by row); only the lower part is used
+void cholesky6(double *a)
+{
+    for (int j = 0; j < 6; ++j)
+    {
+        double sum = a[j * 6 + j];
+
+        for (int k = 0; k < j; ++k)
+            sum -= a[j * 6 + k] * a[j * 6 + k];
+
+        const double pivot = std::sqrt(std::max(sum, 1.0e-14));
+
+        a[j * 6 + j] = pivot;
+
+        for (int i = j + 1; i < 6; ++i)
+        {
+            double value = a[i * 6 + j];
+
+            for (int k = 0; k < j; ++k)
+                value -= a[i * 6 + k] * a[j * 6 + k];
+
+            a[i * 6 + j] = value / pivot;
+        }
+    }
+}
+
+// b = (L L^T)^-1 b
+void solve6(const double *l, double *b)
+{
+    for (int i = 0; i < 6; ++i)
+    {
+        double value = b[i];
+
+        for (int k = 0; k < i; ++k)
+            value -= l[i * 6 + k] * b[k];
+
+        b[i] = value / l[i * 6 + i];
+    }
+
+    for (int i = 5; i >= 0; --i)
+    {
+        double value = b[i];
+
+        for (int k = i + 1; k < 6; ++k)
+            value -= l[k * 6 + i] * b[k];
+
+        b[i] = value / l[i * 6 + i];
     }
 }
 
@@ -173,7 +319,9 @@ RestingRope layOnTable(
         x[i] = Vec3(p.x(), p.y(), p.z()) / radius;
     }
 
-    const Settling settling = settleRope(x, QVector<bool>(n, false), closed, material, Ground());
+    QVector<Vec3> frames;
+
+    const Settling settling = settleRope(x, QVector<bool>(n, false), closed, material, Ground(), &frames);
 
     result.steps = settling.steps;
     result.seconds = settling.seconds;
@@ -195,6 +343,13 @@ RestingRope layOnTable(
         result.points.push_back(Vec3(k.x(), k.y(), k.z()));
     }
 
+    for (const Vec3 &f : frames)
+    {
+        const QVector3D k = back.mapVector(QVector3D(float(f.x), float(f.y), float(f.z)));
+
+        result.frames.push_back(Vec3(k.x(), k.y(), k.z()));
+    }
+
     result.valid = true;
 
     return result;
@@ -205,7 +360,8 @@ Settling settleRope(
     const QVector<bool> &pinned,
     bool closed,
     const RopeMaterial &material,
-    const Ground &ground)
+    const Ground &ground,
+    QVector<Vec3> *frames)
 {
     Settling result;
 
@@ -213,6 +369,9 @@ Settling settleRope(
 
     if (!simulation.isValid())
         return result;
+
+    // it has just been tied
+    simulation.takeSet(material.tiedSet);
 
     int step = 0;
 
@@ -228,12 +387,15 @@ Settling settleRope(
 
     x = simulation.points();
 
+    if (frames != nullptr)
+        *frames = simulation.frames();
+
     const double radiusMm = 0.5 * material.diameterMm;
     const double timeUnit = std::sqrt(radiusMm * 0.001 / Gravity);
 
     result.steps = step;
     result.seconds = step * TimeStep * timeUnit;
-    result.finalSpeed = simulation.fastest() * radiusMm / timeUnit;
+    result.finalSpeed = simulation.drift() * radiusMm / timeUnit;
     result.settled = simulation.atRest();
 
     return result;
@@ -287,12 +449,99 @@ RopeSimulation::RopeSimulation(
 
     const double c = material.bendingLengthMm / radiusMm_;
     const double bending = c * c * c;
+    const double twisting = bending * material.twistStiffness;
 
     const double dt = TimeStep;
 
-    // XPBD: compliance of the bending constraint C = turning angle at a
-    // point (curvature theta / h, energy B h kappa^2 / 2 = B theta^2 / 2h)
-    compliance_ = h_ / bending / (dt * dt);
+    // a piece's turn: its mass h, as a short thick cylinder
+    wq_ = 1.0 / (h_ * (0.25 + h_ * h_ / 12.0));
+
+    // compliance of a joint against turning by an angle (curvature
+    // theta / h, energy B h kappa^2 / 2 = B theta^2 / 2h)
+    bendSoftness_ = h_ / bending / (dt * dt);
+    twistSoftness_ = h_ / twisting / (dt * dt);
+
+    // what permanent bending starts at, as an angle per joint, and how
+    // fast the rope gives way beyond it
+    yieldAngle_ = h_ * radiusMm_ / std::max(material.setRadiusMm, 1.0);
+    setRate_ = material.setRate * std::sqrt(radiusMm_ * 0.001 / Gravity);
+
+    /*
+     * The frame of every piece: its direction, carried along the rope with
+     * no twist; on a closed rope the small turn left at the end is spread
+     * evenly over its length.
+     */
+    q_.resize(segments_);
+
+    {
+        const Vec3 first = (x_.at(1 % n) - x_.at(0)).normalized();
+
+        Quaternion q = turnBetween(Vec3(0.0, 0.0, 1.0), first);
+
+        q_[0] = q;
+
+        Vec3 axis = first;
+
+        for (int i = 1; i < segments_; ++i)
+        {
+            const Vec3 next = (x_.at((i + 1) % n) - x_.at(i)).normalized();
+
+            q = multiply(turnBetween(axis, next), q);
+
+            q_[i] = q;
+            axis = next;
+        }
+
+        if (closed_)
+        {
+            const Quaternion back = multiply(turnBetween(axis, first), q);
+
+            Quaternion left = multiply(conjugate(q_.at(0)), back);
+
+            if (left.w < 0.0)
+                left = Quaternion{-left.w, -left.x, -left.y, -left.z};
+
+            const double total = 2.0 * std::atan2(left.z, left.w);
+
+            for (int i = 0; i < segments_; ++i)
+            {
+                const double a = -total * (double(i) + 0.5) / segments_ * 0.5;
+
+                q_[i] = multiply(q_.at(i), Quaternion{std::cos(a), 0.0, 0.0, std::sin(a)});
+            }
+        }
+    }
+
+    qOld_ = q_;
+    windowStart_ = x_;
+    spin_.fill(Vec3(0.0, 0.0, 0.0), segments_);
+    lambda_.fill(Vec3(0.0, 0.0, 0.0), segments_);
+    groundDepth_.fill(0.0, n);
+
+    /*
+     * No rope is straight when it lies relaxed. It has been wound on a
+     * reel and coiled in a hand: a slow, uneven curl stays in it, different
+     * along its length, the same for the same rope.
+     */
+    shape_.resize(segments_);
+
+    {
+        const double curl = h_ * radiusMm_ / std::max(material.curlRadiusMm, 1.0);
+
+        for (int i = 0; i < segments_; ++i)
+        {
+            const double s = i * h_;
+
+            const double a = 0.6 * std::sin(s * 0.083 + 0.7) + 0.5 * std::sin(s * 0.211 + 2.1) +
+                             0.4 * std::sin(s * 0.431 + 4.4);
+            const double b = 0.6 * std::sin(s * 0.107 + 3.3) + 0.5 * std::sin(s * 0.269 + 0.4) +
+                             0.4 * std::sin(s * 0.373 + 1.9);
+
+            shape_[i] = Vec3(curl * a, curl * b, 0.0);
+        }
+    }
+
+    rodAge_ = -1;
 
     muSurface_ = material.frictionSurface;
     muSelf_ = material.frictionSelf;
@@ -316,6 +565,97 @@ bool RopeSimulation::atRest() const
     return quiet_ >= RestSteps;
 }
 
+QVector<Vec3> RopeSimulation::frames() const
+{
+    const int n = x_.size();
+
+    QVector<Vec3> result(n);
+
+    for (int i = 0; i < n; ++i)
+    {
+        const int piece = std::min(i, segments_ - 1);
+        const int before = closed_ ? (piece - 1 + segments_) % segments_ : std::max(piece - 1, 0);
+
+        result[i] = (rotated(q_.at(piece), Vec3(1.0, 0.0, 0.0)) +
+                     rotated(q_.at(before), Vec3(1.0, 0.0, 0.0))).normalized();
+    }
+
+    return result;
+}
+
+void RopeSimulation::useFrames(const QVector<Vec3> &frames)
+{
+    const int n = x_.size();
+
+    if (!valid_ || frames.size() != n)
+        return;
+
+    for (int i = 0; i < segments_; ++i)
+    {
+        const Vec3 axis = (x_.at((i + 1) % n) - x_.at(i)).normalized();
+
+        Vec3 wanted = frames.at(i) + frames.at((i + 1) % n);
+
+        wanted = (wanted - axis * Vec3::dot(wanted, axis)).normalized();
+
+        const Quaternion aligned = turnBetween(Vec3(0.0, 0.0, 1.0), axis);
+
+        const Vec3 now = rotated(aligned, Vec3(1.0, 0.0, 0.0));
+
+        const double half =
+            0.5 * std::atan2(Vec3::dot(Vec3::cross(now, wanted), axis), Vec3::dot(now, wanted));
+
+        q_[i] = multiply(aligned, Quaternion{std::cos(half), 0.0, 0.0, std::sin(half)});
+    }
+
+    qOld_ = q_;
+}
+
+void RopeSimulation::takeSet(double share)
+{
+    if (!valid_)
+        return;
+
+    const int joints = closed_ ? segments_ : segments_ - 1;
+    const int n = x_.size();
+
+    /*
+     * Where the rope is held fast (a lace through its eyelets) it has long
+     * taken the shape it is held in, whole: there and for a little way
+     * either side, it has no wish to be anything else.
+     */
+    QVector<bool> held(n, false);
+
+    const int reach = static_cast<int>(std::ceil(HeldShapeArc / h_));
+
+    for (int i = 0; i < n; ++i)
+    {
+        if (w_.at(i) != 0.0)
+            continue;
+
+        for (int k = -reach; k <= reach; ++k)
+        {
+            const int m = closed_ ? (i + k + n) % n : i + k;
+
+            if (m >= 0 && m < n)
+                held[m] = true;
+        }
+    }
+
+    for (int i = 0; i < joints; ++i)
+    {
+        Quaternion turn = multiply(conjugate(q_.at(i)), q_.at((i + 1) % segments_));
+
+        if (turn.w < 0.0)
+            turn = Quaternion{-turn.w, -turn.x, -turn.y, -turn.z};
+
+        const double taken = held.at(i) ? 1.0 : share;
+
+        shape_[i].x += taken * (2.0 * turn.x - shape_.at(i).x);
+        shape_[i].y += taken * (2.0 * turn.y - shape_.at(i).y);
+    }
+}
+
 double RopeSimulation::secondsPerStep() const
 {
     return TimeStep * std::sqrt(radiusMm_ * 0.001 / Gravity);
@@ -336,6 +676,7 @@ void RopeSimulation::hold(int index, const Vec3 &target, bool under)
     // the hand moves it; nothing else does
     w_[index] = 0.0;
 
+    rodAge_ = -1;
     quiet_ = 0;
 }
 
@@ -350,195 +691,512 @@ void RopeSimulation::letGo()
     if (held_ >= 0 && held_ < w_.size())
         w_[held_] = heldWeight_;
 
+    rodAge_ = -1;
     held_ = -1;
     under_ = false;
     quiet_ = 0;
 }
 
-void RopeSimulation::step()
+/*
+ * The rod, solved whole. The rope is a Cosserat rod: points p with a mass,
+ * and between every two of them a piece with a turn q (its material frame,
+ * d3 along it). The constraints, at every joint i,
+ *
+ *     s(i) = p(i+1) - p(i) - l(i) d3(q(i)) = 0      no stretch, no shear
+ *     b(i) = turn from q(i) to q(i+1) - rest shape  bending and twisting
+ *
+ * are coupled along the rope only from one joint to the next, so the system
+ * of their corrections (A dl = -C, A = J M^-1 J^T + compliance) is block
+ * tridiagonal with blocks of 6 and is solved exactly, end to end, in time
+ * proportional to the length (Deul, Kugelstadt, Weiler, Bender 2018, Direct
+ * Position-Based Solver for Stiff Rods). Stiffness is therefore the
+ * material's own at any length, unlike constraints solved one after the
+ * other, where a long rope comes out soft and stretchy.
+ *
+ * A closed rope has one more joint, tying the last piece to the first: the
+ * last block is eliminated by its Schur complement. The factors change
+ * slowly and are kept for a few steps.
+ */
+void RopeSimulation::factorRod()
 {
-    if (!valid_)
-        return;
-
-    const int n = x_.size();
     const int segments = segments_;
-    const bool closed = closed_;
-    const double h = h_;
-    const double dt = TimeStep;
+    const int n = x_.size();
+    const int chain = closed_ ? segments - 1 : segments;
 
-    QVector<Vec3> &x = x_;
-    QVector<Vec3> &v = v_;
-    QVector<Vec3> &p = p_;
-    const QVector<double> &w = w_;
-    const QVector<double> &rest = rest_;
+    rodD_.resize(36 * segments);
+    rodE_.resize(36 * segments);
+    rodL_.resize(36 * segments);
+    rodF_.resize(36 * segments);
 
-    // the arrays through plain pointers (no checks on every access)
-    Vec3 *X = x.data();
-    Vec3 *V = v.data();
-    Vec3 *P = p.data();
-    const double *W = w.constData();
-    const double *Rest = rest.constData();
+    double *D = rodD_.data();
+    double *E = rodE_.data();
+    double *L = rodL_.data();
+    double *F = rodF_.data();
 
-    // segments sorted into columns of a grid on the table (x, z), each a
-    // little wider than the reach of a contact
-    constexpr double Cell = 2.6;
+    const Quaternion *Q = q_.constData();
+    const double *W = w_.constData();
+    const double *Rest = rest_.constData();
+    const double wq = wq_;
+    const double wp = 1.0 / h_;
 
-    // the hand carries its point towards it, a safe distance per step;
-    // up and down it moves gently, as a hand lifts a rope (about half a
-    // second to the full height), so the rope never jumps
-    constexpr double HandStep = 0.1;
-    constexpr double HandRise = 0.012;
+    std::fill(D, D + 36 * segments, 0.0);
+    std::fill(E, E + 36 * segments, 0.0);
 
-    // gravity, damping, predicted positions
-    const double keep = std::exp(-Damping * dt);
-
-    for (int i = 0; i < n; ++i)
+    const auto skew = [](double *m, int row, int column, const Vec3 &d, double scale)
     {
-        if (i == held_)
+        // m[row + r][column + c] += scale * skew(d)
+        m[row * 6 + column + 1] += -scale * d.z;
+        m[row * 6 + column + 2] += scale * d.y;
+        m[(row + 1) * 6 + column] += scale * d.z;
+        m[(row + 1) * 6 + column + 2] += -scale * d.x;
+        m[(row + 2) * 6 + column] += -scale * d.y;
+        m[(row + 2) * 6 + column + 1] += scale * d.x;
+    };
+
+    const auto diagonal = [](double *m, int at, double value)
+    {
+        m[at * 6 + at] += value;
+        m[(at + 1) * 6 + at + 1] += value;
+        m[(at + 2) * 6 + at + 2] += value;
+    };
+
+    for (int i = 0; i < segments; ++i)
+    {
+        const int next = (i + 1) % n;
+        const int after = (i + 1) % segments;
+
+        const Vec3 d = axisOf(Q[i]);
+        const double l = Rest[i];
+
+        double *block = D + 36 * i;
+
+        // s with s: the two points and the turn of the piece
+        const double points = wp * (W[i] + W[next]) + StretchCompliance;
+        const double turn = wq * l * l;
+
+        diagonal(block, 0, points + turn);
+
+        const double along[3] = {d.x, d.y, d.z};
+
+        for (int r = 0; r < 3; ++r)
         {
-            Vec3 move = hand_ - X[i];
-
-            move.y = std::clamp(move.y, -HandRise, HandRise);
-
-            const double distance = move.length();
-
-            if (distance > HandStep)
-                move *= HandStep / distance;
-
-            P[i] = X[i] + move;
-            continue;
+            for (int c = 0; c < 3; ++c)
+                block[r * 6 + c] -= turn * along[r] * along[c];
         }
 
-        if (W[i] == 0.0)
+        const bool bends = closed_ || i < segments - 1;
+
+        if (bends)
         {
-            P[i] = X[i];
-            continue;
+            // s with b, through the turn of this piece
+            skew(block, 0, 3, d, -wq * l);
+            skew(block, 3, 0, d, wq * l);
+
+            // b with b: the two pieces, and how soft the joint is
+            diagonal(block, 3, 2.0 * wq + bendSoftness_);
+
+            const double softer = twistSoftness_ - bendSoftness_;
+
+            for (int r = 0; r < 3; ++r)
+            {
+                for (int c = 0; c < 3; ++c)
+                    block[(3 + r) * 6 + 3 + c] += softer * along[r] * along[c];
+            }
+
+            // to the next joint
+            const Vec3 e = axisOf(Q[after]);
+            const double m = Rest[after];
+
+            double *link = E + 36 * i;
+
+            diagonal(link, 0, -wp * W[next]);
+
+            skew(link, 3, 0, e, -wq * m);
+
+            if (closed_ || after < segments - 1)
+                diagonal(link, 3, -wq);
         }
-
-        V[i].y -= dt;
-        V[i] *= keep;
-
-        const double speed = V[i].length();
-
-        if (speed * dt > MaxStep)
-            V[i] *= MaxStep / (speed * dt);
-
-        P[i] = X[i] + V[i] * dt;
+        else
+        {
+            // an open rope's last piece has no joint after it
+            diagonal(block, 3, 1.0);
+        }
     }
 
-    for (int pass = 0; pass < Passes; ++pass)
+    // Eliminating along the chain: C(i+1) = D(i+1) - E(i)^T C(i)^-1 E(i)
+    double working[36];
+
+    std::copy(D, D + 36, working);
+
+    for (int i = 0; i < chain; ++i)
     {
-        // the rope does not stretch
-        for (int i = 0; i < segments; ++i)
+        double *C = L + 36 * i;
+
+        std::copy(working, working + 36, C);
+
+        cholesky6(C);
+
+        if (i + 1 >= chain)
+            break;
+
+        const double *link = E + 36 * i;
+        double *f = F + 36 * i;
+
+        // F(i) = C(i)^-1 E(i), column by column
+        for (int c = 0; c < 6; ++c)
         {
-            const int j = (i + 1) % n;
+            double column[6];
 
-            const double weights = W[i] + W[j];
+            for (int r = 0; r < 6; ++r)
+                column[r] = link[r * 6 + c];
 
-            if (weights == 0.0)
-                continue;
+            solve6(C, column);
 
-            const Vec3 d = P[j] - P[i];
-            const double l = d.length();
-
-            if (l < 1.0e-9)
-                continue;
-
-            const Vec3 move = d * ((l - Rest[i]) / l / weights);
-
-            P[i] += move * W[i];
-            P[j] -= move * W[j];
+            for (int r = 0; r < 6; ++r)
+                f[r * 6 + c] = column[r];
         }
+
+        std::copy(D + 36 * (i + 1), D + 36 * (i + 2), working);
+
+        for (int r = 0; r < 6; ++r)
+        {
+            for (int c = 0; c < 6; ++c)
+            {
+                double sum = 0.0;
+
+                for (int k = 0; k < 6; ++k)
+                    sum += link[k * 6 + r] * f[k * 6 + c];
+
+                working[r * 6 + c] -= sum;
+            }
+        }
+    }
+
+    if (!closed_)
+    {
+        rodAge_ = 0;
+        return;
+    }
+
+    /*
+     * The joint that closes the rope couples the last block to the first
+     * and the last of the chain: Z = A^-1 G column by column, and its
+     * Schur complement S = D(last) - G^T Z.
+     */
+    rodZ_.resize(36 * chain);
+    rodS_.resize(36);
+
+    double *Z = rodZ_.data();
+
+    const double *toLast = E + 36 * (chain - 1);
+    const double *wrap = E + 36 * (segments - 1);
+
+    QVector<double> rhs(6 * chain);
+
+    for (int c = 0; c < 6; ++c)
+    {
+        rhs.fill(0.0);
+
+        for (int r = 0; r < 6; ++r)
+        {
+            // G(0) = wrap^T (the first block against the last), G(end) = E
+            rhs[r] = wrap[c * 6 + r];
+            rhs[6 * (chain - 1) + r] += toLast[r * 6 + c];
+        }
+
+        solveChain(rhs.data());
+
+        for (int i = 0; i < chain; ++i)
+        {
+            for (int r = 0; r < 6; ++r)
+                Z[36 * i + r * 6 + c] = rhs[6 * i + r];
+        }
+    }
+
+    double *S = rodS_.data();
+
+    std::copy(D + 36 * chain, D + 36 * (chain + 1), S);
+
+    for (int r = 0; r < 6; ++r)
+    {
+        for (int c = 0; c < 6; ++c)
+        {
+            double sum = 0.0;
+
+            for (int k = 0; k < 6; ++k)
+            {
+                sum += wrap[r * 6 + k] * Z[k * 6 + c];
+                sum += toLast[k * 6 + r] * Z[36 * (chain - 1) + k * 6 + c];
+            }
+
+            S[r * 6 + c] -= sum;
+        }
+    }
+
+    cholesky6(S);
+
+    rodAge_ = 0;
+}
+
+void RopeSimulation::solveChain(double *b) const
+{
+    const int chain = closed_ ? segments_ - 1 : segments_;
+
+    const double *L = rodL_.constData();
+    const double *F = rodF_.constData();
+
+    // forward: y(i+1) = b(i+1) - F(i)^T y(i)
+    for (int i = 0; i + 1 < chain; ++i)
+    {
+        const double *f = F + 36 * i;
+        const double *y = b + 6 * i;
+        double *next = b + 6 * (i + 1);
+
+        for (int r = 0; r < 6; ++r)
+        {
+            double sum = 0.0;
+
+            for (int k = 0; k < 6; ++k)
+                sum += f[k * 6 + r] * y[k];
+
+            next[r] -= sum;
+        }
+    }
+
+    // back: x(i) = C(i)^-1 y(i) - F(i) x(i+1)
+    for (int i = chain - 1; i >= 0; --i)
+    {
+        double *x = b + 6 * i;
+
+        solve6(L + 36 * i, x);
+
+        if (i + 1 >= chain)
+            continue;
+
+        const double *f = F + 36 * i;
+        const double *after = b + 6 * (i + 1);
+
+        for (int r = 0; r < 6; ++r)
+        {
+            double sum = 0.0;
+
+            for (int k = 0; k < 6; ++k)
+                sum += f[r * 6 + k] * after[k];
+
+            x[r] -= sum;
+        }
+    }
+}
+
+void RopeSimulation::solveRod()
+{
+    const int segments = segments_;
+    const int n = x_.size();
+
+    Vec3 *P = p_.data();
+    Quaternion *Q = q_.data();
+    Vec3 *Sum = lambda_.data();
+
+    const double *W = w_.constData();
+    const double *Rest = rest_.constData();
+    const Vec3 *Shape = shape_.constData();
+
+    rodRhs_.resize(6 * segments);
+
+    double *B = rodRhs_.data();
+
+    // what the constraints are off by
+    for (int i = 0; i < segments; ++i)
+    {
+        const int next = (i + 1) % n;
+        const int after = (i + 1) % segments;
+
+        const Vec3 d = axisOf(Q[i]);
+        const Vec3 s = P[next] - P[i] - d * Rest[i];
+
+        double *row = B + 6 * i;
+
+        row[0] = -s.x;
+        row[1] = -s.y;
+        row[2] = -s.z;
+
+        if (!closed_ && i == segments - 1)
+        {
+            row[3] = row[4] = row[5] = 0.0;
+            continue;
+        }
+
+        Quaternion turn = multiply(conjugate(Q[i]), Q[after]);
+
+        if (turn.w < 0.0)
+            turn = Quaternion{-turn.w, -turn.x, -turn.y, -turn.z};
+
+        const Vec3 off = rotated(Q[i], Vec3(2.0 * turn.x, 2.0 * turn.y, 2.0 * turn.z) - Shape[i]);
+
+        // and how far the compliance has given way already in this step
+        const double axial = Vec3::dot(d, Sum[i]);
+        const Vec3 given = Sum[i] * bendSoftness_ + d * ((twistSoftness_ - bendSoftness_) * axial);
+
+        row[3] = -off.x - given.x;
+        row[4] = -off.y - given.y;
+        row[5] = -off.z - given.z;
+    }
+
+    solveChain(B);
+
+    if (closed_)
+    {
+        const int chain = segments - 1;
+
+        const double *E = rodE_.constData();
+        const double *toLast = E + 36 * (chain - 1);
+        const double *wrap = E + 36 * (segments - 1);
+        const double *Z = rodZ_.constData();
+
+        double last[6];
+
+        for (int r = 0; r < 6; ++r)
+        {
+            double sum = 0.0;
+
+            for (int k = 0; k < 6; ++k)
+            {
+                sum += wrap[r * 6 + k] * B[k];
+                sum += toLast[k * 6 + r] * B[6 * (chain - 1) + k];
+            }
+
+            last[r] = B[6 * chain + r] - sum;
+        }
+
+        solve6(rodS_.constData(), last);
+
+        for (int i = 0; i < chain; ++i)
+        {
+            for (int r = 0; r < 6; ++r)
+            {
+                double sum = 0.0;
+
+                for (int k = 0; k < 6; ++k)
+                    sum += Z[36 * i + r * 6 + k] * last[k];
+
+                B[6 * i + r] -= sum;
+            }
+        }
+
+        for (int r = 0; r < 6; ++r)
+            B[6 * chain + r] = last[r];
+    }
+
+    // the corrections, through the masses
+    const double wp = 1.0 / h_;
+    const double wq = wq_;
+
+    for (int i = 0; i < segments; ++i)
+    {
+        const double *row = B + 6 * i;
+
+        const Vec3 stretch(row[0], row[1], row[2]);
+        const Vec3 bend(row[3], row[4], row[5]);
 
         /*
-         * It resists bending: the turning angle theta between the two
-         * pieces at a point, with the gradients
-         *     d theta / d a = n1 / |e1|,  d theta / d b = -n2 / |e2|,
-         *     d theta / d i = -(d theta / d a + d theta / d b),
-         * e1 = i - a, e2 = b - i, n1 and n2 the unit directions at
-         * right angles to them in their plane, towards each other.
+         * The system is the rod straightened out to first order about where
+         * it is now. Far from there (where a contact has just pushed a part
+         * hard) that is no guide: no point or piece takes more of the
+         * correction than first order can be trusted for, and the next pass
+         * goes on from there. The rest of the rope is not held back by it.
+         * What counts is what a point really moves, the difference of the
+         * pulls on its two sides: a hanging rope is under a great tension
+         * that all but cancels at every point.
          */
-        for (int i = closed ? 0 : 1; i < (closed ? n : n - 1); ++i)
         {
-            const int a = (i - 1 + n) % n;
-            const int b = (i + 1) % n;
+            Vec3 pull = stretch;
 
-            if (W[a] + W[b] + W[i] == 0.0)
-                continue;
+            if (closed_ || i > 0)
+            {
+                const double *other = B + 6 * ((i - 1 + segments) % segments);
 
-            const Vec3 e1 = P[i] - P[a];
-            const Vec3 e2 = P[b] - P[i];
+                pull -= Vec3(other[0], other[1], other[2]);
+            }
 
-            const double l1 = e1.length();
-            const double l2 = e2.length();
+            pull *= -wp * W[i];
 
-            if (l1 < 1.0e-9 || l2 < 1.0e-9)
-                continue;
+            const double far = pull.length();
 
-            const Vec3 u1 = e1 / l1;
-            const Vec3 u2 = e2 / l2;
+            if (far > TrustMove)
+                pull *= TrustMove / far;
 
-            const double cosine = std::clamp(Vec3::dot(u1, u2), -1.0, 1.0);
-            const double sine = Vec3::cross(u1, u2).length();
-            const double theta = std::atan2(sine, cosine);
-
-            if (sine < 1.0e-6)
-                continue;
-
-            const Vec3 n1 = (u2 - u1 * cosine) / sine;
-            const Vec3 n2 = (u1 - u2 * cosine) / sine;
-
-            const Vec3 ga = n1 / l1;
-            const Vec3 gb = n2 * (-1.0 / l2);
-            const Vec3 gi = (ga + gb) * -1.0;
-
-            const double ma = W[a] / h;
-            const double mb = W[b] / h;
-            const double mi = W[i] / h;
-
-            const double denominator =
-                ma * ga.lengthSquared() + mb * gb.lengthSquared() + mi * gi.lengthSquared() +
-                compliance_;
-
-            const double dl = -theta / denominator;
-
-            P[a] += ga * (ma * dl);
-            P[b] += gb * (mb * dl);
-            P[i] += gi * (mi * dl);
+            P[i] += pull;
         }
+
+        // the last point of an open rope has the one piece before it
+        if (!closed_ && i == segments - 1)
+        {
+            Vec3 pull = stretch * (wp * W[n - 1]);
+
+            const double far = pull.length();
+
+            if (far > TrustMove)
+                pull *= TrustMove / far;
+
+            P[n - 1] += pull;
+        }
+
+        Sum[i] += bend;
+
+        const Vec3 d = axisOf(Q[i]);
+
+        // -l S(d)^T... on the piece's own turn: l (d x lambda) with the sign
+        // of the stretch term, and the bend terms of its two joints
+        const Vec3 own = Vec3::cross(d, stretch) * (-wq * Rest[i]);
+
+        Vec3 before(0.0, 0.0, 0.0);
+
+        const int previous = (i - 1 + segments) % segments;
+
+        if (closed_ || i > 0)
+        {
+            const double *other = B + 6 * previous;
+
+            before = Vec3(other[3], other[4], other[5]);
+        }
+
+        Vec3 turn = own + (before - bend) * wq;
+
+        const double angle = turn.length();
+
+        if (angle > TrustTurn)
+            turn *= TrustTurn / angle;
+
+        turnBy(Q[i], turn);
     }
+}
 
-    /*
-     * In contacts and on the ground the point in the hand gives way like
-     * any other: the hand carries it, but cannot force it through another
-     * strand or into the table (a strand trapped between the two would
-     * otherwise be squeezed through).
-     */
-    QVector<double> solid = w;
+/*
+ * The contacts: of the rope with itself and with the ground. The pairs of
+ * pieces near each other are found on a grid only when the rope has moved
+ * far enough for a new pair to come into reach.
+ */
+void RopeSimulation::findPairs()
+{
+    const int n = x_.size();
+    const int segments = segments_;
 
-    if (held_ >= 0)
-        solid[held_] = 1.0;
+    const Vec3 *P = p_.constData();
 
-    const double *Solid = solid.constData();
+    // two radii apart, and what they may still move before the next search
+    constexpr double Cell = 3.8;
 
-    /*
-     * Contacts of the rope with itself: two segments far apart along
-     * the rope stay two radii apart (centre lines). The push is shared
-     * by their four points by where the closest points lie (a pinned
-     * point takes none of it); friction takes away the sliding of the
-     * two parts against each other.
-     */
     double minX = 1.0e30;
     double minZ = 1.0e30;
     double maxX = -1.0e30;
     double maxZ = -1.0e30;
 
-    for (const Vec3 &q : p)
+    for (int i = 0; i < n; ++i)
     {
-        minX = std::min(minX, q.x);
-        minZ = std::min(minZ, q.z);
-        maxX = std::max(maxX, q.x);
-        maxZ = std::max(maxZ, q.z);
+        minX = std::min(minX, P[i].x);
+        minZ = std::min(minZ, P[i].z);
+        maxX = std::max(maxX, P[i].x);
+        maxZ = std::max(maxZ, P[i].z);
     }
 
     const int columns = std::max(1, static_cast<int>((maxX - minX) / Cell) + 1);
@@ -570,6 +1228,72 @@ void RopeSimulation::step()
         for (int i = 0; i < segments; ++i)
             order[fill[cellOf.at(i)]++] = i;
     }
+
+    pairs_.clear();
+
+    for (int i = 0; i < segments; ++i)
+    {
+        const int cx = cellOf.at(i) % columns;
+        const int cz = cellOf.at(i) / columns;
+
+        for (int dz = -1; dz <= 1; ++dz)
+        {
+            for (int dx = -1; dx <= 1; ++dx)
+            {
+                const int ox = cx + dx;
+                const int oz = cz + dz;
+
+                if (ox < 0 || oz < 0 || ox >= columns || oz >= rows)
+                    continue;
+
+                const int cell = oz * columns + ox;
+
+                for (int k = cellStart.at(cell); k < cellStart.at(cell + 1); ++k)
+                {
+                    const int j = order.at(k);
+
+                    if (j <= i || arcGap(i, j, n, closed_) <= neighbours_)
+                        continue;
+
+                    const Vec3 gap =
+                        (P[i] + P[(i + 1) % n] - P[j] - P[(j + 1) % n]) * 0.5;
+
+                    const double reach = 2.0 + PairMargin + h_;
+
+                    if (gap.lengthSquared() < reach * reach)
+                    {
+                        pairs_.push_back(i);
+                        pairs_.push_back(j);
+                    }
+                }
+            }
+        }
+    }
+
+    travelled_ = 0.0;
+}
+
+void RopeSimulation::solveContacts()
+{
+    const int n = x_.size();
+    const bool closed = closed_;
+    const double h = h_;
+
+    Vec3 *X = x_.data();
+    Vec3 *P = p_.data();
+
+    /*
+     * In contacts and on the ground the point in the hand gives way like
+     * any other: the hand carries it, but cannot force it through another
+     * strand or into the table (a strand trapped between the two would
+     * otherwise be squeezed through).
+     */
+    QVector<double> solid = w_;
+
+    if (held_ >= 0)
+        solid[held_] = 1.0;
+
+    const double *Solid = solid.constData();
 
     // a segment next to the hand, when it pushes the rope's end under
     auto nearHand = [this, n, closed](int segment)
@@ -631,145 +1355,122 @@ void RopeSimulation::step()
         }
     }
 
-    for (int i = 0; i < segments; ++i)
+    const int *pairs = pairs_.constData();
+    const int pairCount = pairs_.size() / 2;
+
+    for (int pair = 0; pair < pairCount; ++pair)
     {
-        const int cx = cellOf.at(i) % columns;
-        const int cz = cellOf.at(i) / columns;
+        const int i = pairs[2 * pair];
+        const int j = pairs[2 * pair + 1];
 
-        for (int dz = -1; dz <= 1; ++dz)
+        const int i1 = (i + 1) % n;
+        const int j1 = (j + 1) % n;
+
+        // two pinned parts never move
+        if (Solid[i] + Solid[i1] + Solid[j] + Solid[j1] == 0.0)
+            continue;
+
+        // far apart for sure (their middles, less the pieces' own half
+        // lengths, beyond the two radii of a contact)
         {
-            for (int dx = -1; dx <= 1; ++dx)
+            const Vec3 gap = (P[i] + P[i1] - P[j] - P[j1]) * 0.5;
+            const double reach =
+                2.0 + 0.5 * ((P[i1] - P[i]).length() + (P[j1] - P[j]).length());
+
+            if (gap.lengthSquared() > reach * reach)
+                continue;
+        }
+
+        double s = 0.0;
+        double t = 0.0;
+
+        closestPoints(P[i], P[i1], P[j], P[j1], s, t);
+
+        const Vec3 pa = P[i] * (1.0 - s) + P[i1] * s;
+        const Vec3 pb = P[j] * (1.0 - t) + P[j1] * t;
+
+        const Vec3 d = pa - pb;
+        const double distance = d.length();
+
+        if (distance >= 2.0)
+            continue;
+
+        Vec3 normal = distance > 1.0e-9 ? d / distance : Vec3(0.0, 1.0, 0.0);
+
+        double depth = 2.0 - distance;
+
+        /*
+         * The hand pushes its part under another: that one is lifted
+         * straight up over it (by as much as the two need to be apart, at
+         * their distance across). Only a part beside it or above it, and
+         * none near a part lying under it (pinnedDown): those would have to
+         * go through it, so their contacts are ordinary ones.
+         */
+        const bool handA = nearHand(i);
+        const bool handB = nearHand(j);
+
+        if (handA != handB)
+        {
+            const Vec3 up(0.0, handA ? -1.0 : 1.0, 0.0);
+
+            // how far the other part is above the hand's part
+            const double rise = Vec3::dot(d, up);
+            const double across2 = std::max(d.lengthSquared() - rise * rise, 0.0);
+
+            const int other = handA ? j : i;
+            const int otherEnd = handA ? j1 : i1;
+
+            if (rise >= -0.3 && !pinnedDown.at(other) && !pinnedDown.at(otherEnd))
             {
-                const int ox = cx + dx;
-                const int oz = cz + dz;
+                normal = up;
+                depth = std::sqrt(std::max(4.0 - across2, 0.0)) - rise;
 
-                if (ox < 0 || oz < 0 || ox >= columns || oz >= rows)
+                if (depth <= 0.0)
                     continue;
-
-                const int cell = oz * columns + ox;
-
-                for (int k = cellStart.at(cell); k < cellStart.at(cell + 1); ++k)
-                {
-                    const int j = order.at(k);
-
-                    if (j <= i || arcGap(i, j, n, closed) <= neighbours_)
-                        continue;
-
-                    const int i1 = (i + 1) % n;
-                    const int j1 = (j + 1) % n;
-
-                    // two pinned parts never move
-                    if (Solid[i] + Solid[i1] + Solid[j] + Solid[j1] == 0.0)
-                        continue;
-
-                    // far apart for sure (their middles, less the pieces'
-                    // own half lengths, beyond the two radii of a contact)
-                    {
-                        const Vec3 gap = (P[i] + P[i1] - P[j] - P[j1]) * 0.5;
-                        const double reach =
-                            2.0 + 0.5 * ((P[i1] - P[i]).length() + (P[j1] - P[j]).length());
-
-                        if (gap.lengthSquared() > reach * reach)
-                            continue;
-                    }
-
-                    double s = 0.0;
-                    double t = 0.0;
-
-                    closestPoints(P[i], P[i1], P[j], P[j1], s, t);
-
-                    const Vec3 pa = P[i] * (1.0 - s) + P[i1] * s;
-                    const Vec3 pb = P[j] * (1.0 - t) + P[j1] * t;
-
-                    const Vec3 d = pa - pb;
-                    const double distance = d.length();
-
-                    if (distance >= 2.0)
-                        continue;
-
-                    Vec3 normal =
-                        distance > 1.0e-9 ? d / distance : Vec3(0.0, 1.0, 0.0);
-
-                    double depth = 2.0 - distance;
-
-                    /*
-                     * The hand pushes its part under another: that one is
-                     * lifted straight up over it (by as much as the two
-                     * need to be apart, at their distance across). Only
-                     * a part beside it or above it, and none near a part
-                     * lying under it (pinnedDown): those would have to go
-                     * through it, so their contacts are ordinary ones.
-                     */
-                    const bool handA = nearHand(i);
-                    const bool handB = nearHand(j);
-
-                    if (handA != handB)
-                    {
-                        const Vec3 up(0.0, handA ? -1.0 : 1.0, 0.0);
-
-                        // how far the other part is above the hand's part
-                        const double rise = Vec3::dot(d, up);
-                        const double across2 = std::max(d.lengthSquared() - rise * rise, 0.0);
-
-                        const int other = handA ? j : i;
-                        const int otherEnd = handA ? j1 : i1;
-
-                        if (rise >= -0.3 && !pinnedDown.at(other) && !pinnedDown.at(otherEnd))
-                        {
-                            normal = up;
-                            depth = std::sqrt(std::max(4.0 - across2, 0.0)) - rise;
-
-                            if (depth <= 0.0)
-                                continue;
-                        }
-                    }
-
-                    const double wa0 = 1.0 - s;
-                    const double wa1 = s;
-                    const double wb0 = 1.0 - t;
-                    const double wb1 = t;
-
-                    const double share =
-                        Solid[i] * wa0 * wa0 + Solid[i1] * wa1 * wa1 +
-                        Solid[j] * wb0 * wb0 + Solid[j1] * wb1 * wb1;
-
-                    if (share < 1.0e-12)
-                        continue;
-
-                    const Vec3 push = normal * (depth / share);
-
-                    P[i] += push * (wa0 * Solid[i]);
-                    P[i1] += push * (wa1 * Solid[i1]);
-                    P[j] -= push * (wb0 * Solid[j]);
-                    P[j1] -= push * (wb1 * Solid[j1]);
-
-                    // sliding of the two parts against each other in this step
-                    const Vec3 moveA =
-                        (P[i] - X[i]) * wa0 + (P[i1] - X[i1]) * wa1;
-                    const Vec3 moveB =
-                        (P[j] - X[j]) * wb0 + (P[j1] - X[j1]) * wb1;
-
-                    Vec3 slide = moveA - moveB;
-                    slide -= normal * Vec3::dot(slide, normal);
-
-                    const double amount = slide.length();
-
-                    if (amount < 1.0e-12)
-                        continue;
-
-                    // static friction holds, kinetic friction slows
-                    const double stop =
-                        amount < muSelf_ * depth ? 1.0 : std::min(muSelf_ * depth / amount, 1.0);
-
-                    const Vec3 hold = slide * (stop / share);
-
-                    P[i] -= hold * (wa0 * Solid[i]);
-                    P[i1] -= hold * (wa1 * Solid[i1]);
-                    P[j] += hold * (wb0 * Solid[j]);
-                    P[j1] += hold * (wb1 * Solid[j1]);
-                }
             }
         }
+
+        const double wa0 = 1.0 - s;
+        const double wa1 = s;
+        const double wb0 = 1.0 - t;
+        const double wb1 = t;
+
+        const double share =
+            Solid[i] * wa0 * wa0 + Solid[i1] * wa1 * wa1 +
+            Solid[j] * wb0 * wb0 + Solid[j1] * wb1 * wb1;
+
+        if (share < 1.0e-12)
+            continue;
+
+        const Vec3 push = normal * (depth / share);
+
+        P[i] += push * (wa0 * Solid[i]);
+        P[i1] += push * (wa1 * Solid[i1]);
+        P[j] -= push * (wb0 * Solid[j]);
+        P[j1] -= push * (wb1 * Solid[j1]);
+
+        // sliding of the two parts against each other in this step
+        const Vec3 moveA = (P[i] - X[i]) * wa0 + (P[i1] - X[i1]) * wa1;
+        const Vec3 moveB = (P[j] - X[j]) * wb0 + (P[j1] - X[j1]) * wb1;
+
+        Vec3 slide = moveA - moveB;
+        slide -= normal * Vec3::dot(slide, normal);
+
+        const double amount = slide.length();
+
+        if (amount < 1.0e-12)
+            continue;
+
+        // static friction holds, kinetic friction slows
+        const double stop =
+            amount < muSelf_ * depth ? 1.0 : std::min(muSelf_ * depth / amount, 1.0);
+
+        const Vec3 hold = slide * (stop / share);
+
+        P[i] -= hold * (wa0 * Solid[i]);
+        P[i1] -= hold * (wa1 * Solid[i1]);
+        P[j] += hold * (wb0 * Solid[j]);
+        P[j1] += hold * (wb1 * Solid[j1]);
     }
 
     /*
@@ -795,15 +1496,120 @@ void RopeSimulation::step()
 
         P[i] += normal * depth;
 
+        // Friction may take away only what the pressure on the ground in
+        // this step allows, over all the passes together.
+        groundDepth_[i] += muSurface_ * depth;
+
         Vec3 slide = P[i] - X[i];
         slide -= normal * Vec3::dot(slide, normal);
 
         const double amount = slide.length();
 
-        if (amount < muSurface_ * depth)
-            P[i] -= slide;
-        else if (amount > 1.0e-12)
-            P[i] -= slide * std::min(muSurface_ * depth / amount, 1.0);
+        if (amount < 1.0e-12)
+            continue;
+
+        const double take = std::min(amount, groundDepth_[i]);
+
+        groundDepth_[i] -= take;
+
+        P[i] -= slide * (take / amount);
+    }
+}
+
+void RopeSimulation::step()
+{
+    if (!valid_)
+        return;
+
+    const int n = x_.size();
+    const int segments = segments_;
+    const double dt = TimeStep;
+
+    Vec3 *X = x_.data();
+    Vec3 *V = v_.data();
+    Vec3 *P = p_.data();
+    Quaternion *Q = q_.data();
+    Quaternion *Old = qOld_.data();
+    Vec3 *Spin = spin_.data();
+    const double *W = w_.constData();
+
+    // the hand carries its point towards it, a safe distance per step;
+    // up and down it moves gently, as a hand lifts a rope (about half a
+    // second to the full height), so the rope never jumps
+    constexpr double HandStep = 0.2;
+    constexpr double HandRise = 0.024;
+
+    // no piece turns further than this in a step
+    constexpr double MaxTurn = 0.3;
+
+    for (int i = 0; i < n; ++i)
+    {
+        if (i == held_)
+        {
+            Vec3 move = hand_ - X[i];
+
+            move.y = std::clamp(move.y, -HandRise, HandRise);
+
+            const double distance = move.length();
+
+            if (distance > HandStep)
+                move *= HandStep / distance;
+
+            P[i] = X[i] + move;
+            continue;
+        }
+
+        if (W[i] == 0.0)
+        {
+            P[i] = X[i];
+            continue;
+        }
+
+        // Falling is free: the only thing that slows the rope in the air is
+        // the air, and for a rope that is too little to see. What takes the
+        // energy out is inside the rope and in its contacts.
+        V[i].y -= dt;
+
+        const double speed = V[i].length();
+
+        if (speed * dt > MaxStep)
+            V[i] *= MaxStep / (speed * dt);
+
+        P[i] = X[i] + V[i] * dt;
+    }
+
+    for (int i = 0; i < segments; ++i)
+    {
+        Old[i] = Q[i];
+
+        Vec3 turn = Spin[i] * dt;
+
+        const double angle = turn.length();
+
+        if (angle > MaxTurn)
+            turn *= MaxTurn / angle;
+
+        turnBy(Q[i], turn);
+    }
+
+    if (rodAge_ < 0 || ++rodAge_ >= RodFactorSteps)
+        factorRod();
+
+    std::fill(lambda_.begin(), lambda_.end(), Vec3(0.0, 0.0, 0.0));
+    std::fill(groundDepth_.begin(), groundDepth_.end(), 0.0);
+
+    if (travelled_ > PairMargin || pairs_.isEmpty())
+        findPairs();
+
+    /*
+     * The rod and the contacts in turn. They ask for different things; the
+     * last word is the contacts', so that no strand ever passes through
+     * another.
+     */
+    for (int pass = 0; pass < Passes; ++pass)
+    {
+        solveRod();
+        solveContacts();
     }
 
     // velocities from the motion
@@ -818,8 +1624,102 @@ void RopeSimulation::step()
             fastest_ = std::max(fastest_, V[i].length());
     }
 
-    // (a rope in the hand is never at rest)
-    quiet_ = fastest_ < RestSpeed && held_ < 0 ? quiet_ + 1 : 0;
+    for (int i = 0; i < segments; ++i)
+    {
+        Quaternion change = multiply(Q[i], conjugate(Old[i]));
+
+        if (change.w < 0.0)
+            change = Quaternion{-change.w, -change.x, -change.y, -change.z};
+
+        Spin[i] = Vec3(change.x, change.y, change.z) * (2.0 / dt);
+    }
+
+    /*
+     * The rope's own damping: the fibres rub against each other as it
+     * bends, so motion of one part against the next dies away (a smoothing
+     * of the velocities along the rope). The rope as a whole keeps moving:
+     * this cannot slow a fall.
+     */
+    for (int sweep = 0; sweep < DampingSweeps; ++sweep)
+    {
+        smoothed_ = v_;
+
+        for (int i = closed_ ? 0 : 1; i < (closed_ ? n : n - 1); ++i)
+        {
+            if (W[i] == 0.0)
+                continue;
+
+            const int a = (i - 1 + n) % n;
+            const int b = (i + 1) % n;
+
+            V[i] = smoothed_.at(i) + (smoothed_.at(a) + smoothed_.at(b) - smoothed_.at(i) * 2.0) * Fibres;
+        }
+
+        smoothed_ = spin_;
+
+        for (int i = closed_ ? 0 : 1; i < (closed_ ? segments : segments - 1); ++i)
+        {
+            const int a = (i - 1 + segments) % segments;
+            const int b = (i + 1) % segments;
+
+            Spin[i] = smoothed_.at(i) + (smoothed_.at(a) + smoothed_.at(b) - smoothed_.at(i) * 2.0) * Fibres;
+        }
+    }
+
+    /*
+     * Natural fibre takes a set: bent further than its yield, the rope
+     * creeps towards the new shape and keeps part of it when let go. The
+     * rest shape follows the bending (not the twist), in the frame of the
+     * piece, so it travels with the rope.
+     */
+    if (setRate_ > 0.0)
+    {
+        Vec3 *Shape = shape_.data();
+
+        for (int i = 0; i < (closed_ ? segments : segments - 1); ++i)
+        {
+            const int after = (i + 1) % segments;
+
+            Quaternion turn = multiply(conjugate(Q[i]), Q[after]);
+
+            if (turn.w < 0.0)
+                turn = Quaternion{-turn.w, -turn.x, -turn.y, -turn.z};
+
+            const double bx = 2.0 * turn.x - Shape[i].x;
+            const double by = 2.0 * turn.y - Shape[i].y;
+
+            const double amount = std::sqrt(bx * bx + by * by);
+
+            if (amount <= yieldAngle_)
+                continue;
+
+            const double creep = setRate_ * dt * (amount - yieldAngle_) / amount;
+
+            Shape[i].x += bx * creep;
+            Shape[i].y += by * creep;
+        }
+    }
+
+    travelled_ += 2.0 * fastest_ * dt;
+
+    if (++windowSteps_ >= RestWindow)
+    {
+        double furthest = 0.0;
+
+        for (int i = 0; i < n; ++i)
+        {
+            if (W[i] != 0.0)
+                furthest = std::max(furthest, (X[i] - windowStart_.at(i)).lengthSquared());
+        }
+
+        windowStart_ = x_;
+        windowSteps_ = 0;
+
+        drift_ = std::sqrt(furthest) / (RestWindow * dt);
+
+        // (a rope in the hand is never at rest)
+        quiet_ = drift_ < RestSpeed && held_ < 0 ? quiet_ + RestWindow : 0;
+    }
 }
 
 RopeInHand::RopeInHand(const RopeSimulation &rope)
@@ -840,12 +1740,15 @@ RopeInHand::~RopeInHand()
     thread_.join();
 }
 
-QVector<Vec3> RopeInHand::points(quint64 *version) const
+QVector<Vec3> RopeInHand::points(quint64 *version, QVector<Vec3> *frames) const
 {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     if (version != nullptr)
         *version = version_;
+
+    if (frames != nullptr)
+        *frames = rope_.frames();
 
     return rope_.points();
 }
@@ -1510,7 +2413,8 @@ KnotMath::Mesh buildRopeMesh(
     bool closed,
     double radius,
     const RopeMaterial &material,
-    bool quick)
+    bool quick,
+    const QVector<Vec3> &frames)
 {
     const bool braided = material.construction == 2;
 
@@ -1574,6 +2478,52 @@ KnotMath::Mesh buildRopeMesh(
 
     const double phaseScale = 2.0 * Pi * turns / std::max(total, 1.0e-9);
 
+    /*
+     * Where the material has turned to, along the rope: the given directions
+     * by the fraction of the length, for every ring.
+     */
+    QVector<Vec3> ringFrames;
+
+    if (frames.size() == curve.size() && curve.size() >= 4)
+    {
+        QVector<double> arc(curve.size(), 0.0);
+
+        for (int i = 1; i < curve.size(); ++i)
+            arc[i] = arc.at(i - 1) + (curve.at(i) - curve.at(i - 1)).length();
+
+        const double whole =
+            closed ? arc.last() + (curve.first() - curve.last()).length() : arc.last();
+
+        ringFrames.resize(n);
+
+        int at = 0;
+
+        for (int i = 0; i < n; ++i)
+        {
+            const double s = whole * mesh.centerlineArc.at(i) / std::max(double(total), 1.0e-9);
+
+            while (at + 1 < curve.size() && arc.at(at + 1) <= s)
+                ++at;
+
+            const int next = closed ? (at + 1) % curve.size() : std::min(at + 1, int(curve.size()) - 1);
+            const double end = at + 1 < curve.size() ? arc.at(at + 1) : whole;
+            const double f = std::clamp((s - arc.at(at)) / std::max(end - arc.at(at), 1.0e-12), 0.0, 1.0);
+
+            ringFrames[i] = frames.at(at) * (1.0 - f) + frames.at(next) * f;
+        }
+    }
+
+    /*
+     * No rope is even. Its strands are a little thicker and thinner along
+     * their length and the lay tightens and slackens, each strand on its
+     * own: waves of whole numbers along a closed rope, so that it still
+     * closes up.
+     */
+    const auto wave = [phaseScale, turns](double s, double perTurn, double offset)
+    {
+        return std::sin(std::round(turns * perTurn) / turns * s * phaseScale + offset);
+    };
+
     QVector<float> openness(ringVertices, 1.0f);
 
     mesh.occlusion.resize(mesh.positions.size() / 3);
@@ -1598,7 +2548,21 @@ KnotMath::Mesh buildRopeMesh(
             const Vec3 centre(centerline[4 * i], centerline[4 * i + 1], centerline[4 * i + 2]);
 
             const double s = arcs[i];
-            const double phase = s * phaseScale;
+
+            double phase = s * phaseScale + 0.09 * wave(s, 0.37, 0.4) + 0.05 * wave(s, 1.13, 2.2);
+
+            // how far the material has turned here
+            if (!ringFrames.isEmpty())
+            {
+                const Vec3 first(normals[3 * i * segments], normals[3 * i * segments + 1],
+                                 normals[3 * i * segments + 2]);
+
+                const int quarter = i * segments + segments / 4;
+
+                const Vec3 second(normals[3 * quarter], normals[3 * quarter + 1], normals[3 * quarter + 2]);
+
+                phase += std::atan2(Vec3::dot(ringFrames.at(i), second), Vec3::dot(ringFrames.at(i), first));
+            }
 
             for (int j = 0; j < segments; ++j)
             {
@@ -1626,10 +2590,13 @@ KnotMath::Mesh buildRopeMesh(
                     const int k = static_cast<int>(x / (2.0 * Pi) * StrandSamples + 0.5) % StrandSamples;
                     const StrandSample &sample = strands[k];
 
-                    rho = sample.rho;
                     across = sample.across;
                     which = sample.which;
                     groove = sample.groove;
+
+                    // this strand, thicker or thinner here
+                    rho = sample.rho * (1.0 + 0.016 * wave(s, 0.31, 1.7 + 2.1 * which) +
+                                        0.009 * wave(s, 0.83, 4.1 * which));
 
                     open[index] = sample.open;
                 }

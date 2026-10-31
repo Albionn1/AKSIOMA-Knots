@@ -11,7 +11,7 @@ target_include_directories(photo_render PRIVATE ${SRC})
 target_compile_options(photo_render PRIVATE -O2 -Wall -Wextra)
 qt_add_resources(photo_render "knottable" PREFIX "/" BIG_RESOURCES BASE ${SRC} FILES ${SRC}/data/knottable.dat)
 qt_add_resources(photo_render "photo" PREFIX "/" BIG_RESOURCES BASE ${SRC} FILES
-    ${SRC}/data/photo/aft_lounge_4k.hdr ${SRC}/data/photo/country_club_4k.hdr
+    ${SRC}/data/photo/chinese_garden_4k.hdr ${SRC}/data/photo/meadow_2_4k.hdr
     ${SRC}/data/photo/wood_table_large_diff.jpg ${SRC}/data/photo/wood_table_large_nor_gl.jpg
     ${SRC}/data/photo/wood_table_large_rough.jpg ${SRC}/data/photo/wood_floor_worn_diff.jpg
     ${SRC}/data/photo/wood_floor_worn_nor_gl.jpg ${SRC}/data/photo/wood_floor_worn_rough.jpg

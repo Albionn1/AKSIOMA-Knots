@@ -878,7 +878,9 @@ TiedLace tieOnSneaker(
         return shoe.heightAt(px * r, pz * r, &slopeX, &slopeZ) / r;
     };
 
-    const Settling settling = settleRope(x, pinned, true, material, ground);
+    QVector<Vec3> frames;
+
+    const Settling settling = settleRope(x, pinned, true, material, ground, &frames);
 
     tied.pinned = pinned;
 
@@ -894,6 +896,9 @@ TiedLace tieOnSneaker(
 
     for (const Vec3 &p : x)
         result.points.push_back(v3(back.map(q(p * (r / scale)))));
+
+    for (const Vec3 &f : frames)
+        result.frames.push_back(v3(back.mapVector(q(f))));
 
     result.valid = true;
 

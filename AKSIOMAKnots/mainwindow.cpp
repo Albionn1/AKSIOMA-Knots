@@ -326,17 +326,17 @@ MainWindow::MainWindow(
 
     photoButton_->setToolTip(
         tr("Show the knot as a real rope: it falls onto a table under its "
-           "own weight and comes to rest, in a sunlit room photographed "
+           "own weight and comes to rest, in a sunny place photographed "
            "with its real light."));
 
     photoSceneCombo_ = new QComboBox(viewBar);
 
     photoSceneCombo_->addItem(
-        tr("Hemp rope on a table, low sun"),
+        tr("Hemp rope on a garden table, in the sun"),
         static_cast<int>(Photo::Scene::LoungeTable));
 
     photoSceneCombo_->addItem(
-        tr("Shoelace on a sunlit floor"),
+        tr("Shoelace on boards in a meadow, in the sun"),
         static_cast<int>(Photo::Scene::BallroomFloor));
 
     photoSceneCombo_->addItem(
@@ -3744,7 +3744,9 @@ bool MainWindow::showRestingRope(double radius)
             restingRope_.points,
             currentData_.closed,
             radius,
-            material);
+            material,
+            false,
+            restingRope_.frames);
 
     if (!mesh.isValid())
         return false;
@@ -3899,6 +3901,20 @@ void MainWindow::layRestingRope(double radius)
 
             // the rope lying still, drawn where the knot was
             rebuildMesh();
+
+            /*
+             * The camera was framed while the rope was still being laid
+             * down, for what was there then. Now it can see the rope, and
+             * in the sneaker's scene the shoe around it, to their scale.
+             */
+            const QString framing = QStringLiteral("%1 %2").arg(static_cast<int>(scene)).arg(framedKnot_);
+
+            if (framing != restingFramed_)
+            {
+                restingFramed_ = framing;
+
+                resetCamera();
+            }
         });
 
     worker->start();
@@ -3924,6 +3940,8 @@ void MainWindow::applyPhotoMode()
 
     // (a rope still being laid down says so until it lies still)
     glWidget_->setCaption(QString(), QString());
+
+    restingFramed_.clear();
 
     const auto scene =
         static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
@@ -7019,7 +7037,23 @@ bool MainWindow::startPhotoRope()
 
     const Photo::RopeMaterial material = Photo::sceneInfo(scene).rope;
 
-    const Photo::RopeSimulation rope(points, {}, currentData_.closed, material);
+    Photo::RopeSimulation rope(points, {}, currentData_.closed, material);
+
+    // the same rope: its strands where they lay, the bends it lay in
+    {
+        QVector<KnotMath::Vec3> frames;
+
+        for (const KnotMath::Vec3 &f : restingRope_.frames)
+        {
+            const QVector3D q = restingRope_.pose.mapVector(
+                QVector3D(static_cast<float>(f.x), static_cast<float>(f.y), static_cast<float>(f.z)));
+
+            frames.push_back(KnotMath::Vec3(q.x(), q.y(), q.z()));
+        }
+
+        rope.useFrames(frames);
+        rope.takeSet(material.tiedSet);
+    }
 
     if (!rope.isValid())
         return false;
@@ -7089,6 +7123,25 @@ bool MainWindow::showKeptPhotoRope(double radius)
     showPhotoRope(photoRopeTimer_->isActive());
 
     return true;
+}
+
+QVector<KnotMath::Vec3> MainWindow::photoRopeFrames(const QVector<KnotMath::Vec3> &table) const
+{
+    const QMatrix4x4 back = photoRopePose_.inverted();
+
+    QVector<KnotMath::Vec3> frames;
+
+    frames.reserve(table.size());
+
+    for (const KnotMath::Vec3 &f : table)
+    {
+        const QVector3D q = back.mapVector(
+            QVector3D(static_cast<float>(f.x), static_cast<float>(f.y), static_cast<float>(f.z)));
+
+        frames.push_back(KnotMath::Vec3(q.x(), q.y(), q.z()));
+    }
+
+    return frames;
 }
 
 QVector<KnotMath::Vec3> MainWindow::photoRopeCurve(
@@ -7163,10 +7216,15 @@ void MainWindow::showPhotoRope(bool quick)
     finishPhotoRopeJob();
 
     const bool closed = photoRope_->closed();
-    const QVector<KnotMath::Vec3> curve = photoRopeCurve(photoRope_->points(&photoRopeShown_), closed, false);
+
+    QVector<KnotMath::Vec3> tableFrames;
+
+    const QVector<KnotMath::Vec3> curve =
+        photoRopeCurve(photoRope_->points(&photoRopeShown_, &tableFrames), closed, false);
 
     KnotMath::Mesh mesh =
-        Photo::buildRopeMesh(curve, closed, photoRopeRadius_, photoRopeMaterial_, quick);
+        Photo::buildRopeMesh(curve, closed, photoRopeRadius_, photoRopeMaterial_, quick,
+                             photoRopeFrames(tableFrames));
 
     if (!mesh.isValid())
         return;
@@ -7224,7 +7282,9 @@ void MainWindow::photoRopeTick()
 
     quint64 version = 0;
 
-    const QVector<KnotMath::Vec3> points = photoRope_->points(&version);
+    QVector<KnotMath::Vec3> tableFrames;
+
+    const QVector<KnotMath::Vec3> points = photoRope_->points(&version, &tableFrames);
 
     if (!held && photoRope_->resting())
     {
@@ -7252,18 +7312,19 @@ void MainWindow::photoRopeTick()
      */
     const bool closed = photoRope_->closed();
     const QVector<KnotMath::Vec3> curve = photoRopeCurve(points, closed, false);
+    const QVector<KnotMath::Vec3> ropeFrames = photoRopeFrames(tableFrames);
     const double radius = photoRopeRadius_;
     const Photo::RopeMaterial material = photoRopeMaterial_;
 
     photoRopeJob_ = std::async(
         std::launch::async,
-        [curve, closed, radius, material]()
+        [curve, ropeFrames, closed, radius, material]()
         {
             PhotoRopeFrame frame;
 
             frame.curve = curve;
             frame.closed = closed;
-            frame.mesh = Photo::buildRopeMesh(curve, closed, radius, material, true);
+            frame.mesh = Photo::buildRopeMesh(curve, closed, radius, material, true, ropeFrames);
 
             return frame;
         });

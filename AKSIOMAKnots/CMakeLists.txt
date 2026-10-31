@@ -99,8 +99,8 @@ qt_add_resources(AKSIOMAKnots "photo"
     PREFIX "/"
     BIG_RESOURCES
     FILES
-        data/photo/aft_lounge_4k.hdr
-        data/photo/country_club_4k.hdr
+        data/photo/chinese_garden_4k.hdr
+        data/photo/meadow_2_4k.hdr
         data/photo/wood_table_large_diff.jpg
         data/photo/wood_table_large_nor_gl.jpg
         data/photo/wood_table_large_rough.jpg

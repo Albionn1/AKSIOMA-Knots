@@ -681,10 +681,12 @@ SceneInfo sceneInfo(Scene scene)
     switch (scene)
     {
     case Scene::Sneaker:
-        // the ballroom's floor, a navy canvas sneaker on it
-        info.environment = QStringLiteral(":/data/photo/country_club_4k.hdr");
+        // boards in a sunny meadow, a navy canvas sneaker on them
+        info.environment = QStringLiteral(":/data/photo/meadow_2_4k.hdr");
         info.cameraHeightM = 1.6;
-        info.roomRadiusM = 9.0;
+        info.roomRadiusM = 12.0;
+        info.exposure = 2.6f;
+        info.calmStage = 0.1f;
 
         info.surfaceColor = QStringLiteral(":/data/photo/wood_floor_worn_diff.jpg");
         info.surfaceNormal = QStringLiteral(":/data/photo/wood_floor_worn_nor_gl.jpg");
@@ -696,6 +698,11 @@ SceneInfo sceneInfo(Scene scene)
         info.rope.construction = 2;
         info.rope.diameterMm = 4.5;
         info.rope.bendingLengthMm = 20.0;
+        info.rope.tiedSet = 0.3;
+        info.rope.twistStiffness = 0.5;
+        info.rope.setRadiusMm = 14.0;
+        info.rope.setRate = 0.3;
+        info.rope.curlRadiusMm = 70.0;
         info.rope.frictionSurface = 0.6;
         info.rope.frictionSelf = 0.5;
         info.rope.color = QColor(240, 238, 232);
@@ -708,9 +715,11 @@ SceneInfo sceneInfo(Scene scene)
     case Scene::BallroomFloor:
         // a Victorian ballroom in the morning sun: tall windows, a worn
         // board floor
-        info.environment = QStringLiteral(":/data/photo/country_club_4k.hdr");
+        info.environment = QStringLiteral(":/data/photo/meadow_2_4k.hdr");
         info.cameraHeightM = 1.6;
-        info.roomRadiusM = 9.0;
+        info.roomRadiusM = 12.0;
+        info.exposure = 2.6f;
+        info.calmStage = 0.1f;
 
         info.surfaceColor = QStringLiteral(":/data/photo/wood_floor_worn_diff.jpg");
         info.surfaceNormal = QStringLiteral(":/data/photo/wood_floor_worn_nor_gl.jpg");
@@ -722,6 +731,11 @@ SceneInfo sceneInfo(Scene scene)
         info.rope.construction = 2;
         info.rope.diameterMm = 5.0;
         info.rope.bendingLengthMm = 20.0;
+        info.rope.tiedSet = 0.3;
+        info.rope.twistStiffness = 0.5;
+        info.rope.setRadiusMm = 14.0;
+        info.rope.setRate = 0.3;
+        info.rope.curlRadiusMm = 70.0;
         info.rope.frictionSurface = 0.4;
         info.rope.frictionSelf = 0.5;
         info.rope.color = QColor(236, 232, 224);
@@ -732,9 +746,11 @@ SceneInfo sceneInfo(Scene scene)
     case Scene::Count:
     default:
         // a ship's lounge at sunrise: the low sun through the windows
-        info.environment = QStringLiteral(":/data/photo/aft_lounge_4k.hdr");
+        info.environment = QStringLiteral(":/data/photo/chinese_garden_4k.hdr");
         info.cameraHeightM = 1.6;
-        info.roomRadiusM = 12.0;
+        info.roomRadiusM = 16.0;
+        info.exposure = 3.0f;
+        info.calmStage = 0.1f;
 
         // an old plank table, 1.8 m x 0.9 m
         info.surfaceColor = QStringLiteral(":/data/photo/wood_table_large_diff.jpg");

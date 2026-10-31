@@ -21,6 +21,15 @@
 namespace Photo
 {
 
+// a turn (the frame of a piece of rope)
+struct Quaternion
+{
+    double w = 1.0;
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+};
+
 struct RestingRope
 {
     bool valid = false;
@@ -29,6 +38,10 @@ struct RestingRope
     // The centre line at rest, in the knot's own coordinates (the same
     // units, the same number of points for every call with this curve).
     QVector<KnotMath::Vec3> points;
+
+    // at every point, a direction across the rope fixed in its fibres (see
+    // RopeSimulation::frames), in the same coordinates
+    QVector<KnotMath::Vec3> frames;
 
     // The knot's coordinates -> the table: y up, the table top at y = 0.
     QMatrix4x4 pose;
@@ -88,7 +101,8 @@ Settling settleRope(
     const QVector<bool> &pinned,
     bool closed,
     const RopeMaterial &material,
-    const Ground &ground);
+    const Ground &ground,
+    QVector<KnotMath::Vec3> *frames = nullptr);
 
 /*
  * The same rope, one time step at a time, and a hand that can take hold
@@ -120,6 +134,18 @@ public:
 
     // the rope, in units of its radius (y up)
     const QVector<KnotMath::Vec3> &points() const { return x_; }
+
+    // at every point, a direction across the rope fixed in its fibres: it
+    // turns as the rope rolls and twists, and the strands turn with it
+    QVector<KnotMath::Vec3> frames() const;
+
+    // the fibres as they are in another copy of this rope (one direction
+    // per point, as frames() gives them)
+    void useFrames(const QVector<KnotMath::Vec3> &frames);
+
+    // A rope that has been tied, or has lain a long while, keeps part of
+    // that shape: `share` of its present bends become its own.
+    void takeSet(double share);
     bool closed() const { return closed_; }
 
     void step();
@@ -129,6 +155,10 @@ public:
 
     // the fastest point after the last step (radii per time unit)
     double fastest() const { return fastest_; }
+
+    // the fastest a point has really been getting anywhere, over the last
+    // short while (radii per time unit)
+    double drift() const { return drift_; }
 
     // seconds of real time per step, for the material's size
     double secondsPerStep() const;
@@ -141,6 +171,12 @@ public:
     bool holdsUnder() const { return under_; }
 
 private:
+    void factorRod();
+    void solveChain(double *b) const;
+    void solveRod();
+    void findPairs();
+    void solveContacts();
+
     bool valid_ = false;
     bool closed_ = true;
 
@@ -155,7 +191,40 @@ private:
     int segments_ = 0;
     double h_ = 0.5;
     double radiusMm_ = 1.0;
-    double compliance_ = 0.0;
+
+    // the rod: the frame of every piece, its turn before the step, its spin;
+    // the rest shape of every joint (in the frame of the piece before it),
+    // the turn so far given to it in this step
+    QVector<Quaternion> q_;
+    QVector<Quaternion> qOld_;
+    QVector<KnotMath::Vec3> spin_;
+    QVector<KnotMath::Vec3> shape_;
+    QVector<KnotMath::Vec3> lambda_;
+    QVector<KnotMath::Vec3> smoothed_;
+    double wq_ = 1.0;
+    double bendSoftness_ = 0.0;
+    double twistSoftness_ = 0.0;
+    double yieldAngle_ = 1.0;
+    double setRate_ = 0.0;
+
+    // the factors of the system (6 x 6 blocks), and steps since they were
+    // made (negative: to be made)
+    QVector<double> rodD_;
+    QVector<double> rodE_;
+    QVector<double> rodL_;
+    QVector<double> rodF_;
+    QVector<double> rodZ_;
+    QVector<double> rodS_;
+    QVector<double> rodRhs_;
+    int rodAge_ = -1;
+
+    // pieces near each other (two numbers each), and how far the rope has
+    // come since they were found; how hard each point is pressed on the
+    // ground in this step
+    QVector<int> pairs_;
+    double travelled_ = 0.0;
+    QVector<double> groundDepth_;
+
     double muSurface_ = 0.5;
     double muSelf_ = 0.5;
     int neighbours_ = 8;
@@ -168,6 +237,11 @@ private:
 
     int quiet_ = 0;
     double fastest_ = 0.0;
+
+    // where the rope was at the start of this window of steps
+    QVector<KnotMath::Vec3> windowStart_;
+    int windowSteps_ = 0;
+    double drift_ = 1.0;
 
     int held_ = -1;
     double heldWeight_ = 1.0;
@@ -194,7 +268,9 @@ public:
 
     // a copy of the rope as it is now (units of its radius), and a number
     // that changes with every step
-    QVector<KnotMath::Vec3> points(quint64 *version = nullptr) const;
+    QVector<KnotMath::Vec3> points(
+        quint64 *version = nullptr,
+        QVector<KnotMath::Vec3> *frames = nullptr) const;
 
     bool closed() const;
     bool resting() const;
@@ -232,13 +308,17 @@ private:
  * Occlusion per vertex: how much of the room the point sees past the other
  * parts of the rope and the grooves (view factors). `quick`: the grooves
  * only, for a rope that moves (in the hand) and is built for every frame.
+ * `frames` (one per point of `curve`): the direction the rope's material
+ * has turned to there, so that the strands roll and twist with the rope
+ * instead of being laid over it anew for every shape.
  */
 KnotMath::Mesh buildRopeMesh(
     const QVector<KnotMath::Vec3> &curve,
     bool closed,
     double radius,
     const RopeMaterial &material,
-    bool quick = false);
+    bool quick = false,
+    const QVector<KnotMath::Vec3> &frames = {});
 
 } // namespace Photo
 

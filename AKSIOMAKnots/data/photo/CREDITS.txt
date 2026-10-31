@@ -1,10 +1,10 @@
 Photo mode pictures - all from Poly Haven (https://polyhaven.com), CC0
 (public domain: free for any use, no credit required; credited anyway).
 
-aft_lounge_4k.hdr            HDRI "Aft Lounge" by Greg Zaal (unclipped: the
-                             low sun through the windows is in the picture)
-country_club_4k.hdr          HDRI "Country Club" by Sergej Majboroda (unclipped
-                             morning sun through tall windows)
+chinese_garden_4k.hdr        HDRI "Chinese Garden" by Andreas Mischok
+                             (unclipped: 22 stops, the sun at its true strength)
+meadow_2_4k.hdr              HDRI "Meadow 2" by Sergej Majboroda
+                             (unclipped: 27 stops, the sun at its true strength)
 wood_table_large_*.jpg       texture "Wood Table Large" by Dimitrios Savva
                              (4k colour and normal map, 2k roughness, re-encoded)
 wood_floor_worn_*.jpg        texture "Wood Floor Worn" by Dimitrios Savva

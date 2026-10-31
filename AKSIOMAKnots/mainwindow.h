@@ -129,6 +129,9 @@ private slots:
     // everything else
     QVector<KnotMath::Vec3> photoRopeCurve(QVector<KnotMath::Vec3> table, bool closed, bool joined) const;
 
+    // the rope's material frames (on the table) in the knot's coordinates
+    QVector<KnotMath::Vec3> photoRopeFrames(const QVector<KnotMath::Vec3> &table) const;
+
     // The Sneaker scene takes knots of up to 7 crossings (one closed
     // strand): larger knots do not fit on a shoe.
     bool knotFitsSneaker() const;
@@ -540,6 +543,9 @@ private:
     // a rope being laid down on a worker thread (layRestingRope): which
     // job is the newest, and what it was asked for
     bool restingLaying_ = false;
+
+    // the scene and knot the camera was last framed for, with the rope down
+    QString restingFramed_;
     quint64 restingJob_ = 0;
     QVector<KnotMath::Vec3> restingJobFrom_;
     double restingJobRadius_ = 0.0;

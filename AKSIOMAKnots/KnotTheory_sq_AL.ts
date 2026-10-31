@@ -68,8 +68,8 @@
         <translation>MËNYRA FOTO</translation>
     </message>
     <message>
-        <source>The rooms and surfaces of Photo mode come from &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; and are free for any use (CC0): the HDRIs Aft Lounge (Greg Zaal) and Country Club (Sergej Majboroda), the textures Wood Table Large and Wood Floor Worn (Dimitrios Savva). The rope lies down by position based dynamics (XPBD: M. Macklin, M. Müller and N. Chentanez, 2016). The sneaker was made for AKSIOMA in Blender.</source>
-        <translation>Dhomat dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): HDRI-të Aft Lounge (Greg Zaal) dhe Country Club (Sergej Majboroda), teksturat Wood Table Large dhe Wood Floor Worn (Dimitrios Savva). Litari shtrihet me dinamikë të bazuar në pozicione (XPBD: M. Macklin, M. Müller dhe N. Chentanez, 2016). Atletja u bë për AKSIOMA në Blender.</translation>
+        <source>The places and surfaces of Photo mode come from &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; and are free for any use (CC0): the HDRIs Chinese Garden (Andreas Mischok) and Meadow 2 (Sergej Majboroda), the textures Wood Table Large and Wood Floor Worn (Dimitrios Savva). The rope is a Cosserat rod solved directly (C. Deul, T. Kugelstadt, M. Weiler and J. Bender, 2018) by position based dynamics (XPBD: M. Macklin, M. Müller and N. Chentanez, 2016). The sneaker was made for AKSIOMA in Blender.</source>
+        <translation>Vendet dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): HDRI-të Chinese Garden (Andreas Mischok) dhe Meadow 2 (Sergej Majboroda), teksturat Wood Table Large dhe Wood Floor Worn (Dimitrios Savva). Litari është një shufër Cosserat e zgjidhur drejtpërdrejt (C. Deul, T. Kugelstadt, M. Weiler dhe J. Bender, 2018) me dinamikë të bazuar në pozicione (XPBD: M. Macklin, M. Müller dhe N. Chentanez, 2016). Atletja u bë për AKSIOMA në Blender.</translation>
     </message>
     <message>
         <source>About Qt</source>
@@ -1090,18 +1090,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>NYJA</translation>
     </message>
     <message>
-        <source>Show the knot as a real rope: it falls onto a table under its own weight and comes to rest, in a sunlit room photographed with its real light.</source>
-        <translation>Shfaq nyjën si një litar të vërtetë: bie mbi një tavolinë nga pesha e vet dhe qetësohet, në një dhomë me diell të fotografuar me dritën e saj të vërtetë.</translation>
-    </message>
-    <message>
-        <source>Hemp rope on a table, low sun</source>
-        <translation>Litar kërpi mbi tavolinë, diell i ulët</translation>
-    </message>
-    <message>
-        <source>Shoelace on a sunlit floor</source>
-        <translation>Lidhëse këpucësh mbi dysheme me diell</translation>
-    </message>
-    <message>
         <source>Unknot</source>
         <translation>Nyja triviale</translation>
     </message>
@@ -1350,6 +1338,18 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Speed</source>
         <translation>Shpejtësia</translation>
+    </message>
+    <message>
+        <source>Show the knot as a real rope: it falls onto a table under its own weight and comes to rest, in a sunny place photographed with its real light.</source>
+        <translation>Shfaq nyjën si një litar të vërtetë: bie mbi një tavolinë nga pesha e vet dhe qetësohet, në një vend me diell të fotografuar me dritën e tij të vërtetë.</translation>
+    </message>
+    <message>
+        <source>Hemp rope on a garden table, in the sun</source>
+        <translation>Litar kërpi mbi tavolinë në kopsht, në diell</translation>
+    </message>
+    <message>
+        <source>Shoelace on boards in a meadow, in the sun</source>
+        <translation>Lidhëse këpucësh mbi dërrasa në livadh, në diell</translation>
     </message>
     <message>
         <source>Unknot</source>

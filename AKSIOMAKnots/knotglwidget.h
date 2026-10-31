@@ -229,6 +229,14 @@ public:
         float yaw,
         float pitch);
 
+    // The camera at once at (yaw, pitch) degrees, showing the ball (`centre`
+    // in the view, `radius`) whole. For pictures from a chosen place.
+    void placeCamera(
+        const QVector3D &centre,
+        float radius,
+        float yaw,
+        float pitch);
+
     QSize minimumSizeHint() const override;
     QSize sizeHint() const override;
 

@@ -1057,7 +1057,7 @@ def setup_world():
 
     # the room of the scene (for the previews)
     hdr = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       "..", "..", "data", "photo", "country_club_4k.hdr")
+                       "..", "..", "data", "photo", "meadow_2_4k.hdr")
     nodes = world.node_tree.nodes
     links = world.node_tree.links
 

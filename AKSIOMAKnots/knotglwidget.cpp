@@ -5233,6 +5233,22 @@ float KnotGLWidget::sphereDistance(float radius) const
         30.0f);
 }
 
+void KnotGLWidget::placeCamera(
+    const QVector3D &centre,
+    float radius,
+    float yaw,
+    float pitch)
+{
+    stopCameraFlight();
+
+    yaw_ = yaw;
+    pitch_ = pitch;
+    distance_ = sphereDistance(radius);
+    panOffset_ = centre;
+
+    update();
+}
+
 void KnotGLWidget::flyToSphere(
     const QVector3D &centre,
     float radius,
@@ -6559,7 +6575,7 @@ void KnotGLWidget::setPhotoUniforms(QOpenGLShaderProgram &program)
     const float lightOnTable =
         0.2126f * onTable.x() + 0.7152f * onTable.y() + 0.0722f * onTable.z();
 
-    photoExposure_ = 1.45f / std::max(lightOnTable, 1.0e-3f);
+    photoExposure_ = photoInfo_.exposure / std::max(lightOnTable, 1.0e-3f);
 
     /*
      * The white balance: the colour of the light on the table made grey,
@@ -7544,7 +7560,17 @@ void KnotGLWidget::developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &p
             update();
     }
 
-    developProgram_->setUniformValue("uStage", stage_);
+    // the calm stage is the scene's own; from there up to the full stage
+    {
+        const float calm = photoInfo_.calmStage;
+
+        const float shown =
+            stage_ <= CalmStage
+                ? stage_ / CalmStage * calm
+                : calm + (stage_ - CalmStage) / (1.0f - CalmStage) * (1.0f - calm);
+
+        developProgram_->setUniformValue("uStage", shown);
+    }
 
     const float focal = 0.5f * SensorHeight / std::tan(qDegreesToRadians(0.5f * FieldOfView));
     const float focus = std::max(distance_, 0.01f);
