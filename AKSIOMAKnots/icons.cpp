@@ -57,6 +57,15 @@ QColor textColour(const QAbstractButton *button)
     if (kind == QStringLiteral("GenerateButton"))
         return down || hover ? c.text : c.window;
 
+    // the tools on the left edge: amber while the tool is at work
+    if (kind == QStringLiteral("RailButton"))
+    {
+        if (button->property("running").toBool())
+            return c.accent;
+
+        return hover || button->isChecked() ? c.text : c.quiet;
+    }
+
     // text-only buttons
     if (kind == QStringLiteral("DisclosureButton") || kind == QStringLiteral("TopBarButton"))
         return down ? c.accent : (hover || button->isChecked() ? c.text : c.quiet);
@@ -94,7 +103,9 @@ public:
         }
 
         // a little smaller than the letters are tall
-        const qreal size = std::round(QFontMetricsF(button_->font()).height() * 0.78);
+        const qreal size = button_->objectName() == QStringLiteral("RailButton")
+                               ? 20.0
+                               : std::round(QFontMetricsF(button_->font()).height() * 0.78);
         const qreal ratio = button_->devicePixelRatioF();
 
         const QColor colour = textColour(button_);

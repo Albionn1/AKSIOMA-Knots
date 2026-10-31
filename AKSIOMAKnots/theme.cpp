@@ -145,12 +145,43 @@ const char *const StyleSheet = R"(
 
     QWidget#TopBar {
         background: #0D0D0D;
-        border-bottom: 1px solid #060606;
+        border-bottom: 1px solid #1A1A1A;
     }
 
     QWidget#ViewBar {
         background: #0D0D0D;
-        border-top: 1px solid #060606;
+        border-top: 1px solid #1A1A1A;
+    }
+
+    /* the tools down the left edge; the chosen one runs into its panel */
+
+    QWidget#Rail {
+        background: #060606;
+        border-right: 1px solid #1A1A1A;
+    }
+
+    QToolButton#RailButton {
+        background: transparent;
+        color: #8A8780;
+        border: none;
+        border-left: 2px solid transparent;
+        padding: 9px 0px 8px 0px;
+        font-size: 8pt;
+        font-weight: 600;
+    }
+
+    QToolButton#RailButton:hover {
+        color: #BAB9B4;
+    }
+
+    QToolButton#RailButton:checked {
+        background: #0D0D0D;
+        color: #BAB9B4;
+        border-left: 2px solid #BAB9B4;
+    }
+
+    QToolButton#RailButton[running="true"] {
+        color: #D99B42;
     }
 
     QWidget#Panel,
@@ -164,7 +195,7 @@ const char *const StyleSheet = R"(
     }
 
     QSplitter::handle {
-        background: #060606;
+        background: #1A1A1A;
     }
 
     QFrame#Rule {
@@ -207,10 +238,10 @@ const char *const StyleSheet = R"(
     }
 
     QLabel#Caption {
-        color: #53514C;
-        font-size: 7pt;
+        color: #8A8780;
+        font-size: 8pt;
         font-weight: 700;
-        letter-spacing: 1.6px;
+        letter-spacing: 1.4px;
     }
 
     QLabel#SectionIndex {
@@ -239,8 +270,8 @@ const char *const StyleSheet = R"(
     }
 
     QLabel#Subtitle {
-        color: #53514C;
-        font-size: 8.5pt;
+        color: #8A8780;
+        font-size: 9pt;
     }
 
     QLabel#Status {
@@ -568,7 +599,7 @@ const char *const StyleSheet = R"(
 
     QTabBar::tab {
         background: transparent;
-        color: #53514C;
+        color: #8A8780;
         padding: 14px 20px 12px 20px;
         margin: 0;
         border: none;

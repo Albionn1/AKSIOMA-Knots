@@ -17,6 +17,7 @@
 #include <QStandardItemModel>
 
 #include <QApplication>
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -42,6 +43,8 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
+#include <QStackedWidget>
+#include <QStyle>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QSplitter>
@@ -51,8 +54,10 @@
 #include <QTextEdit>
 #include <QGuiApplication>
 #include <QRandomGenerator>
+#include <QScreen>
 #include <QThread>
 #include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -60,6 +65,31 @@
 #include <cmath>
 #include <memory>
 #include <stdexcept>
+
+namespace
+{
+
+// A hint that makes way: all of its text or, in too little room, nothing.
+class FittingLabel final
+    : public QLabel
+{
+public:
+    using QLabel::QLabel;
+
+    QSize minimumSizeHint() const override
+    {
+        return QSize(0, 0);
+    }
+
+protected:
+    void paintEvent(QPaintEvent *event) override
+    {
+        if (sizeHint().width() <= width())
+            QLabel::paintEvent(event);
+    }
+};
+
+} // namespace
 
 MainWindow::MainWindow(
     QWidget *parent)
@@ -169,9 +199,10 @@ MainWindow::MainWindow(
                 });
     }
 
+    // something to do, not a window setting: a button among the text links
     QPushButton *practiceButton = new QPushButton(tr("Practice"), topBar);
 
-    practiceButton->setObjectName(QStringLiteral("TopBarButton"));
+    practiceButton->setMinimumHeight(36);
     practiceButton->setCursor(Qt::PointingHandCursor);
     practiceButton->setToolTip(
         tr("Exercises on the knot diagram: tricolouring, crossing signs"));
@@ -191,9 +222,9 @@ MainWindow::MainWindow(
     topLayout->addWidget(brandDivider);
     topLayout->addSpacing(6);
     topLayout->addWidget(createKnotBar(topBar), 1);
-    topLayout->addWidget(fileButton);
-    topLayout->addSpacing(4);
     topLayout->addWidget(practiceButton);
+    topLayout->addSpacing(8);
+    topLayout->addWidget(fileButton);
     topLayout->addSpacing(4);
     topLayout->addWidget(settingsButton);
     topLayout->addSpacing(4);
@@ -202,8 +233,13 @@ MainWindow::MainWindow(
     rootLayout->addWidget(topBar);
 
     /*
-     * MAIN AREA: sidebar | 3D view | analysis
+     * MAIN AREA: tools | tool panel | 3D view | analysis
      */
+
+    QHBoxLayout *mainLayout = new QHBoxLayout();
+
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setSpacing(0);
 
     mainSplitter_ = new QSplitter(Qt::Horizontal, central);
 
@@ -213,6 +249,9 @@ MainWindow::MainWindow(
     QWidget *leftPanel = createLeftPanel();
 
     QWidget *rightPanel = createRightPanel();
+
+    mainLayout->addWidget(createRail(central));
+    mainLayout->addWidget(mainSplitter_, 1);
 
     // 3D view with a slim bar underneath
     QWidget *viewport = new QWidget(central);
@@ -228,6 +267,32 @@ MainWindow::MainWindow(
 
     viewportLayout->addWidget(glWidget_, 1);
 
+    // The unknotting plays like a film: its controls under the picture, so
+    // that they stay at hand with the panels folded away.
+    transportBar_ = new QWidget(viewport);
+
+    transportBar_->setObjectName(QStringLiteral("ViewBar"));
+    transportBar_->setAttribute(Qt::WA_StyledBackground, true);
+    transportBar_->setFixedHeight(60);
+
+    QHBoxLayout *transportLayout = new QHBoxLayout(transportBar_);
+
+    transportLayout->setContentsMargins(16, 0, 16, 0);
+    transportLayout->setSpacing(10);
+
+    // "0.5×" says what it is; no label, the bar has to fit a small window
+    unknotSpeedCombo_->setToolTip(tr("Speed"));
+
+    transportLayout->addWidget(unknotPlayButton_);
+    transportLayout->addWidget(unknotScrubSlider_, 1);
+    transportLayout->addWidget(unknotSpeedCombo_);
+    transportLayout->addWidget(unknotSummaryButton_);
+    transportLayout->addWidget(unknotResetButton_);
+
+    transportBar_->hide();
+
+    viewportLayout->addWidget(transportBar_);
+
     QWidget *viewBar = new QWidget(viewport);
 
     viewBar->setObjectName(QStringLiteral("ViewBar"));
@@ -240,11 +305,12 @@ MainWindow::MainWindow(
     viewBarLayout->setSpacing(10);
 
     QLabel *navigationHint =
-        new QLabel(
+        new FittingLabel(
             tr("DRAG  ORBIT      RIGHT-DRAG  PAN      SCROLL  ZOOM"),
             viewBar);
 
     navigationHint->setObjectName(QStringLiteral("Caption"));
+    navigationHint->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 
     resetCameraButton_ = new QPushButton(tr("Reset view"), viewBar);
 
@@ -254,6 +320,8 @@ MainWindow::MainWindow(
     // Photo mode: the knot as a real rope lying on a real surface
     photoButton_ = new QPushButton(tr("Photo"), viewBar);
 
+    // the same look as a chosen brush in Practice when it is on
+    photoButton_->setObjectName(QStringLiteral("BrushButton"));
     photoButton_->setCheckable(true);
 
     photoButton_->setToolTip(
@@ -290,11 +358,21 @@ MainWindow::MainWindow(
         this,
         [this]() { applyPhotoMode(); });
 
-    viewBarLayout->addWidget(navigationHint);
-    viewBarLayout->addStretch(1);
+    viewBarLayout->addWidget(navigationHint, 1);
     viewBarLayout->addWidget(photoSceneCombo_);
     viewBarLayout->addWidget(photoButton_);
     viewBarLayout->addWidget(resetCameraButton_);
+
+    // the analysis folded away, for more room around the knot
+    analysisButton_ = new QPushButton(tr("Analysis", "view bar"), viewBar);
+
+    analysisButton_->setCheckable(true);
+    analysisButton_->setChecked(true);
+    analysisButton_->setToolTip(tr("Show or hide the analysis panel."));
+
+    connect(analysisButton_, &QPushButton::toggled, rightPanel, &QWidget::setVisible);
+
+    viewBarLayout->addWidget(analysisButton_);
 
     viewportLayout->addWidget(viewBar);
 
@@ -309,7 +387,7 @@ MainWindow::MainWindow(
     // panel widths and first sizes for the text size
     fitPanelsToText();
 
-    rootLayout->addWidget(mainSplitter_, 1);
+    rootLayout->addLayout(mainLayout, 1);
 
     setCentralWidget(central);
 
@@ -568,6 +646,16 @@ MainWindow::MainWindow(
             else
                 rebuildMesh();
         });
+
+    // The tools start and stop in many places; a look a few times a second
+    // keeps the left edge true without touching all of them.
+    QTimer *railTimer = new QTimer(this);
+
+    railTimer->setInterval(200);
+
+    connect(railTimer, &QTimer::timeout, this, &MainWindow::updateRailActivity);
+
+    railTimer->start();
 
     unknotTimer_ =
         new QTimer(
@@ -905,21 +993,133 @@ QWidget *MainWindow::createKnotBar(
     return bar;
 }
 
+QWidget *MainWindow::createRail(
+    QWidget *parent)
+{
+    QWidget *rail = new QWidget(parent);
+
+    rail->setObjectName(QStringLiteral("Rail"));
+    rail->setAttribute(Qt::WA_StyledBackground, true);
+    // wider with larger text, through the buttons
+    rail->setMinimumWidth(84);
+    rail->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+
+    QVBoxLayout *layout = new QVBoxLayout(rail);
+
+    layout->setContentsMargins(0, 8, 1, 8);
+    layout->setSpacing(2);
+
+    railGroup_ = new QButtonGroup(this);
+
+    const struct
+    {
+        QString text;
+        QString icon;
+    }
+    tools[] =
+    {
+        {tr("Style"), QStringLiteral("rail_style")},
+        {tr("Relax"), QStringLiteral("rail_relax")},
+        {tr("Unknot", "rail"), QStringLiteral("rail_unknot")},
+        {tr("Join"), QStringLiteral("rail_join")},
+        {tr("Surface"), QStringLiteral("rail_surface")}
+    };
+
+    int page = 0;
+
+    for (const auto &tool : tools)
+    {
+        QToolButton *button = new QToolButton(rail);
+
+        button->setObjectName(QStringLiteral("RailButton"));
+        button->setText(tool.text);
+        button->setCheckable(true);
+        button->setChecked(page == 0);
+        button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setToolTip(
+            QStringLiteral("%1  (Ctrl+%2)\n").arg(tool.text).arg(page + 1) +
+            tr("Click the open tool again to fold its panel away."));
+
+        Icons::set(button, tool.icon);
+
+        railGroup_->addButton(button, page);
+
+        layout->addWidget(button);
+
+        QShortcut *shortcut =
+            new QShortcut(
+                QKeySequence(Qt::CTRL | static_cast<Qt::Key>(Qt::Key_1 + page)),
+                this);
+
+        connect(shortcut, &QShortcut::activated, button, &QToolButton::click);
+
+        page++;
+    }
+
+    layout->addStretch(1);
+
+    // idClicked, not idToggled: the open tool clicked again folds its panel
+    connect(railGroup_, &QButtonGroup::idClicked, this, &MainWindow::railClicked);
+
+    return rail;
+}
+
+void MainWindow::railClicked(
+    int page)
+{
+    const bool fold =
+        page == leftPages_->currentIndex() && !leftPages_->isHidden();
+
+    leftPages_->setCurrentIndex(page);
+    leftPages_->setVisible(!fold);
+
+    updateRailActivity();
+}
+
+void MainWindow::updateRailActivity()
+{
+    const bool running[] =
+    {
+        false,
+        relaxRunning_ || pulling_,
+        unknotActive_,
+        joinActive_,
+        seifertActive_
+    };
+
+    for (int page = 0; page < 5; page++)
+    {
+        QAbstractButton *button = railGroup_->button(page);
+
+        if (button->property("running").toBool() == running[page])
+            continue;
+
+        button->setProperty("running", running[page]);
+
+        // the style sheet looks at the property again
+        button->style()->unpolish(button);
+        button->style()->polish(button);
+    }
+
+    transportBar_->setVisible(
+        leftPages_->currentIndex() == 2 || unknotActive_);
+}
+
 QWidget *MainWindow::createLeftPanel()
 {
-    QTabWidget *tabs = new QTabWidget(this);
+    QStackedWidget *pages = new QStackedWidget(this);
 
-    leftTabs_ = tabs;
+    leftPages_ = pages;
 
-    tabs->setObjectName(QStringLiteral("LeftTabs"));
-    tabs->setDocumentMode(true);
-    tabs->setMinimumWidth(300);
-    tabs->setMaximumWidth(380);
+    pages->setMinimumWidth(280);
+    pages->setMaximumWidth(380);
 
-    // one scrolling page per tab
-    auto makePage = [this, tabs](QVBoxLayout *&layout) -> QScrollArea *
+    // one scrolling page per tool
+    auto makePage = [this, pages](QVBoxLayout *&layout) -> QScrollArea *
     {
-        QScrollArea *scroll = new QScrollArea(tabs);
+        QScrollArea *scroll = new QScrollArea(pages);
 
         scroll->setObjectName(QStringLiteral("PanelScroll"));
         scroll->setWidgetResizable(true);
@@ -933,7 +1133,7 @@ QWidget *MainWindow::createLeftPanel()
 
         layout = new QVBoxLayout(panel);
 
-        layout->setContentsMargins(24, 22, 24, 24);
+        layout->setContentsMargins(20, 20, 20, 20);
         layout->setSpacing(14);
 
         scroll->setWidget(panel);
@@ -1093,17 +1293,17 @@ QWidget *MainWindow::createLeftPanel()
 
     layout->addStretch(1);
 
-    tabs->addTab(stylePage, tr("STYLE"));
+    pages->addWidget(stylePage);
 
     /*
-     * ANIMATE: relax (same knot) and unknot (crossing changes)
+     * RELAX: the same knot in another shape
      */
 
-    QScrollArea *animatePage = makePage(layout);
+    QScrollArea *relaxPage = makePage(layout);
 
-    panel = animatePage->widget();
+    panel = relaxPage->widget();
 
-    addSectionHeader(layout, panel, QStringLiteral("01"), tr("RELAX"));
+    addSectionHeader(layout, panel, QString(), tr("RELAX"));
 
     QWidget *relaxGroup = new QWidget(panel);
 
@@ -1205,9 +1405,19 @@ QWidget *MainWindow::createLeftPanel()
 
     layout->addWidget(relaxGroup);
 
-    layout->addSpacing(14);
+    layout->addStretch(1);
 
-    addSectionHeader(layout, panel, QStringLiteral("02"), tr("UNKNOT"));
+    pages->addWidget(relaxPage);
+
+    /*
+     * UNKNOT: crossing changes (the playback is under the 3D view)
+     */
+
+    QScrollArea *unknotPage = makePage(layout);
+
+    panel = unknotPage->widget();
+
+    addSectionHeader(layout, panel, QString(), tr("UNKNOT"));
 
     unknotGroup_ = new QWidget(panel);
 
@@ -1227,45 +1437,30 @@ QWidget *MainWindow::createLeftPanel()
 
     unknotLayout->addWidget(unknotIntro);
 
-    QHBoxLayout *unknotButtons = new QHBoxLayout();
-
-    unknotButtons->setSpacing(8);
-
     unknotPlayButton_ = new QPushButton(tr("UNKNOT", "button"), unknotGroup_);
 
     Icons::set(unknotPlayButton_, QStringLiteral("play"));
 
     unknotPlayButton_->setObjectName(QStringLiteral("GenerateButton"));
-    unknotPlayButton_->setMinimumHeight(40);
+    unknotPlayButton_->setMinimumHeight(38);
+    unknotPlayButton_->setMinimumWidth(120);
 
     unknotResetButton_ = new QPushButton(tr("Reset"), unknotGroup_);
 
-    unknotResetButton_->setMinimumHeight(40);
+    unknotResetButton_->setMinimumHeight(38);
     unknotResetButton_->setEnabled(false);
 
     unknotSummaryButton_ = new QPushButton(tr("Steps"), unknotGroup_);
 
-    unknotSummaryButton_->setMinimumHeight(40);
+    unknotSummaryButton_->setMinimumHeight(38);
     unknotSummaryButton_->setEnabled(false);
     unknotSummaryButton_->setToolTip(
         tr("Every crossing change of the animation, one by one."));
-
-    unknotButtons->addWidget(unknotPlayButton_, 3);
-    unknotButtons->addWidget(unknotSummaryButton_, 1);
-    unknotButtons->addWidget(unknotResetButton_, 1);
-
-    unknotLayout->addLayout(unknotButtons);
 
     unknotScrubSlider_ = new TimelineSlider(unknotGroup_);
 
     unknotScrubSlider_->setRange(0, 1000);
     unknotScrubSlider_->setEnabled(false);
-
-    unknotLayout->addWidget(unknotScrubSlider_);
-
-    QHBoxLayout *speedLayout = new QHBoxLayout();
-
-    speedLayout->setSpacing(10);
 
     unknotSpeedCombo_ = new QComboBox(unknotGroup_);
 
@@ -1277,11 +1472,6 @@ QWidget *MainWindow::createLeftPanel()
     unknotSpeedCombo_->addItem(QStringLiteral("4×"), 4.0);
     // slowly enough to follow every step
     unknotSpeedCombo_->setCurrentIndex(1);
-
-    speedLayout->addWidget(makeFieldLabel(tr("Speed"), unknotGroup_));
-    speedLayout->addWidget(unknotSpeedCombo_, 1);
-
-    unknotLayout->addLayout(speedLayout);
 
     unknotStepCheck_ =
         new QCheckBox(tr("Step by step (pause at every stage)"), unknotGroup_);
@@ -1300,9 +1490,19 @@ QWidget *MainWindow::createLeftPanel()
 
     layout->addWidget(unknotGroup_);
 
-    layout->addSpacing(14);
+    layout->addStretch(1);
 
-    addSectionHeader(layout, panel, QStringLiteral("03"), tr("JOIN TWO KNOTS"));
+    pages->addWidget(unknotPage);
+
+    /*
+     * JOIN: two knots become their connected sum
+     */
+
+    QScrollArea *joinPage = makePage(layout);
+
+    panel = joinPage->widget();
+
+    addSectionHeader(layout, panel, QString(), tr("JOIN TWO KNOTS"));
 
     QLabel *joinIntro =
         new QLabel(
@@ -1365,7 +1565,7 @@ QWidget *MainWindow::createLeftPanel()
 
     layout->addStretch(1);
 
-    tabs->addTab(animatePage, tr("ANIMATE"));
+    pages->addWidget(joinPage);
 
     /*
      * SURFACE: the Seifert surface of the knot
@@ -1481,11 +1681,11 @@ QWidget *MainWindow::createLeftPanel()
                 }
             });
 
-    tabs->addTab(surfacePage, tr("SURFACE"));
+    pages->addWidget(surfacePage);
 
     setSeifertStep(0);
 
-    return tabs;
+    return pages;
 }
 
 QWidget *MainWindow::createRightPanel()
@@ -2393,7 +2593,7 @@ void MainWindow::fitPanelsToText()
     // widths at the normal text size: least, most, first
     struct Panel
     {
-        QTabWidget *tabs;
+        QWidget *widget;
         int minimum;
         int maximum;
         int initial;
@@ -2401,28 +2601,46 @@ void MainWindow::fitPanelsToText()
 
     const Panel panels[] =
     {
-        {leftTabs_, 300, 380, 330},
+        {leftPages_, 280, 380, 310},
         {rightTabs_, 320, 460, 370}
     };
 
     QVector<int> initial;
 
+    // The 3D view keeps room for its playback bar, and the window for the
+    // view next to both panels (never more than the screen has: in less
+    // room the panels are folded away).
+    const int viewWidth = 460 * scale / 100;
+
+    glWidget_->parentWidget()->setMinimumWidth(viewWidth);
+
+    int windowWidth = viewWidth + 100;
+
     for (const Panel &panel : panels)
     {
         // the tab bar scrolls when its tabs do not fit (with the style
         // sheet's font, also before the window is first shown)
-        panel.tabs->ensurePolished();
+        panel.widget->ensurePolished();
+
+        const QTabWidget *tabs = qobject_cast<QTabWidget *>(panel.widget);
 
         const int minimum =
             std::max(
                 panel.minimum * scale / 100,
-                panel.tabs->tabBar()->sizeHint().width());
+                tabs != nullptr ? tabs->tabBar()->sizeHint().width() : 0);
 
-        panel.tabs->setMinimumWidth(minimum);
-        panel.tabs->setMaximumWidth(std::max(panel.maximum * scale / 100, minimum));
+        panel.widget->setMinimumWidth(minimum);
+        panel.widget->setMaximumWidth(std::max(panel.maximum * scale / 100, minimum));
 
         initial.push_back(std::max(panel.initial * scale / 100, minimum));
+
+        windowWidth += minimum;
     }
+
+    setMinimumWidth(
+        std::min(
+            windowWidth,
+            screen()->availableGeometry().width()));
 
     // the first sizes again only when the text size changed, so that a
     // dragged divider stays where it is when only the theme changes
@@ -2569,11 +2787,19 @@ void MainWindow::takeOverFrom(
     mainSplitter_->setSizes(
         previous.mainSplitter_->sizes());
 
-    leftTabs_->setCurrentIndex(
-        previous.leftTabs_->currentIndex());
+    leftPages_->setCurrentIndex(
+        previous.leftPages_->currentIndex());
+
+    leftPages_->setVisible(
+        !previous.leftPages_->isHidden());
+
+    railGroup_->button(leftPages_->currentIndex())->setChecked(true);
 
     rightTabs_->setCurrentIndex(
         previous.rightTabs_->currentIndex());
+
+    analysisButton_->setChecked(
+        previous.analysisButton_->isChecked());
 
     // the knot
     tableKnotName_ = previous.tableKnotName_;

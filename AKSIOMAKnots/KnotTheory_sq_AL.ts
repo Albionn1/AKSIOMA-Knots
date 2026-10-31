@@ -1050,14 +1050,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Vizato...</translation>
     </message>
     <message>
-        <source>STYLE</source>
-        <translation>STILI</translation>
-    </message>
-    <message>
-        <source>ANIMATE</source>
-        <translation>ANIMIMI</translation>
-    </message>
-    <message>
         <source>CURVE</source>
         <translation>KURBA</translation>
     </message>
@@ -1360,6 +1352,11 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Shpejtësia</translation>
     </message>
     <message>
+        <source>Unknot</source>
+        <comment>rail</comment>
+        <translation>Zgjidhja</translation>
+    </message>
+    <message>
         <source>Step by step (pause at every stage)</source>
         <translation>Hap pas hapi (ndalo në çdo fazë)</translation>
     </message>
@@ -1402,10 +1399,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Go back and forth through the four steps.</source>
         <translation>Lëvizni para dhe mbrapa nëpër katër hapat.</translation>
-    </message>
-    <message>
-        <source>SURFACE</source>
-        <translation>SIPËRFAQJA</translation>
     </message>
     <message>
         <source>CLASSIFICATION</source>
@@ -1830,6 +1823,35 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Unknotting needs a single closed curve. Choose a knot preset or a custom curve.</source>
         <translation>Zgjidhja kërkon një kurbë të vetme të mbyllur. Zgjidhni një nyjë të gatshme ose një kurbë të personalizuar.</translation>
+    </message>
+    <message>
+        <source>Analysis</source>
+        <comment>view bar</comment>
+        <translation>Analiza</translation>
+    </message>
+    <message>
+        <source>Show or hide the analysis panel.</source>
+        <translation>Shfaq ose fshih panelin e analizës.</translation>
+    </message>
+    <message>
+        <source>Style</source>
+        <translation>Stili</translation>
+    </message>
+    <message>
+        <source>Relax</source>
+        <translation>Relaksimi</translation>
+    </message>
+    <message>
+        <source>Join</source>
+        <translation>Bashkimi</translation>
+    </message>
+    <message>
+        <source>Surface</source>
+        <translation>Sipërfaqja</translation>
+    </message>
+    <message>
+        <source>Click the open tool again to fold its panel away.</source>
+        <translation>Kliko sërish mjetin e hapur për të palosur panelin e tij.</translation>
     </message>
     <message>
         <source>Preparing the animation...</source>

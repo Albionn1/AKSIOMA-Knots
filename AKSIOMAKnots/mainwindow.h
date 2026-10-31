@@ -29,11 +29,13 @@
 #include <memory>
 #include <map>
 
+class QButtonGroup;
 class QCheckBox;
 class QDialog;
 class QGroupBox;
 class QProgressBar;
 class QShortcut;
+class QStackedWidget;
 class QTabWidget;
 class TimelineSlider;
 class UnknotSummaryDialog;
@@ -196,6 +198,10 @@ private:
     QWidget *createKnotBar(
         QWidget *parent);
 
+    // the tools down the left edge, one page of createLeftPanel each
+    QWidget *createRail(
+        QWidget *parent);
+
     QWidget *createLeftPanel();
 
     QWidget *createRightPanel();
@@ -228,6 +234,14 @@ private:
     // Side panel widths for the text size: wider with larger text, and
     // never narrower than their tabs.
     void fitPanelsToText();
+
+    // Opens the page of a tool; the tool already open folds its panel
+    // away, which leaves the room to the 3D view.
+    void railClicked(
+        int page);
+
+    // Marks the tools at work and shows the playback bar when it is wanted.
+    void updateRailActivity();
 
     // Takes over the knot, the view settings and the window placement.
     void takeOverFrom(
@@ -352,7 +366,18 @@ private:
     QSplitter *mainSplitter_ =
         nullptr;
 
-    QTabWidget *leftTabs_ =
+    QStackedWidget *leftPages_ =
+        nullptr;
+
+    QButtonGroup *railGroup_ =
+        nullptr;
+
+    // playback under the 3D view: the unknotting animation
+    QWidget *transportBar_ =
+        nullptr;
+
+    // shows and hides rightTabs_
+    QPushButton *analysisButton_ =
         nullptr;
 
     QTabWidget *rightTabs_ =

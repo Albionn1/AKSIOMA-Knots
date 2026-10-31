@@ -12,6 +12,11 @@
         <file>icons/svg/hand.svg</file>
         <file>icons/svg/pause.svg</file>
         <file>icons/svg/play.svg</file>
+        <file>icons/svg/rail_join.svg</file>
+        <file>icons/svg/rail_relax.svg</file>
+        <file>icons/svg/rail_style.svg</file>
+        <file>icons/svg/rail_surface.svg</file>
+        <file>icons/svg/rail_unknot.svg</file>
         <file>icons/svg/scissors.svg</file>
         <file>icons/svg/stop.svg</file>
         <file>icons/svg/tie.svg</file>
