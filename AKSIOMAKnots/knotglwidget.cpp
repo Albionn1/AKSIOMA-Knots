@@ -3238,7 +3238,10 @@ void KnotGLWidget::setFixedBounds(
 
     poseFixedBounds();
 
-    tableLevel_ = meshBottom();
+    // the floor under everything that will be shown, not only what is shown
+    // now; a rope on the table leaves the table where it is
+    if (!(photo_ && restingRope_ && tableAnchored_))
+        tableLevel_ = photo_ ? std::min(meshBottom(), meshMin_.y()) : meshBottom();
 
     groundDirty_ = true;
     update();

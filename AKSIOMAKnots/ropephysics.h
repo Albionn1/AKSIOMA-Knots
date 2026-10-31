@@ -190,6 +190,7 @@ private:
     void solveRod();
     void findPairs();
     void solveContacts();
+    void rubFibres();
 
     bool valid_ = false;
     bool closed_ = true;
@@ -214,7 +215,7 @@ private:
     QVector<KnotMath::Vec3> spin_;
     QVector<KnotMath::Vec3> shape_;
     QVector<KnotMath::Vec3> lambda_;
-    QVector<KnotMath::Vec3> smoothed_;
+    double fibreRub_ = 0.0;
     double wq_ = 1.0;
     double bendSoftness_ = 0.0;
     double twistSoftness_ = 0.0;
@@ -262,6 +263,10 @@ private:
     bool under_ = false;
     int handArc_ = 6;
     KnotMath::Vec3 hand_;
+
+    // where the hand really is: it follows the mouse smoothly
+    KnotMath::Vec3 handEased_;
+    double handEase_ = 1.0;
 };
 
 /*

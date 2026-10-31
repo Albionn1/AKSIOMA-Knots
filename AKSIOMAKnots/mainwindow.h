@@ -26,6 +26,7 @@
 #include <QVector3D>
 #include <QElapsedTimer>
 #include <QPair>
+#include <QQuaternion>
 
 #include <functional>
 #include <future>
@@ -865,6 +866,15 @@ private:
     void updateJoinStatus();
     void finishJoin();
 
+    // Photo mode's join: the real rope on the table
+    bool startPhotoJoin();
+    void stopPhotoJoin();
+    KnotMath::Vec3 joinOnTable(const KnotMath::Vec3 &point) const;
+    void renderPhotoJoinFrame();
+    void startJoinDrop();
+    void advanceJoinDrop();
+    void landJoinedRope();
+
     // the knot symbol of the current knot ("3₁", "T(2,5)", "3₁ # 4₁")
     QString currentKnotSymbol() const;
 
@@ -922,6 +932,37 @@ private:
 
     double joinTubeRadius_ =
         0.16;
+
+    /*
+     * Photo mode's join (startPhotoJoin), all of it on the table (y up, the
+     * table top at y = 0). joinPose_ takes the sum's coordinates to the
+     * table; joinFrom_ is the rope where it lay (in the knot's coordinates,
+     * point for point with join_.firstBase), and the turn and place that
+     * take the rope from there to the first knot's place. The joined rope
+     * then falls by its own physics (joinDrop_); where it comes to lie is
+     * the rope at rest from then on (joinLanded_). A knot's curve stands
+     * high; a rope lies low: heights are scaled by joinFlat_, as far as the
+     * strands still clear each other (a change of heights is no change of
+     * knot).
+     */
+    bool photoJoin_ = false;
+    QMatrix4x4 joinPose_;
+    double joinFlat_ = 1.0;
+    QVector<KnotMath::Vec3> joinFrom_;
+    KnotMath::Vec3 joinFromCentre_;
+    QQuaternion joinTurnFrom_;
+    QQuaternion joinTurnTo_;
+    QVector3D joinPlaceFrom_;
+    QVector3D joinPlaceTo_;
+    double joinFromRadius_ = 0.0;
+    double joinRopeRadius_ = 0.0;
+    double joinSetDownHeight_ = 0.0;
+    Photo::RopeMaterial joinMaterial_;
+    std::unique_ptr<Photo::RopeInHand> joinDrop_;
+    double joinDropTime_ = 0.0;
+    quint64 joinDropShown_ = 0;
+    quint64 joinCheck_ = 0;
+    Photo::RestingRope joinLanded_;
 
     // the last table knot chosen as the second knot
     QString joinTableName_ =

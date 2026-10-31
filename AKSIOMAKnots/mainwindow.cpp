@@ -5103,6 +5103,44 @@ bool MainWindow::showRestingRope(double radius)
     if (sneaker && !knotFitsSneaker())
         return false;
 
+    /*
+     * The rope just joined has fallen onto the table by itself: it stays
+     * where it came to lie, on the same table (it does not fall again).
+     * (Choosing Custom Curve redraws the knot before the joined one is in:
+     * only the joined knot itself takes this rope.)
+     */
+    const bool landed =
+        joinLanded_.valid && !sneaker &&
+        currentPreset() == KnotMath::Preset::CustomCoordinates &&
+        customInputEdit_->toPlainText() == joined_.text;
+
+    if (landed)
+    {
+        restingRope_ = joinLanded_;
+        restingTied_ = Photo::TiedLace();
+        restingFrom_ = currentData_.points;
+        restingRadius_ = radius;
+        restingScene_ = static_cast<int>(scene);
+
+        joinLanded_ = Photo::RestingRope();
+
+        // what was still being laid down is for nothing now
+        ++restingJob_;
+
+        restingLaying_ = false;
+        restingJobFrom_.clear();
+
+        if (layingProgress_)
+            layingProgress_->cancel = true;
+
+        layingTimer_->stop();
+
+        if (noticeProgress_->isVisible())
+            hideNotice();
+
+        glWidget_->setCaption(QString(), QString());
+    }
+
     const bool known =
         restingRope_.valid &&
         restingScene_ == static_cast<int>(scene) &&
@@ -5211,7 +5249,7 @@ bool MainWindow::showRestingRope(double radius)
     }
 
     glWidget_->setCrossings(crossings);
-    glWidget_->setRestingRope(mesh, restingRope_.pose);
+    glWidget_->setRestingRope(mesh, restingRope_.pose, landed);
     glWidget_->setMeshColor(meshColor_);
 
     applySurface();
@@ -9465,6 +9503,11 @@ constexpr double JoinBridgeEnd = 4.4;
 constexpr double JoinFuseEnd = 5.4;
 constexpr double JoinEnd = 6.2;
 
+// Photo mode: how much of its colour each part takes on while they are told
+// apart, and the longest the joined rope takes to fall still (seconds)
+constexpr double JoinTint = 0.8;
+constexpr double JoinLongestFall = 4.0;
+
 const QColor JoinFirstColor(91, 155, 255);
 const QColor JoinSecondColor(217, 155, 66);
 const QColor JoinBandColor(255, 244, 214);
@@ -9499,6 +9542,30 @@ std::map<int, long long> polynomialMap(
     }
 
     return result;
+}
+
+// the length of a closed curve
+double arcLength(const QVector<KnotMath::Vec3> &curve)
+{
+    double length = 0.0;
+
+    for (int i = 0; i < curve.size(); ++i)
+        length += (curve.at((i + 1) % curve.size()) - curve.at(i)).length();
+
+    return length;
+}
+
+// the knot with a gap opened around its peak (0..1 of the cut)
+QVector<KnotMath::Vec3> openedKnot(const QVector<KnotMath::Vec3> &curve, int start, int peak, int end, double p)
+{
+    const int n = curve.size();
+    const int back = ((peak - start) % n + n) % n;
+    const int ahead = ((end - peak) % n + n) % n;
+
+    const int from = peak - std::max(1, static_cast<int>(std::lround(p * back)));
+    const int to = peak + std::max(1, static_cast<int>(std::lround(p * ahead)));
+
+    return KnotMath::curveWithout(curve, (from % n + n) % n, to % n);
 }
 
 // bounding box of some curves
@@ -9801,23 +9868,61 @@ void MainWindow::startJoin()
     glWidget_->setShowCrossingNumbers(false);
     glWidget_->clearFlashes();
 
+    photoJoin_ = startPhotoJoin();
+
+    if (photoJoin_)
+        renderPhotoJoinFrame();
+
     // the floor under everything that will be shown, and a view from the
     // front: the first knot on the left, the second on the right
     QVector3D minimum;
     QVector3D maximum;
 
-    curveBounds({&sum.firstBase, &sum.first, &sum.second, &sum.joined}, minimum, maximum);
+    // (Photo mode: as they lie on the table)
+    const auto placed = [this](const QVector<KnotMath::Vec3> &curve)
+    {
+        QVector<KnotMath::Vec3> result = curve;
 
-    const QVector3D pad(
-        static_cast<float>(radius),
-        static_cast<float>(radius),
-        static_cast<float>(radius));
+        if (photoJoin_)
+        {
+            for (KnotMath::Vec3 &p : result)
+                p = joinOnTable(p);
+        }
+
+        return result;
+    };
+
+    const QVector<KnotMath::Vec3> firstPlace = placed(sum.first);
+    const QVector<KnotMath::Vec3> secondPlace = placed(sum.second);
+    const QVector<KnotMath::Vec3> joinedPlace = placed(sum.joined);
+
+    // (the rope may have to come from where it lay)
+    QVector<KnotMath::Vec3> startPlace = photoJoin_ ? QVector<KnotMath::Vec3>() : sum.firstBase;
+
+    if (photoJoin_)
+    {
+        const QMatrix4x4 from = restingRope_.pose;
+
+        for (const KnotMath::Vec3 &p : joinFrom_)
+        {
+            const QVector3D q = from.map(
+                QVector3D(static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z)));
+
+            startPlace.push_back(KnotMath::Vec3(q.x(), q.y(), q.z()));
+        }
+    }
+
+    curveBounds({&startPlace, &firstPlace, &secondPlace, &joinedPlace}, minimum, maximum);
+
+    const float padding = static_cast<float>(photoJoin_ ? joinRopeRadius_ : radius);
+
+    const QVector3D pad(padding, padding, padding);
 
     glWidget_->setFixedBounds(minimum - pad, maximum + pad);
 
     // The pair is wide and low: the ball the camera fits is as large as
     // needed for the width across the wider angle of view, or the height.
-    curveBounds({&sum.first, &sum.second, &sum.joined}, minimum, maximum);
+    curveBounds({&firstPlace, &secondPlace, &joinedPlace}, minimum, maximum);
 
     const QVector3D size = maximum - minimum + 2.0f * pad;
 
@@ -9826,11 +9931,12 @@ void MainWindow::startJoin()
             ? static_cast<float>(glWidget_->width()) / static_cast<float>(glWidget_->height())
             : 1.0f;
 
+    // (a rope on the table is looked at from above it)
     glWidget_->flyToSphere(
         0.5f * (minimum + maximum),
         0.5f * std::max({size.x() / std::max(1.0f, aspect), size.y(), size.z()}),
         0.0f,
-        14.0f);
+        photoJoin_ ? 32.0f : 14.0f);
 
     joinButton_->setText(tr("STOP"));
     Icons::set(joinButton_, QStringLiteral("stop"));
@@ -9852,6 +9958,8 @@ void MainWindow::stopJoin(
 
     joinTimer_->stop();
 
+    stopPhotoJoin();
+
     glWidget_->clearFlashes();
     glWidget_->clearFixedBounds();
 
@@ -9865,10 +9973,544 @@ void MainWindow::stopJoin(
     }
 }
 
+bool MainWindow::startPhotoJoin()
+{
+    using KnotMath::Vec3;
+
+    if (!glWidget_->photoMode() || !restingRope_.valid || !sameCurve(restingFrom_, currentData_.points))
+        return false;
+
+    const auto scene = static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
+
+    // (a lace stays in its shoe)
+    if (Photo::sceneInfo(scene).sneaker)
+        return false;
+
+    // the rope where it lies now: picked up and put down, or as it was laid
+    const QVector<Vec3> rope =
+        photoRopeOn_ && photoRope_ != nullptr && photoRope_->closed()
+            ? photoRopeCurve(photoRope_->points(), true, false)
+            : restingRope_.points;
+
+    const QMatrix4x4 fromPose = restingRope_.pose;
+
+    stopPhotoRope();
+
+    joinMaterial_ = Photo::sceneInfo(scene).rope;
+    joinFromRadius_ = restingRadius_;
+
+    // the rope has the thickness the joined knot will have
+    {
+        KnotMath::CurveData data;
+
+        data.points = join_.joined;
+        data.closed = true;
+
+        joinRopeRadius_ = std::min(
+            KnotMath::safeTubeRadius(data, static_cast<double>(thicknessSlider_->value()) / 100.0),
+            joinFromRadius_);
+    }
+
+    joinFrom_ = KnotMath::resampleClosedCurve(rope, join_.firstBase.size(), true);
+
+    if (joinFrom_.size() != join_.firstBase.size())
+        return false;
+
+    /*
+     * The two knots lie flat side by side (the longest way along x), around
+     * where the rope lay. Nothing of them goes below a rope's radius above
+     * the table, in any of the parts ever shown.
+     */
+    QVector<QVector3D> flat;
+
+    flat.reserve(join_.joined.size());
+
+    for (const Vec3 &p : join_.joined)
+        flat.push_back(QVector3D(static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z)));
+
+    joinPose_ = Photo::flatPose(flat);
+
+    float lowest = std::numeric_limits<float>::max();
+
+    QVector3D low(1.0e30f, 1.0e30f, 1.0e30f);
+    QVector3D high(-1.0e30f, -1.0e30f, -1.0e30f);
+
+    for (const QVector<Vec3> *curve : {&join_.first, &join_.second, &join_.joined, &join_.bridgeOut, &join_.bridgeBack})
+    {
+        for (const Vec3 &p : *curve)
+        {
+            const QVector3D q = joinPose_.map(
+                QVector3D(static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z)));
+
+            lowest = std::min(lowest, q.y());
+
+            low = QVector3D(std::min(low.x(), q.x()), std::min(low.y(), q.y()), std::min(low.z(), q.z()));
+            high = QVector3D(std::max(high.x(), q.x()), std::max(high.y(), q.y()), std::max(high.z(), q.z()));
+        }
+    }
+
+    Vec3 centre(0.0, 0.0, 0.0);
+
+    QVector3D middle(0.0f, 0.0f, 0.0f);
+
+    for (const Vec3 &p : joinFrom_)
+    {
+        centre += p / joinFrom_.size();
+
+        middle += fromPose.map(QVector3D(static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z))) /
+                  static_cast<float>(joinFrom_.size());
+    }
+
+    joinFromCentre_ = centre;
+
+    QMatrix4x4 place;
+
+    place.translate(
+        middle.x() - 0.5f * (low.x() + high.x()),
+        static_cast<float>(joinRopeRadius_) - lowest,
+        middle.z() - 0.5f * (low.z() + high.z()));
+
+    joinPose_ = place * joinPose_;
+
+    /*
+     * As flat as the rope allows: the lowest scale of the heights at which
+     * no two parts of the joined rope, away from each other along it, come
+     * closer than two radii.
+     */
+    {
+        const int count = std::max(16, static_cast<int>(std::lround(arcLength(join_.joined) / joinRopeRadius_)));
+
+        const QVector<Vec3> line = KnotMath::resampleClosedCurve(join_.joined, count, true);
+
+        QVector<Vec3> table;
+
+        table.reserve(count);
+
+        for (const Vec3 &p : line)
+        {
+            const QVector3D q = joinPose_.map(
+                QVector3D(static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z)));
+
+            table.push_back(Vec3(q.x(), q.y(), q.z()));
+        }
+
+        const double clear = 2.1 * joinRopeRadius_;
+        const int apart = 6;
+
+        const auto clears = [&table, count, clear, apart](double flat)
+        {
+            for (int i = 0; i < count; ++i)
+            {
+                for (int j = i + apart; j < count; ++j)
+                {
+                    if (count - (j - i) <= apart)
+                        continue;
+
+                    const double dx = table.at(i).x - table.at(j).x;
+                    const double dy = (table.at(i).y - table.at(j).y) * flat;
+                    const double dz = table.at(i).z - table.at(j).z;
+
+                    if (dx * dx + dy * dy + dz * dz < clear * clear)
+                        return false;
+                }
+            }
+
+            return true;
+        };
+
+        joinFlat_ = 1.0;
+
+        for (const double flat : {0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2})
+        {
+            if (!clears(flat))
+                break;
+
+            joinFlat_ = flat;
+        }
+    }
+
+    // how the rope gets from where it lay to the first knot's place
+    const QVector<Vec3> axes = KnotMath::placeCurve(
+        {Vec3(1.0, 0.0, 0.0), Vec3(0.0, 1.0, 0.0), Vec3(0.0, 0.0, 1.0)},
+        join_.firstPose.yaw,
+        join_.firstPose.tilt,
+        Vec3(0.0, 0.0, 0.0));
+
+    QMatrix3x3 turn;
+
+    for (int column = 0; column < 3; ++column)
+    {
+        const QVector3D axis = joinPose_.mapVector(QVector3D(
+            static_cast<float>(axes.at(column).x),
+            static_cast<float>(axes.at(column).y),
+            static_cast<float>(axes.at(column).z)));
+
+        for (int row = 0; row < 3; ++row)
+            turn(row, column) = axis[row];
+    }
+
+    joinTurnFrom_ = QQuaternion::fromRotationMatrix(fromPose.toGenericMatrix<3, 3>());
+    joinTurnTo_ = QQuaternion::fromRotationMatrix(turn);
+
+    joinPlaceFrom_ = fromPose.map(QVector3D(
+        static_cast<float>(centre.x), static_cast<float>(centre.y), static_cast<float>(centre.z)));
+
+    joinPlaceTo_ = joinPose_.map(QVector3D(
+        static_cast<float>(join_.firstPose.shift.x),
+        static_cast<float>(join_.firstPose.shift.y),
+        static_cast<float>(join_.firstPose.shift.z)));
+
+    joinSetDownHeight_ = 1.2 * static_cast<double>((high - low).length());
+
+    joinDrop_.reset();
+    joinLanded_ = Photo::RestingRope();
+
+    glWidget_->setRopeTinted(true);
+
+    return true;
+}
+
+KnotMath::Vec3 MainWindow::joinOnTable(const KnotMath::Vec3 &point) const
+{
+    const QVector3D q = joinPose_.map(
+        QVector3D(static_cast<float>(point.x), static_cast<float>(point.y), static_cast<float>(point.z)));
+
+    return KnotMath::Vec3(q.x(), joinRopeRadius_ + (q.y() - joinRopeRadius_) * joinFlat_, q.z());
+}
+
+void MainWindow::stopPhotoJoin()
+{
+    // (what is still being checked is for nothing now)
+    ++joinCheck_;
+
+    joinDrop_.reset();
+
+    if (!photoJoin_)
+        return;
+
+    photoJoin_ = false;
+
+    glWidget_->setRopeTinted(false);
+}
+
+void MainWindow::renderPhotoJoinFrame()
+{
+    using KnotMath::Vec3;
+
+    const KnotMath::ConnectedSum &s = join_;
+    const double t = joinTime_;
+    const QColor rope = joinMaterial_.color;
+
+    KnotMath::Mesh mesh;
+
+    // one length of rope, as it lies on the table
+    auto add = [this, &mesh](const QVector<Vec3> &curve, bool closed, double radius, const QColor &colour)
+    {
+        if (curve.size() < 2)
+            return;
+
+        KnotMath::Mesh part = Photo::buildRopeMesh(curve, closed, radius, joinMaterial_, true);
+
+        if (!part.isValid())
+            return;
+
+        part.fillColor(colour);
+
+        mesh.append(part);
+    };
+
+    auto onTable = [this](const QVector<Vec3> &curve)
+    {
+        QVector<Vec3> table;
+
+        table.reserve(curve.size());
+
+        for (const Vec3 &p : curve)
+            table.push_back(joinOnTable(p));
+
+        return table;
+    };
+
+    const QColor firstTint = blendColour(rope, JoinFirstColor, JoinTint);
+    const QColor secondTint = blendColour(rope, JoinSecondColor, JoinTint);
+    const QColor bandTint = blendColour(rope, JoinBandColor, JoinTint);
+
+    const double r = joinRopeRadius_;
+
+    if (t < JoinIntroEnd)
+    {
+        /*
+         * The rope slides from where it lay to its place, taking on the
+         * knot's own shape on the way; no point of it ever goes below the
+         * table. The second knot is set down from above beside it.
+         */
+        const double e = joinEase(t / JoinIntroEnd);
+
+        const QQuaternion turn = QQuaternion::slerp(joinTurnFrom_, joinTurnTo_, static_cast<float>(e));
+        const QVector3D place = joinPlaceFrom_ + (joinPlaceTo_ - joinPlaceFrom_) * static_cast<float>(e);
+        const double thick = joinFromRadius_ + (joinRopeRadius_ - joinFromRadius_) * e;
+        const double flat = 1.0 + (joinFlat_ - 1.0) * e;
+
+        QVector<Vec3> first;
+
+        first.reserve(joinFrom_.size());
+
+        double lowest = std::numeric_limits<double>::max();
+
+        for (int i = 0; i < joinFrom_.size(); ++i)
+        {
+            const Vec3 shape = (joinFrom_.at(i) - joinFromCentre_) * (1.0 - e) + s.firstBase.at(i) * e;
+
+            const QVector3D q = turn.rotatedVector(QVector3D(
+                static_cast<float>(shape.x), static_cast<float>(shape.y), static_cast<float>(shape.z))) + place;
+
+            first.push_back(Vec3(q.x(), thick + (q.y() - thick) * flat, q.z()));
+
+            lowest = std::min(lowest, first.last().y);
+        }
+
+        if (lowest < thick)
+        {
+            for (Vec3 &p : first)
+                p.y += thick - lowest;
+        }
+
+        add(first, true, thick, blendColour(rope, JoinFirstColor, JoinTint * e));
+
+        const double f = joinEase((t - 0.35) / (JoinIntroEnd - 0.35));
+
+        if (f > 0.0)
+        {
+            QVector<Vec3> second = onTable(s.second);
+
+            const double above = joinSetDownHeight_ * (1.0 - f) * (1.0 - f);
+
+            for (Vec3 &p : second)
+                p.y += above;
+
+            add(second, true, r, secondTint);
+        }
+    }
+    else if (t < JoinCutEnd)
+    {
+        const double p = joinEase((t - JoinIntroEnd) / (JoinCutEnd - JoinIntroEnd));
+
+        add(onTable(openedKnot(s.first, s.firstCutStart, s.firstPeak, s.firstCutEnd, p)), false, r, firstTint);
+        add(onTable(openedKnot(s.second, s.secondCutStart, s.secondPeak, s.secondCutEnd, p)), false, r, secondTint);
+    }
+    else if (t < JoinBridgeEnd)
+    {
+        const double p = joinEase((t - JoinCutEnd) / (JoinBridgeEnd - JoinCutEnd));
+
+        add(onTable(KnotMath::curveWithout(s.first, s.firstCutStart, s.firstCutEnd)), false, r, firstTint);
+        add(onTable(KnotMath::curveWithout(s.second, s.secondCutStart, s.secondCutEnd)), false, r, secondTint);
+
+        for (const QVector<Vec3> *strand : {&s.bridgeOut, &s.bridgeBack})
+        {
+            const int count = strand->size();
+            const int grown = std::min(count, 2 + static_cast<int>(std::lround(p * 0.5 * (count - 1))));
+
+            add(onTable(strand->mid(0, grown)), false, r, bandTint);
+            add(onTable(strand->mid(count - grown)), false, r, bandTint);
+        }
+    }
+    else
+    {
+        // one rope: the colours of its parts fade back to the rope's own
+        const double f = joinEase((t - JoinBridgeEnd) / (JoinFuseEnd - JoinBridgeEnd));
+
+        mesh = Photo::buildRopeMesh(onTable(s.joined), true, r, joinMaterial_, true);
+
+        const int vertices = mesh.positions.size() / 3;
+        const int points = s.joined.size();
+        const float length = mesh.strandLength.value(0, 1.0f);
+
+        mesh.colors.resize(3 * vertices);
+
+        for (int v = 0; v < vertices; ++v)
+        {
+            const int ring = mesh.vertexSample.value(v, 0);
+            const float fraction = mesh.centerlineArc.value(ring, 0.0f) / std::max(length, 1.0e-6f);
+
+            const int point = std::clamp(static_cast<int>(fraction * points), 0, points - 1);
+            const int part = s.joinedPart[point];
+
+            const QColor colour = blendColour(
+                rope,
+                part == 0 ? JoinFirstColor : part == 1 ? JoinSecondColor : JoinBandColor,
+                JoinTint * (1.0 - f));
+
+            mesh.colors[3 * v] = static_cast<float>(colour.redF());
+            mesh.colors[3 * v + 1] = static_cast<float>(colour.greenF());
+            mesh.colors[3 * v + 2] = static_cast<float>(colour.blueF());
+        }
+    }
+
+    if (!mesh.isValid())
+        return;
+
+    // (the rope is made in the table's own coordinates)
+    glWidget_->setRestingRope(std::move(mesh), QMatrix4x4(), true);
+}
+
+void MainWindow::startJoinDrop()
+{
+    using KnotMath::Vec3;
+
+    glWidget_->clearFlashes();
+
+    // on the table in radii, points half a radius apart, as the rope
+    // physics wants them
+    QVector<Vec3> table;
+
+    table.reserve(join_.joined.size());
+
+    double length = 0.0;
+
+    for (const Vec3 &p : join_.joined)
+        table.push_back(joinOnTable(p) / joinRopeRadius_);
+
+    for (int i = 0; i < table.size(); ++i)
+        length += (table.at((i + 1) % table.size()) - table.at(i)).length();
+
+    const int n = std::clamp(static_cast<int>(std::lround(length / 0.5)), 16, 6000);
+
+    Photo::RopeSimulation rope(KnotMath::resampleClosedCurve(table, n, true), QVector<bool>(), true, joinMaterial_);
+
+    if (!rope.isValid())
+    {
+        finishJoin();
+        return;
+    }
+
+    rope.takeSet(joinMaterial_.tiedSet);
+
+    joinDrop_ = std::make_unique<Photo::RopeInHand>(rope);
+    joinDropTime_ = 0.0;
+    joinDropShown_ = 0;
+}
+
+void MainWindow::advanceJoinDrop()
+{
+    using KnotMath::Vec3;
+
+    joinDropTime_ += std::min(static_cast<double>(joinClock_.restart()) / 1000.0, 0.05);
+
+    if (joinDrop_->resting() || joinDropTime_ > JoinLongestFall)
+    {
+        landJoinedRope();
+        return;
+    }
+
+    quint64 version = 0;
+
+    QVector<Vec3> frames;
+    QVector<Vec3> points = joinDrop_->points(&version, &frames);
+
+    if (version == joinDropShown_)
+        return;
+
+    joinDropShown_ = version;
+
+    for (Vec3 &p : points)
+        p *= joinRopeRadius_;
+
+    KnotMath::Mesh mesh = Photo::buildRopeMesh(points, true, joinRopeRadius_, joinMaterial_, true, frames);
+
+    if (!mesh.isValid())
+        return;
+
+    mesh.fillColor(joinMaterial_.color);
+
+    glWidget_->setRestingRope(std::move(mesh), QMatrix4x4(), true);
+}
+
+void MainWindow::landJoinedRope()
+{
+    using KnotMath::Vec3;
+
+    joinDrop_->rest();
+
+    QVector<Vec3> frames;
+    const QVector<Vec3> points = joinDrop_->points(nullptr, &frames);
+
+    joinDrop_.reset();
+    joinTimer_->stop();
+
+    // where it lies, as a rope at rest: in the knot's coordinates, with the
+    // pose that takes them to the table
+    const QMatrix4x4 back = joinPose_.inverted();
+
+    auto landed = std::make_shared<Photo::RestingRope>();
+
+    landed->pose = joinPose_;
+    landed->settled = true;
+
+    for (const Vec3 &p : points)
+    {
+        const QVector3D q = back.map(QVector3D(
+            static_cast<float>(p.x * joinRopeRadius_),
+            static_cast<float>(p.y * joinRopeRadius_),
+            static_cast<float>(p.z * joinRopeRadius_)));
+
+        landed->points.push_back(Vec3(q.x(), q.y(), q.z()));
+    }
+
+    for (const Vec3 &f : frames)
+    {
+        const QVector3D q =
+            back.mapVector(QVector3D(static_cast<float>(f.x), static_cast<float>(f.y), static_cast<float>(f.z)));
+
+        landed->frames.push_back(Vec3(q.x(), q.y(), q.z()));
+    }
+
+    /*
+     * The rope never passes through itself; checked all the same, as for a
+     * rope laid down, while it lies there. If it changed it is laid down
+     * anew from the knot.
+     */
+    const quint64 check = ++joinCheck_;
+    const QVector<Vec3> knot = join_.joined;
+
+    QThread *worker = QThread::create(
+        [landed, knot]()
+        {
+            const KnotMath::AlexanderPolynomial before = KnotMath::computeAlexanderPolynomial(knot);
+            const KnotMath::AlexanderPolynomial after = KnotMath::computeAlexanderPolynomial(landed->points);
+
+            landed->valid = before.valid && after.valid && after.text == before.text;
+        });
+
+    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+
+    connect(
+        worker,
+        &QThread::finished,
+        this,
+        [this, check, landed]()
+        {
+            if (check != joinCheck_ || !joinActive_)
+                return;
+
+            joinLanded_ = *landed;
+
+            finishJoin();
+        });
+
+    worker->start();
+}
+
 void MainWindow::joinTick()
 {
     if (!joinActive_)
         return;
+
+    // Photo mode: the joined rope falling to rest
+    if (joinDrop_ != nullptr)
+    {
+        advanceJoinDrop();
+        return;
+    }
 
     joinTime_ +=
         std::min(
@@ -9876,6 +10518,18 @@ void MainWindow::joinTick()
             static_cast<double>(joinClock_.restart()) / 1000.0);
 
     const double t = joinTime_;
+
+    if (photoJoin_ && t >= JoinFuseEnd)
+    {
+        startJoinDrop();
+        return;
+    }
+
+    // (flashes in the coordinates of what is shown)
+    const auto shown = [this](const KnotMath::Vec3 &p)
+    {
+        return photoJoin_ ? joinOnTable(p) : p;
+    };
 
     // flashes where the cuts open and where the two halves of each strand
     // of the band meet
@@ -9886,7 +10540,7 @@ void MainWindow::joinTick()
 
     if (cut > 0.0 && cut < 1.0)
     {
-        flashes << join_.first[join_.firstPeak] << join_.second[join_.secondPeak];
+        flashes << shown(join_.first[join_.firstPeak]) << shown(join_.second[join_.secondPeak]);
         progress << static_cast<float>(cut) << static_cast<float>(cut);
     }
 
@@ -9894,8 +10548,8 @@ void MainWindow::joinTick()
 
     if (meet > 0.0 && meet < 1.0)
     {
-        flashes << join_.bridgeOut[join_.bridgeOut.size() / 2]
-                << join_.bridgeBack[join_.bridgeBack.size() / 2];
+        flashes << shown(join_.bridgeOut[join_.bridgeOut.size() / 2])
+                << shown(join_.bridgeBack[join_.bridgeBack.size() / 2]);
         progress << static_cast<float>(meet) << static_cast<float>(meet);
     }
 
@@ -9917,6 +10571,12 @@ void MainWindow::joinTick()
 void MainWindow::renderJoinFrame()
 {
     using KnotMath::Vec3;
+
+    if (photoJoin_)
+    {
+        renderPhotoJoinFrame();
+        return;
+    }
 
     const KnotMath::ConnectedSum &s = join_;
     const double t = joinTime_;
@@ -9940,19 +10600,6 @@ void MainWindow::renderJoinFrame()
             part.fillColor(color);
 
         return part;
-    };
-
-    // the knot with a gap opened around its peak (0..1 of the cut)
-    auto opened = [](const QVector<Vec3> &curve, int start, int peak, int end, double p)
-    {
-        const int n = curve.size();
-        const int back = ((peak - start) % n + n) % n;
-        const int ahead = ((end - peak) % n + n) % n;
-
-        const int from = peak - std::max(1, static_cast<int>(std::lround(p * back)));
-        const int to = peak + std::max(1, static_cast<int>(std::lround(p * ahead)));
-
-        return KnotMath::curveWithout(curve, (from % n + n) % n, to % n);
     };
 
     const double r = joinTubeRadius_;
@@ -9995,11 +10642,11 @@ void MainWindow::renderJoinFrame()
         const double p = joinEase((t - JoinIntroEnd) / (JoinCutEnd - JoinIntroEnd));
 
         mesh.append(tube(
-            opened(s.first, s.firstCutStart, s.firstPeak, s.firstCutEnd, p),
+            openedKnot(s.first, s.firstCutStart, s.firstPeak, s.firstCutEnd, p),
             r, false, JoinFirstColor));
 
         mesh.append(tube(
-            opened(s.second, s.secondCutStart, s.secondPeak, s.secondCutEnd, p),
+            openedKnot(s.second, s.secondCutStart, s.secondPeak, s.secondCutEnd, p),
             r, false, JoinSecondColor));
     }
     else if (t < JoinBridgeEnd)
@@ -10130,6 +10777,8 @@ void MainWindow::finishJoin()
 
     joinTimer_->stop();
 
+    stopPhotoJoin();
+
     glWidget_->clearFlashes();
     glWidget_->clearFixedBounds();
 
@@ -10153,6 +10802,8 @@ void MainWindow::finishJoin()
     customInputEdit_->setPlainText(joined_.text);
 
     generateMesh();
+
+    joinLanded_ = Photo::RestingRope();
 
     QString text =
         QStringLiteral("<b>%1</b><br>%2")

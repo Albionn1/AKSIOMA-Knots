@@ -56,6 +56,11 @@ struct RopeMaterial
     // stiffness against twisting, as a share of that against bending
     double twistStiffness = 0.7;
 
+    // A rope is no spring: its fibres rub on each other wherever it bends,
+    // and the same share of a swing goes in every cycle, long or short. As
+    // a share of the damping at which it would no longer swing back at all.
+    double swingDamping = 1.0;
+
     // Natural fibre takes a set: bent tighter than this radius it creeps
     // towards the new shape (at this rate, per second) and keeps part of it.
     double setRadiusMm = 70.0;

@@ -5,7 +5,7 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui)
 set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 add_executable(rope_lab rope_lab.cpp
-    ${SRC}/knotmath.cpp ${SRC}/knottable.cpp ${SRC}/photoscene.cpp ${SRC}/ropephysics.cpp)
+    ${SRC}/knotjoin.cpp ${SRC}/knotmath.cpp ${SRC}/knottable.cpp ${SRC}/photoscene.cpp ${SRC}/ropephysics.cpp)
 target_include_directories(rope_lab PRIVATE ${SRC})
 target_compile_options(rope_lab PRIVATE -O2 -Wall -Wextra)
 qt_add_resources(rope_lab "knottable" PREFIX "/" BIG_RESOURCES BASE ${SRC} FILES ${SRC}/data/knottable.dat)

@@ -65,14 +65,13 @@ constexpr double TrustTurn = 0.4;
 // a rod all but unstretchable: its compliance in the solved system
 constexpr double StretchCompliance = 1.0e-6;
 
-// how much of the difference from its neighbours a point's velocity loses
-// to the rubbing of the fibres, per sweep and step, and the sweeps
-constexpr double Fibres = 0.12;
-constexpr int DampingSweeps = 2;
-
 // no point moves more than this in one step (no tunnelling through the
 // rope: two radii wide)
 constexpr double MaxStep = 0.4;
+
+// A mouse moves in jumps, once a frame; a hand moves smoothly. The hand
+// follows the mouse this late (seconds), or every jump would shake the rope.
+constexpr double HandDelay = 0.04;
 
 // pieces this much beyond contact are still kept in the list of pairs, and
 // the list is renewed before anything can have moved that far
@@ -234,6 +233,80 @@ void solve6(const double *l, double *b)
 
         b[i] = value / l[i * 6 + i];
     }
+}
+
+// x = M^-1 x for the tridiagonal M (the rows below, on and above the diagonal)
+template<typename T>
+void solveTridiagonal(const double *below, const double *on, const double *above, double *work, T *x, int n)
+{
+    double pivot = on[0];
+
+    x[0] = x[0] * (1.0 / pivot);
+
+    for (int i = 1; i < n; ++i)
+    {
+        work[i] = above[i - 1] / pivot;
+        pivot = on[i] - below[i] * work[i];
+        x[i] = (x[i] - x[i - 1] * below[i]) * (1.0 / pivot);
+    }
+
+    for (int i = n - 2; i >= 0; --i)
+        x[i] = x[i] - x[i + 1] * work[i + 1];
+}
+
+/*
+ * v = (1 - rub L)^-1 v, L the differences of the velocities of neighbours
+ * along the rope: every point's velocity is drawn towards theirs, as far as
+ * the rubbing of the fibres takes it in a step, however strong. Points with
+ * no weight (held fast, `free` 0) keep theirs and hold their neighbours back.
+ * On a closed rope the first and last are neighbours as well: the two
+ * corners of the system are taken out by Sherman-Morrison.
+ */
+void rubAlong(Vec3 *v, int n, bool closed, double rub, const double *free)
+{
+    QVector<double> below(n);
+    QVector<double> on(n);
+    QVector<double> above(n);
+    QVector<double> work(n);
+
+    for (int i = 0; i < n; ++i)
+    {
+        const bool moves = free == nullptr || free[i] != 0.0;
+        const bool first = !closed && i == 0;
+        const bool last = !closed && i == n - 1;
+
+        below[i] = moves && !first ? -rub : 0.0;
+        above[i] = moves && !last ? -rub : 0.0;
+        on[i] = 1.0 - below.at(i) - above.at(i);
+    }
+
+    if (!closed)
+    {
+        solveTridiagonal(below.constData(), on.constData(), above.constData(), work.data(), v, n);
+        return;
+    }
+
+    // (row 0 reaches the last point, the last row reaches point 0)
+    const double cornerLow = below.at(0);
+    const double cornerLast = above.at(n - 1);
+    const double scale = -on.at(0);
+
+    on[0] -= scale;
+    on[n - 1] -= cornerLast * cornerLow / scale;
+
+    QVector<double> z(n, 0.0);
+
+    z[0] = scale;
+    z[n - 1] = cornerLast;
+
+    solveTridiagonal(below.constData(), on.constData(), above.constData(), work.data(), v, n);
+    solveTridiagonal(below.constData(), on.constData(), above.constData(), work.data(), z.data(), n);
+
+    const Vec3 top = v[0] + v[n - 1] * (cornerLow / scale);
+    const double share = 1.0 / (1.0 + z.at(0) + z.at(n - 1) * cornerLow / scale);
+
+    for (int i = 0; i < n; ++i)
+        v[i] = v[i] - top * (share * z.at(i));
 }
 
 // distance along the rope between points i and j (in points)
@@ -480,6 +553,17 @@ RopeSimulation::RopeSimulation(
     bendSoftness_ = h_ / bending / (dt * dt);
     twistSoftness_ = h_ / twisting / (dt * dt);
 
+    /*
+     * A bend of wavenumber k swings at w = sqrt(B) k^2 (mass 1 per length),
+     * and the rubbing takes its velocity away at the rate rub (k h)^2 / dt:
+     * also in k^2, so the swings of every length lose the same share per
+     * cycle, as those of a real rope do. Damped by the share z of what stops
+     * it swinging back, that rate is 2 z w.
+     */
+    fibreRub_ = 2.0 * material.swingDamping * std::sqrt(bending) * dt / (h_ * h_);
+
+    handEase_ = std::min(secondsPerStep() / HandDelay, 1.0);
+
     // what permanent bending starts at, as an angle per joint, and how
     // fast the rope gives way beyond it
     yieldAngle_ = h_ * radiusMm_ / std::max(material.setRadiusMm, 1.0);
@@ -691,6 +775,7 @@ void RopeSimulation::hold(int index, const Vec3 &target, bool under)
     heldWeight_ = w_.at(index);
     under_ = under;
     hand_ = target;
+    handEased_ = x_.at(index);
 
     // the hand moves it; nothing else does
     w_[index] = 0.0;
@@ -1561,11 +1646,14 @@ void RopeSimulation::step()
     // no piece turns further than this in a step
     constexpr double MaxTurn = 0.3;
 
+    if (held_ >= 0)
+        handEased_ += (hand_ - handEased_) * handEase_;
+
     for (int i = 0; i < n; ++i)
     {
         if (i == held_)
         {
-            Vec3 move = hand_ - X[i];
+            Vec3 move = handEased_ - X[i];
 
             move.y = std::clamp(move.y, -HandRise, HandRise);
 
@@ -1655,35 +1743,12 @@ void RopeSimulation::step()
 
     /*
      * The rope's own damping: the fibres rub against each other as it
-     * bends, so motion of one part against the next dies away (a smoothing
-     * of the velocities along the rope). The rope as a whole keeps moving:
-     * this cannot slow a fall.
+     * bends, so motion of one part against the next dies away. The rope as
+     * a whole keeps moving: this cannot slow a fall. On the velocities once
+     * the step is over, so it can only ever take energy out.
      */
-    for (int sweep = 0; sweep < DampingSweeps; ++sweep)
-    {
-        smoothed_ = v_;
-
-        for (int i = closed_ ? 0 : 1; i < (closed_ ? n : n - 1); ++i)
-        {
-            if (W[i] == 0.0)
-                continue;
-
-            const int a = (i - 1 + n) % n;
-            const int b = (i + 1) % n;
-
-            V[i] = smoothed_.at(i) + (smoothed_.at(a) + smoothed_.at(b) - smoothed_.at(i) * 2.0) * Fibres;
-        }
-
-        smoothed_ = spin_;
-
-        for (int i = closed_ ? 0 : 1; i < (closed_ ? segments : segments - 1); ++i)
-        {
-            const int a = (i - 1 + segments) % segments;
-            const int b = (i + 1) % segments;
-
-            Spin[i] = smoothed_.at(i) + (smoothed_.at(a) + smoothed_.at(b) - smoothed_.at(i) * 2.0) * Fibres;
-        }
-    }
+    rubAlong(V, n, closed_, fibreRub_, W);
+    rubAlong(Spin, segments, closed_, fibreRub_, nullptr);
 
     /*
      * Natural fibre takes a set: bent further than its yield, the rope
