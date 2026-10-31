@@ -221,6 +221,8 @@ private:
 
     void updateLightingControls();
 
+    void updatePhotoQualityNote();
+
     void updateMemoryMeter();
 
     // F11; Esc leaves full screen
@@ -437,6 +439,13 @@ private:
         nullptr;
 
     QComboBox *shadowQualityCombo_ =
+        nullptr;
+
+    // Photo mode's quality, and what it is working at now
+    QComboBox *photoQualityCombo_ =
+        nullptr;
+
+    QLabel *photoQualityNow_ =
         nullptr;
 
     QLabel *memoryAdapterLabel_ =

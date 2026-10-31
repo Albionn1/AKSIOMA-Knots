@@ -50,6 +50,13 @@ Lighting::Options lighting();
 void setLighting(
     const Lighting::Options &options);
 
+// the level Photo mode's automatic quality last settled on (1 high, 2
+// medium, 3 low): it starts there the next time
+int photoAutoLevel();
+
+void setPhotoAutoLevel(
+    int level);
+
 // Removes every stored setting.
 void restoreDefaults();
 

@@ -6,6 +6,8 @@
 //
 // PHOTO_CAM="yaw pitch radius along": the camera at yaw, pitch degrees on a
 // ball of `radius` rope radii around the point `along` (0..1) of the rope.
+// PHOTO_QUALITY=0..3: automatic, high, medium, low. AKSIOMA_PHOTO_SLOW=n: the
+// automatic quality judges as if the graphics card were n times slower.
 
 #include "knotglwidget.h"
 #include "knotmath.h"
@@ -100,6 +102,20 @@ int main(int argc, char **argv)
         view.setAttribute(Qt::WA_DontShowOnScreen);
         view.resize(width, height);
         view.show();
+
+        {
+            Lighting::Options options = view.lighting();
+
+            options.photoQuality = qEnvironmentVariableIntValue("PHOTO_QUALITY");
+
+            view.setLighting(options);
+        }
+
+        QObject::connect(&view, &KnotGLWidget::photoLevelChanged, [](int level, bool automatic)
+                         {
+                             std::printf("level %d (%s)\n", level, automatic ? "automatic" : "chosen");
+                             std::fflush(stdout);
+                         });
 
         if (!view.setPhotoMode(true, scene))
             return 1;
@@ -221,6 +237,14 @@ int main(int argc, char **argv)
     view.setAttribute(Qt::WA_DontShowOnScreen);
     view.resize(width, height);
     view.show();
+
+    {
+        Lighting::Options options = view.lighting();
+
+        options.photoQuality = qEnvironmentVariableIntValue("PHOTO_QUALITY");
+
+        view.setLighting(options);
+    }
 
     for (int k = 0; k < static_cast<int>(Photo::Scene::Count); ++k)
     {

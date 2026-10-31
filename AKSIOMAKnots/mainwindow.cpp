@@ -264,6 +264,7 @@ MainWindow::MainWindow(
     glWidget_ = new KnotGLWidget(viewport);
 
     glWidget_->setLighting(AppSettings::lighting());
+    glWidget_->setPhotoAutoLevel(AppSettings::photoAutoLevel());
 
     viewportLayout->addWidget(glWidget_, 1);
 
@@ -2235,6 +2236,29 @@ QWidget *MainWindow::createLightingPanel()
 
     layout->addWidget(shadowQualityCombo_);
 
+    layout->addWidget(makeFieldLabel(tr("Photo quality"), panel));
+
+    photoQualityCombo_ = new QComboBox(panel);
+
+    photoQualityCombo_->setMinimumHeight(36);
+    photoQualityCombo_->setToolTip(
+        tr("How much work the graphics card does in Photo mode. Automatic "
+           "keeps the picture smooth on any computer. A still picture "
+           "comes out clean at every level."));
+
+    photoQualityCombo_->addItem(tr("Automatic"), 0);
+    photoQualityCombo_->addItem(tr("High"), 1);
+    photoQualityCombo_->addItem(tr("Medium"), 2);
+    photoQualityCombo_->addItem(tr("Low"), 3);
+
+    layout->addWidget(photoQualityCombo_);
+
+    photoQualityNow_ = new QLabel(panel);
+
+    photoQualityNow_->setObjectName(QStringLiteral("Subtitle"));
+
+    layout->addWidget(photoQualityNow_);
+
     layout->addSpacing(12);
 
     /*
@@ -2306,8 +2330,12 @@ QWidget *MainWindow::createLightingPanel()
                 return;
             }
 
-            applyLighting(
-                Lighting::preset(preset, glWidget_->lighting().shadowQuality));
+            Lighting::Options options =
+                Lighting::preset(preset, glWidget_->lighting().shadowQuality);
+
+            options.photoQuality = glWidget_->lighting().photoQuality;
+
+            applyLighting(options);
         });
 
     connect(
@@ -2347,6 +2375,32 @@ QWidget *MainWindow::createLightingPanel()
             options.shadowQuality = shadowQualityCombo_->currentData().toInt();
 
             applyLighting(options);
+        });
+
+    connect(
+        photoQualityCombo_,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this](int)
+        {
+            Lighting::Options options = glWidget_->lighting();
+
+            options.photoQuality = photoQualityCombo_->currentData().toInt();
+
+            applyLighting(options);
+        });
+
+    connect(
+        glWidget_,
+        &KnotGLWidget::photoLevelChanged,
+        this,
+        [this](int level, bool automatic)
+        {
+            // it starts there the next time
+            if (automatic)
+                AppSettings::setPhotoAutoLevel(level);
+
+            updatePhotoQualityNote();
         });
 
     memoryTimer_ = new QTimer(this);
@@ -2463,6 +2517,29 @@ void MainWindow::updateLightingControls()
         shadowQualityCombo_->setCurrentIndex(
             std::max(0, shadowQualityCombo_->findData(options.shadowQuality)));
     }
+
+    {
+        const QSignalBlocker blocker(photoQualityCombo_);
+
+        photoQualityCombo_->setCurrentIndex(
+            std::max(0, photoQualityCombo_->findData(options.photoQuality)));
+    }
+
+    updatePhotoQualityNote();
+}
+
+void MainWindow::updatePhotoQualityNote()
+{
+    if (photoQualityNow_ == nullptr || photoQualityCombo_ == nullptr)
+        return;
+
+    // only automatic quality has something to tell
+    const bool automatic = photoQualityCombo_->currentData().toInt() == 0;
+
+    const int found = photoQualityCombo_->findData(glWidget_->photoLevelInUse());
+
+    photoQualityNow_->setVisible(automatic);
+    photoQualityNow_->setText(tr("Working at: %1").arg(photoQualityCombo_->itemText(std::max(found, 0))));
 }
 
 void MainWindow::updateMemoryMeter()

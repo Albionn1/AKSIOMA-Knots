@@ -192,8 +192,20 @@ Lighting::Options lighting()
     options.brightness = number("brightness", defaults.brightness, 50, 150);
     options.shadowSoftness = number("shadowSoftness", defaults.shadowSoftness, 25, 400);
     options.shadowQuality = number("shadowQuality", defaults.shadowQuality, 0, 2);
+    options.photoQuality = number("photoQuality", defaults.photoQuality, 0, 3);
 
     return options;
+}
+
+int photoAutoLevel()
+{
+    return std::clamp(QSettings().value(QStringLiteral("photoAutoLevel"), 1).toInt(), 1, 3);
+}
+
+void setPhotoAutoLevel(
+    int level)
+{
+    QSettings().setValue(QStringLiteral("photoAutoLevel"), level);
 }
 
 void setLighting(
@@ -216,6 +228,7 @@ void setLighting(
     settings.setValue(QStringLiteral("brightness"), options.brightness);
     settings.setValue(QStringLiteral("shadowSoftness"), options.shadowSoftness);
     settings.setValue(QStringLiteral("shadowQuality"), options.shadowQuality);
+    settings.setValue(QStringLiteral("photoQuality"), options.photoQuality);
 }
 
 void restoreDefaults()

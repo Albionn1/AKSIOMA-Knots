@@ -83,6 +83,34 @@ Preset presetOf(
     return Preset::Custom;
 }
 
+PhotoLevel photoLevel(
+    int level)
+{
+    PhotoLevel values;
+
+    if (level == 2)
+    {
+        values.scale = 0.85f;
+        values.samples = 2;
+        values.shadowMap = 2048;
+        values.shadowTaps = 8;
+        values.shadeTaps = 8;
+        values.lensTaps = 24;
+    }
+    else if (level >= 3)
+    {
+        values.scale = 0.7f;
+        values.samples = 0;
+        values.shadowMap = 2048;
+        values.shadowTaps = 8;
+        values.shadeTaps = 0;
+        values.lensTaps = 12;
+        values.mirror = false;
+    }
+
+    return values;
+}
+
 int shadowMapSize(
     int quality)
 {

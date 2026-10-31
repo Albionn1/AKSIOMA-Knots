@@ -5,6 +5,8 @@
 #include "lighting.h"
 #include "photoscene.h"
 
+#include <QOpenGLTimerQuery>
+
 #include <QColor>
 #include <QElapsedTimer>
 #include <QMatrix4x4>
@@ -229,6 +231,11 @@ public:
         float yaw,
         float pitch);
 
+    // Photo mode's automatic quality starts at this level (1 high, 2 medium,
+    // 3 low), and the level in use now.
+    void setPhotoAutoLevel(int level);
+    int photoLevelInUse() const;
+
     // The camera at once at (yaw, pitch) degrees, showing the ball (`centre`
     // in the view, `radius`) whole. For pictures from a chosen place.
     void placeCamera(
@@ -246,6 +253,10 @@ signals:
     void ropeGrabbed(const QVector3D &point);
     void ropeDragged(const QVector3D &point);
     void ropeReleased();
+
+    // Photo mode's level changed (1 high, 2 medium, 3 low); `automatic`: the
+    // view chose it
+    void photoLevelChanged(int level, bool automatic);
 
 protected:
     void initializeGL() override;
@@ -672,6 +683,37 @@ private:
 
     // the frame: multisampled HDR colour and depth, resolved into textures
     // (the colour with mipmaps, for the blur)
+    /*
+     * How hard Photo mode works. The level in use (1 high, 2 medium, 3 low);
+     * in automatic quality the view chooses it from how long the graphics
+     * card takes over a frame (measured there, so it does not matter how
+     * fast the window is shown): too long and it steps down, plenty of time
+     * for a while and it tries one step up, and a step up that does not hold
+     * is not tried again.
+     */
+    int photoLevel_ = 1;
+    int autoLevel_ = 1;
+    int autoBest_ = 1;
+    int autoCalmWindows_ = 0;
+    int autoSinceUp_ = 1000;
+    double measuredSum_ = 0.0;
+    int measuredFrames_ = 0;
+    bool photoTiming_ = false;
+    std::unique_ptr<QOpenGLTimerQuery> photoTimer_;
+
+    void applyPhotoLevel();
+    void photoFrameMeasured(double milliseconds);
+
+    // the window's pixels; the frame is drawn with fewer at lower levels
+    int photoOutputWidth_ = 0;
+    int photoOutputHeight_ = 0;
+    int photoFrameSamples_ = -1;
+
+    // what the graphics driver could set up (the picture goes on without)
+    bool shadeReady_ = false;
+    bool mirrorReady_ = false;
+    bool accumulateReady_ = false;
+
     // the depth of the frame alone, and the shade worked out from it (raw,
     // then smoothed)
     GLuint shadeDepthFramebuffer_ = 0;

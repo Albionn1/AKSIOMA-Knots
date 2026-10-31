@@ -1621,6 +1621,30 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>E lartë (64 MB)</translation>
     </message>
     <message>
+        <source>Photo quality</source>
+        <translation>Cilësia e fotos</translation>
+    </message>
+    <message>
+        <source>How much work the graphics card does in Photo mode. Automatic keeps the picture smooth on any computer. A still picture comes out clean at every level.</source>
+        <translation>Sa punë bën karta grafike në mënyrën Foto. Automatike e mban figurën të rrjedhshme në çdo kompjuter. Një figurë e palëvizshme del e pastër në çdo nivel.</translation>
+    </message>
+    <message>
+        <source>Automatic</source>
+        <translation>Automatike</translation>
+    </message>
+    <message>
+        <source>High</source>
+        <translation>E lartë</translation>
+    </message>
+    <message>
+        <source>Medium</source>
+        <translation>Mesatare</translation>
+    </message>
+    <message>
+        <source>Low</source>
+        <translation>E ulët</translation>
+    </message>
+    <message>
         <source>SCENE</source>
         <translation>SKENA</translation>
     </message>
@@ -1655,6 +1679,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Your own combination of the settings below.</source>
         <translation>Kombinimi juaj i cilësimeve më poshtë.</translation>
+    </message>
+    <message>
+        <source>Working at: %1</source>
+        <translation>Po punon në: %1</translation>
     </message>
     <message>
         <source>This program: %1 of %2 (graphics memory shared with the main memory)</source>

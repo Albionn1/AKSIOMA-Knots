@@ -73,7 +73,6 @@ constexpr float FarPlane = 100.0f;
 constexpr int MaxParticles = 120;
 
 // side of the shadow map in Photo mode
-constexpr int PhotoShadowMapSize = 4096;
 
 // the room blurred for roughness 0, 0.2, .. 1 (mip levels of one texture)
 constexpr int SpecularLevels = 6;
@@ -117,6 +116,7 @@ uniform float uLightTan;        // tangent of the light's angular radius
 uniform float uDepthRange;      // world units per unit of map depth
 uniform float uMapWorld;        // world units across the map
 uniform float uPatternTurn;     // turns the random patterns from frame to frame
+uniform int uPcssTaps;          // samples of a soft edge (up to 16)
 
 const vec2 Disk[16] = vec2[16](
     vec2(-0.942, -0.399), vec2(0.946, -0.769), vec2(-0.094, -0.929), vec2(0.345, 0.294),
@@ -165,9 +165,9 @@ float keyShadow(vec3 p, vec3 n)
     float blockers = 0.0;
     float found = 0.0;
 
-    for (int i = 0; i < 16; ++i)
+    for (int i = 0; i < uPcssTaps; ++i)
     {
-        float d = texture(uShadowDepth, c.xy + turn * Disk[i] * search).r;
+        float d = texture(uShadowDepth, c.xy + turn * Disk[i * 16 / uPcssTaps] * search).r;
 
         if (d < depth)
         {
@@ -185,13 +185,15 @@ float keyShadow(vec3 p, vec3 n)
 
     mat2 eighth = mat2(0.7071, 0.7071, -0.7071, 0.7071);
 
-    for (int i = 0; i < 16; ++i)
+    for (int i = 0; i < uPcssTaps; ++i)
     {
-        lit += texture(uShadowMap, vec3(c.xy + turn * Disk[i] * radius, depth));
-        lit += texture(uShadowMap, vec3(c.xy + turn * eighth * Disk[i] * (0.5 * radius), depth));
+        vec2 disk = Disk[i * 16 / uPcssTaps];
+
+        lit += texture(uShadowMap, vec3(c.xy + turn * disk * radius, depth));
+        lit += texture(uShadowMap, vec3(c.xy + turn * eighth * disk * (0.5 * radius), depth));
     }
 
-    return lit / 32.0;
+    return lit / (2.0 * float(uPcssTaps));
 }
 )";
 
@@ -509,6 +511,7 @@ KnotGLWidget::~KnotGLWidget()
         developProgram_.reset();
         occlusionProgram_.reset();
         shoeProgram_.reset();
+        photoTimer_.reset();
         shadeProgram_.reset();
         shadeSmoothProgram_.reset();
         accumulateProgram_.reset();
@@ -546,6 +549,16 @@ void KnotGLWidget::initializeGL()
     initializeShaders();
     initializePhotoShaders();
     initializeShadowMap();
+
+    // no timer on this graphics card: a safe middle for automatic quality
+    photoTimer_ = std::make_unique<QOpenGLTimerQuery>();
+
+    if (!photoTimer_->create())
+    {
+        photoTimer_.reset();
+
+        autoLevel_ = std::max(autoLevel_, 2);
+    }
     initializeFlatBuffers();
 
     uploadMesh();
@@ -1572,6 +1585,7 @@ uniform float uReach;      // view units
 uniform float uPixelsPerUnit;
 uniform float uStrength;
 uniform float uPatternTurn;
+uniform int uShadeTaps;
 
 out vec4 fragColor;
 
@@ -1611,7 +1625,7 @@ void main()
     if (dot(n, c) > 0.0)
         n = -n;
 
-    const int Count = 14;
+    int Count = uShadeTaps;
 
     ivec2 tile = ivec2(gl_FragCoord.xy) & 3;
 
@@ -2049,6 +2063,7 @@ uniform float uFocus;       // distance in focus (along the view)
 uniform float uCocScale;
 uniform float uMaxCoc;
 uniform float uExposure;
+uniform int uLensTaps;
 
 // The stage (0..1 as it fades in): what lies well behind the knot sinks
 // into a dark blur and the light falls off towards the edges of the
@@ -2106,7 +2121,7 @@ void main()
 
     if (centreCircle > 0.5)
     {
-        const int Taps = 48;
+        int Taps = uLensTaps;
 
         float radius = centreCircle;
 
@@ -2935,6 +2950,7 @@ void KnotGLWidget::setShadowUniforms(QOpenGLShaderProgram &program, bool wanted)
     program.setUniformValue("uShadows", shadows ? 1 : 0);
     program.setUniformValue("uPcss", photo_ ? 1 : 0);
     program.setUniformValue("uPatternTurn", 2.3999632f * static_cast<float>(photoSample_));
+    program.setUniformValue("uPcssTaps", Lighting::photoLevel(photoLevel_).shadowTaps);
     program.setUniformValue("uLightTan", std::tan(environment_.sunRadius));
     program.setUniformValue("uDepthRange", shadowDepthRange_);
     program.setUniformValue("uMapWorld", shadowMapWorld_);
@@ -3743,8 +3759,8 @@ void KnotGLWidget::setLighting(const Lighting::Options &options)
 
     normalShadowMapSize_ = Lighting::shadowMapSize(options.shadowQuality);
 
-    // Photo mode always uses the sharpest map
-    const int size = photo_ ? PhotoShadowMapSize : normalShadowMapSize_;
+    // Photo mode's map goes with its level
+    const int size = photo_ ? Lighting::photoLevel(photoLevel_).shadowMap : normalShadowMapSize_;
 
     if (size != shadowMapSize_)
     {
@@ -4508,6 +4524,22 @@ void KnotGLWidget::paintGL()
     if (photo_ && loadedScene_ != static_cast<int>(photoScene_) && !loadPhotoScene())
         photo_ = false;
 
+    if (photo_)
+    {
+        // what the last frame took, once the graphics card knows
+        if (photoTiming_ && photoTimer_ && photoTimer_->isResultAvailable())
+        {
+            photoTiming_ = false;
+
+            photoFrameMeasured(static_cast<double>(photoTimer_->waitForResult()) / 1.0e6);
+        }
+
+        applyPhotoLevel();
+
+        if (!photoTiming_ && photoTimer_)
+            photoTimer_->begin();
+    }
+
     /*
      * AKSIOMA_PROFILE=1: the time of every stage of the frame (each waits
      * for the graphics card to finish it), averaged and printed every 60
@@ -4561,8 +4593,13 @@ void KnotGLWidget::paintGL()
 
     // 1. background (no depth), 2. ground, 3. knot, 4. particles; in Photo
     // mode the room, the table and the rope
-    const int frameWidth = static_cast<int>(static_cast<float>(width()) * dpr);
-    const int frameHeight = static_cast<int>(static_cast<float>(height()) * dpr);
+    photoOutputWidth_ = static_cast<int>(static_cast<float>(width()) * dpr);
+    photoOutputHeight_ = static_cast<int>(static_cast<float>(height()) * dpr);
+
+    const float frameScale = photo_ ? Lighting::photoLevel(photoLevel_).scale : 1.0f;
+
+    const int frameWidth = std::max(1, static_cast<int>(std::lround(static_cast<float>(photoOutputWidth_) * frameScale)));
+    const int frameHeight = std::max(1, static_cast<int>(std::lround(static_cast<float>(photoOutputHeight_) * frameScale)));
 
     if (photo_ && preparePhotoFrame(frameWidth, frameHeight))
     {
@@ -4643,6 +4680,13 @@ void KnotGLWidget::paintGL()
 
         developPhotoFrame(view, projection);
         stage(5);
+
+        if (!photoTiming_ && photoTimer_)
+        {
+            photoTimer_->end();
+
+            photoTiming_ = true;
+        }
 
         if (profiling && ++profileFrames_ == 60)
         {
@@ -5744,7 +5788,7 @@ bool KnotGLWidget::setPhotoMode(bool enabled, Photo::Scene scene)
         if (!ok)
             photo_ = false;
 
-        const int size = photo_ ? PhotoShadowMapSize : normalShadowMapSize_;
+        const int size = photo_ ? Lighting::photoLevel(photoLevel_).shadowMap : normalShadowMapSize_;
 
         if (size != shadowMapSize_ && shadowTexture_ != 0)
         {
@@ -5762,7 +5806,7 @@ bool KnotGLWidget::setPhotoMode(bool enabled, Photo::Scene scene)
     else
     {
         // allocated at that size when the view is set up
-        shadowMapSize_ = photo_ ? PhotoShadowMapSize : normalShadowMapSize_;
+        shadowMapSize_ = photo_ ? Lighting::photoLevel(photoLevel_).shadowMap : normalShadowMapSize_;
     }
 
     // Laid down at the next framing (resetCamera); standing as given again
@@ -6296,17 +6340,22 @@ bool KnotGLWidget::preparePhotoFrame(int width, int height)
     if (width <= 0 || height <= 0)
         return false;
 
-    if (photoFramebuffer_ != 0 && width == photoFrameWidth_ && height == photoFrameHeight_)
-        return true;
-
-    destroyPhotoFrame();
-
-    QOpenGLExtraFunctions *extra = context()->extraFunctions();
+    const Lighting::PhotoLevel level = Lighting::photoLevel(photoLevel_);
 
     GLint most = 1;
     glGetIntegerv(GL_MAX_SAMPLES, &most);
 
-    const int samples = std::clamp(4, 1, std::max(1, static_cast<int>(most)));
+    const int samples = std::min(level.samples, std::max(0, static_cast<int>(most)));
+
+    if (photoFramebuffer_ != 0 && width == photoFrameWidth_ && height == photoFrameHeight_ &&
+        samples == photoFrameSamples_)
+    {
+        return true;
+    }
+
+    destroyPhotoFrame();
+
+    QOpenGLExtraFunctions *extra = context()->extraFunctions();
 
     // drawn into: colour as light (half floats) and depth, several
     // samples per pixel for smooth edges
@@ -6376,7 +6425,11 @@ bool KnotGLWidget::preparePhotoFrame(int width, int height)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     };
 
-    auto makeFramebuffer = [this, &ok](GLuint &framebuffer, GLuint color, GLuint depth)
+    /*
+     * The frame itself must work; what the rest of this builds on it may
+     * fail on an old driver, and the picture goes on without that effect.
+     */
+    auto makeFramebuffer = [this](GLuint &framebuffer, GLuint color, GLuint depth, bool &ready)
     {
         glGenFramebuffers(1, &framebuffer);
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
@@ -6395,57 +6448,69 @@ bool KnotGLWidget::preparePhotoFrame(int width, int height)
             context()->extraFunctions()->glReadBuffer(GL_NONE);
         }
 
-        ok = ok && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+        ready = ready && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
     };
 
-    makeTexture(shadeDepth_, GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, width, height, false);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-    makeFramebuffer(shadeDepthFramebuffer_, 0, shadeDepth_);
+    shadeReady_ = level.shadeTaps > 0;
+    mirrorReady_ = level.mirror;
+    accumulateReady_ = true;
 
-    makeTexture(rawShade_, GL_R8, GL_RED, GL_UNSIGNED_BYTE, width, height, false);
-    makeFramebuffer(rawShadeFramebuffer_, rawShade_, 0);
+    if (shadeReady_)
+    {
+        makeTexture(shadeDepth_, GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, width, height, false);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+        makeFramebuffer(shadeDepthFramebuffer_, 0, shadeDepth_, shadeReady_);
 
-    makeTexture(shade_, GL_R8, GL_RED, GL_UNSIGNED_BYTE, width, height, false);
-    makeFramebuffer(shadeFramebuffer_, shade_, 0);
+        makeTexture(rawShade_, GL_R8, GL_RED, GL_UNSIGNED_BYTE, width, height, false);
+        makeFramebuffer(rawShadeFramebuffer_, rawShade_, 0, shadeReady_);
+
+        makeTexture(shade_, GL_R8, GL_RED, GL_UNSIGNED_BYTE, width, height, false);
+        makeFramebuffer(shadeFramebuffer_, shade_, 0, shadeReady_);
+    }
 
     makeTexture(accumulated_, GL_RGBA32F, GL_RGBA, GL_FLOAT, width, height, false);
-    makeFramebuffer(accumulatedFramebuffer_, accumulated_, 0);
+    makeFramebuffer(accumulatedFramebuffer_, accumulated_, 0, accumulateReady_);
 
-    const int mirrorWidth = std::max(width / 2, 1);
-    const int mirrorHeight = std::max(height / 2, 1);
+    if (mirrorReady_)
+    {
+        const int mirrorWidth = std::max(width / 2, 1);
+        const int mirrorHeight = std::max(height / 2, 1);
 
-    makeTexture(mirrorColor_, GL_RGBA16F, GL_RGBA, GL_FLOAT, mirrorWidth, mirrorHeight, true);
-    makeTexture(mirrorHeight_, GL_RG16F, GL_RG, GL_FLOAT, mirrorWidth, mirrorHeight, true);
+        makeTexture(mirrorColor_, GL_RGBA16F, GL_RGBA, GL_FLOAT, mirrorWidth, mirrorHeight, true);
+        makeTexture(mirrorHeight_, GL_RG16F, GL_RG, GL_FLOAT, mirrorWidth, mirrorHeight, true);
 
-    glGenRenderbuffers(1, &mirrorDepthBuffer_);
-    glBindRenderbuffer(GL_RENDERBUFFER, mirrorDepthBuffer_);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, mirrorWidth, mirrorHeight);
-    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+        glGenRenderbuffers(1, &mirrorDepthBuffer_);
+        glBindRenderbuffer(GL_RENDERBUFFER, mirrorDepthBuffer_);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, mirrorWidth, mirrorHeight);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
 
-    makeFramebuffer(mirrorFramebuffer_, mirrorColor_, 0);
+        makeFramebuffer(mirrorFramebuffer_, mirrorColor_, 0, mirrorReady_);
 
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, mirrorHeight_, 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, mirrorDepthBuffer_);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, mirrorHeight_, 0);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, mirrorDepthBuffer_);
 
-    const GLenum both[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+        const GLenum both[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
 
-    extra->glDrawBuffers(2, both);
+        extra->glDrawBuffers(2, both);
 
-    ok = ok && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+        mirrorReady_ = mirrorReady_ && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    }
 
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
 
     photoFrameWidth_ = width;
     photoFrameHeight_ = height;
+    photoFrameSamples_ = samples;
     photoSample_ = 0;
 
     const qint64 pixels = static_cast<qint64>(width) * height;
 
-    photoFrameBytes_ = pixels * samples * (8 + 4) + pixels * 8 * 4 / 3 + pixels * 4 +
-                       pixels * (4 + 1 + 1 + 16) + pixels / 4 * (8 + 4) * 4 / 3 + pixels;
+    photoFrameBytes_ = pixels * std::max(samples, 1) * (8 + 4) + pixels * 8 * 4 / 3 + pixels * 4 + pixels * 16 +
+                       (level.shadeTaps > 0 ? pixels * (4 + 1 + 1) : 0) +
+                       (level.mirror ? pixels / 4 * (8 + 4) * 4 / 3 + pixels : 0);
 
     if (!ok)
         destroyPhotoFrame();
@@ -6484,7 +6549,11 @@ void KnotGLWidget::destroyPhotoFrame()
 
     photoFrameWidth_ = 0;
     photoFrameHeight_ = 0;
+    photoFrameSamples_ = -1;
     photoFrameBytes_ = 0;
+    shadeReady_ = false;
+    mirrorReady_ = false;
+    accumulateReady_ = false;
 }
 
 QVector3D KnotGLWidget::photoKeyDirection() const
@@ -6513,13 +6582,13 @@ void KnotGLWidget::setPhotoUniforms(QOpenGLShaderProgram &program)
     program.setUniformValue("uSpecular", 4);
     program.setUniformValue("uShade", 10);
     program.setUniformValue("uPhoto", photo_ ? 1 : 0);
-    program.setUniformValue("uUseShade", photo_ && !mirrorPass_ && lighting_.occlusion && shade_ != 0 ? 1 : 0);
+    program.setUniformValue("uUseShade", photo_ && !mirrorPass_ && lighting_.occlusion && shadeReady_ ? 1 : 0);
 
     if (!photo_)
         return;
 
     glActiveTexture(GL_TEXTURE10);
-    glBindTexture(GL_TEXTURE_2D, mirrorPass_ ? 0 : shade_);
+    glBindTexture(GL_TEXTURE_2D, mirrorPass_ || !shadeReady_ ? 0 : shade_);
     glActiveTexture(GL_TEXTURE0);
 
     program.setUniformValue("uRoomScale", photoRoomScale_);
@@ -7227,7 +7296,7 @@ void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
 
     photoFloorProgram_->setUniformValue("uMirror", 11);
     photoFloorProgram_->setUniformValue("uMirrorHeight", 12);
-    photoFloorProgram_->setUniformValue("uUseMirror", lighting_.reflections && mirrorColor_ != 0 ? 1 : 0);
+    photoFloorProgram_->setUniformValue("uUseMirror", lighting_.reflections && mirrorReady_ ? 1 : 0);
     photoFloorProgram_->setUniformValue("uFrameSize", QVector2D(photoFrameWidth_, photoFrameHeight_));
     photoFloorProgram_->setUniformValue(
         "uPixelsPerUnit",
@@ -7262,6 +7331,99 @@ void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
     glDisable(GL_CULL_FACE);
 }
 
+void KnotGLWidget::setPhotoAutoLevel(int level)
+{
+    autoLevel_ = std::clamp(level, 1, 3);
+
+    update();
+}
+
+int KnotGLWidget::photoLevelInUse() const
+{
+    return photoLevel_;
+}
+
+void KnotGLWidget::applyPhotoLevel()
+{
+    const bool automatic = lighting_.photoQuality == 0;
+    const int wanted = automatic ? autoLevel_ : std::clamp(lighting_.photoQuality, 1, 3);
+
+    if (wanted == photoLevel_)
+        return;
+
+    photoLevel_ = wanted;
+
+    measuredSum_ = 0.0;
+    measuredFrames_ = 0;
+
+    // the picture starts again at the new level
+    ++photoVersion_;
+
+    const int size = Lighting::photoLevel(photoLevel_).shadowMap;
+
+    if (size != shadowMapSize_ && shadowTexture_ != 0)
+    {
+        shadowMapSize_ = size;
+
+        allocateShadowMap();
+    }
+
+    emit photoLevelChanged(photoLevel_, automatic);
+}
+
+void KnotGLWidget::photoFrameMeasured(double milliseconds)
+{
+    if (lighting_.photoQuality != 0)
+        return;
+
+    // AKSIOMA_PHOTO_SLOW=n: as a graphics card n times slower would take
+    static const double slower = std::max(1.0, qEnvironmentVariable("AKSIOMA_PHOTO_SLOW").toDouble());
+
+    /*
+     * 16.7 ms for a frame at 60 a second, and the window's other work needs
+     * its share. Half a second of frames is judged at a time. A step up is
+     * tried only with a lot to spare, after several calm windows.
+     */
+    constexpr double TooLong = 12.5;
+    constexpr double Plenty = 5.0;
+    constexpr int Window = 30;
+    constexpr int CalmWindows = 10;
+
+    measuredSum_ += milliseconds * slower;
+
+    if (++measuredFrames_ < Window)
+        return;
+
+    const double average = measuredSum_ / measuredFrames_;
+
+    measuredSum_ = 0.0;
+    measuredFrames_ = 0;
+
+    ++autoSinceUp_;
+
+    if (average > TooLong && autoLevel_ < 3)
+    {
+        // that step up did not hold: this is as high as this computer goes
+        if (autoSinceUp_ <= 3)
+            autoBest_ = autoLevel_ + 1;
+
+        ++autoLevel_;
+
+        autoCalmWindows_ = 0;
+    }
+    else if (average < Plenty && autoLevel_ > autoBest_ && ++autoCalmWindows_ >= CalmWindows)
+    {
+        --autoLevel_;
+
+        autoCalmWindows_ = 0;
+        autoSinceUp_ = 0;
+    }
+    else if (average >= Plenty)
+    {
+        autoCalmWindows_ = 0;
+    }
+}
+
 QVector3D KnotGLWidget::photoEye() const
 {
     QVector3D eye = computeCameraPosition() + panOffset_;
@@ -7274,6 +7436,9 @@ QVector3D KnotGLWidget::photoEye() const
 
 void KnotGLWidget::drawPhotoDepth(const QMatrix4x4 &model, const QMatrix4x4 &viewProjection)
 {
+    if (!shadeReady_ || !lighting_.occlusion)
+        return;
+
     glBindFramebuffer(GL_FRAMEBUFFER, shadeDepthFramebuffer_);
     glViewport(0, 0, photoFrameWidth_, photoFrameHeight_);
 
@@ -7320,7 +7485,7 @@ void KnotGLWidget::drawPhotoDepth(const QMatrix4x4 &model, const QMatrix4x4 &vie
 
 void KnotGLWidget::drawPhotoShade(const QMatrix4x4 &projection)
 {
-    if (!lighting_.occlusion || !shadeProgram_->isLinked() || !shadeSmoothProgram_->isLinked())
+    if (!shadeReady_ || !lighting_.occlusion || !shadeProgram_->isLinked() || !shadeSmoothProgram_->isLinked())
         return;
 
     const QVector4D project(projection(0, 0), projection(1, 1), projection(2, 2), projection(2, 3));
@@ -7349,6 +7514,7 @@ void KnotGLWidget::drawPhotoShade(const QMatrix4x4 &projection)
         "uPixelsPerUnit",
         0.5f * static_cast<float>(photoFrameHeight_) / std::tan(qDegreesToRadians(0.5f * FieldOfView)));
     shadeProgram_->setUniformValue("uStrength", 2.4f);
+    shadeProgram_->setUniformValue("uShadeTaps", Lighting::photoLevel(photoLevel_).shadeTaps);
     shadeProgram_->setUniformValue("uPatternTurn", 2.3999632f * static_cast<float>(photoSample_));
 
     glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -7385,7 +7551,7 @@ void KnotGLWidget::drawPhotoShade(const QMatrix4x4 &projection)
 
 void KnotGLWidget::drawPhotoMirror(const QMatrix4x4 &model, const QMatrix4x4 &view, const QMatrix4x4 &projection)
 {
-    if (!lighting_.reflections)
+    if (!lighting_.reflections || !mirrorReady_)
         return;
 
     glBindFramebuffer(GL_FRAMEBUFFER, mirrorFramebuffer_);
@@ -7434,7 +7600,9 @@ void KnotGLWidget::developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &p
      * count for 1 / n, so that all count the same. The sum then stands in
      * for the frame.
      */
-    if (photoSample_ == 0 || !accumulateProgram_->isLinked())
+    const bool adding = accumulateReady_ && accumulateProgram_->isLinked();
+
+    if (photoSample_ == 0 || !adding)
     {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, resolveFramebuffer_);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, accumulatedFramebuffer_);
@@ -7475,7 +7643,7 @@ void KnotGLWidget::developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &p
         glDepthMask(GL_TRUE);
     }
 
-    if (photoSample_ > 0)
+    if (photoSample_ > 0 && adding)
     {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, accumulatedFramebuffer_);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolveFramebuffer_);
@@ -7489,7 +7657,8 @@ void KnotGLWidget::developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &p
     glGenerateMipmap(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    glViewport(0, 0, width, height);
+    // the frame fills the window, whatever its own size
+    glViewport(0, 0, photoOutputWidth_, photoOutputHeight_);
 
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
@@ -7506,6 +7675,7 @@ void KnotGLWidget::developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &p
     glBindTexture(GL_TEXTURE_2D, resolvedDepth_);
     glActiveTexture(GL_TEXTURE0);
 
+    developProgram_->setUniformValue("uLensTaps", Lighting::photoLevel(photoLevel_).lensTaps);
     developProgram_->setUniformValue("uColor", 5);
     developProgram_->setUniformValue("uDepth", 6);
     developProgram_->setUniformValue("uTexel", QVector2D(1.0f / width, 1.0f / height));
