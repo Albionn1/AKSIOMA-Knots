@@ -25,6 +25,12 @@ qt_add_executable(AKSIOMAKnots
     knotglwidget.cpp
     knotmath.h
     knotmath.cpp
+    knothistory.h
+    knothistory.cpp
+    commandpalette.h
+    commandpalette.cpp
+    controlhelp.h
+    controlhelp.cpp
     knotrelax.h
     knotrelax.cpp
     knotdiagram.h

@@ -216,6 +216,66 @@ const char *const StyleSheet = R"(
         border-radius: 2px;
     }
 
+    /* the notice over the 3D view: what happened, and what can be done */
+
+    QFrame#Notice {
+        background: #0D0D0D;
+        border: 1px solid #53514C;
+        border-left: 3px solid #8A8780;
+        border-radius: 2px;
+    }
+
+    QFrame#Notice[kind="error"] {
+        border-left: 3px solid #D99B42;
+    }
+
+    QPushButton#NoticeClose {
+        background: transparent;
+        border: none;
+        padding: 2px 6px;
+        color: #8A8780;
+    }
+
+    QPushButton#NoticeClose:hover {
+        color: #BAB9B4;
+    }
+
+    /* the command palette (Ctrl+K) */
+
+    QDialog#Palette {
+        background: #0D0D0D;
+        border: 1px solid #53514C;
+    }
+
+    QDialog#Palette QListWidget {
+        background: #0D0D0D;
+        color: #BAB9B4;
+        outline: none;
+    }
+
+    QDialog#Palette QListWidget::item {
+        padding: 7px 10px;
+    }
+
+    QDialog#Palette QListWidget::item:selected {
+        background: #BAB9B4;
+        color: #060606;
+    }
+
+    /* the first-run tour: a card, and what it talks about */
+
+    QFrame#Tour {
+        background: #0D0D0D;
+        border: 1px solid #D99B42;
+        border-radius: 2px;
+    }
+
+    QComboBox[tour="true"],
+    QPushButton[tour="true"],
+    QWidget#Rail[tour="true"] {
+        border: 1px solid #D99B42;
+    }
+
     /* ---------- text roles ---------- */
 
     QLabel {

@@ -105,7 +105,7 @@ KnotBrowserDialog::KnotBrowserDialog(const QString &current, QWidget *parent)
     QGuiApplication::restoreOverrideCursor();
 
     QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setContentsMargins(20, 20, 20, 20);
     layout->setSpacing(12);
 
     /*
@@ -117,17 +117,17 @@ KnotBrowserDialog::KnotBrowserDialog(const QString &current, QWidget *parent)
     search_ = new QLineEdit(this);
     search_->setPlaceholderText(tr("Search: 8_19, 11n34, trefoil, Conway..."));
     search_->setClearButtonEnabled(true);
-    search_->setMinimumHeight(34);
+    search_->setMinimumHeight(36);
 
     crossingFilter_ = new QComboBox(this);
-    crossingFilter_->setMinimumHeight(34);
+    crossingFilter_->setMinimumHeight(36);
     crossingFilter_->addItem(tr("All crossing numbers"), 0);
 
     for (int c = 3; c <= 13; ++c)
         crossingFilter_->addItem(tr("%1 crossings").arg(c), c);
 
     typeFilter_ = new QComboBox(this);
-    typeFilter_->setMinimumHeight(34);
+    typeFilter_->setMinimumHeight(36);
     typeFilter_->addItem(tr("All knots"));
     typeFilter_->addItem(tr("Alternating"));
     typeFilter_->addItem(tr("Non-alternating"));
@@ -210,7 +210,7 @@ KnotBrowserDialog::KnotBrowserDialog(const QString &current, QWidget *parent)
 
     loadButton_ = buttons->addButton(tr("Load knot"), QDialogButtonBox::AcceptRole);
     loadButton_->setObjectName(QStringLiteral("GenerateButton"));
-    loadButton_->setMinimumHeight(36);
+    loadButton_->setMinimumHeight(38);
     loadButton_->setEnabled(false);
 
     buttons->addButton(QDialogButtonBox::Cancel);

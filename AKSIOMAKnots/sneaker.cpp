@@ -386,7 +386,8 @@ const Sneaker &sneaker()
 TiedLace tieOnSneaker(
     const QVector<Vec3> &curve,
     double radius,
-    const RopeMaterial &material)
+    const RopeMaterial &material,
+    RopeProgress *progress)
 {
     TiedLace tied;
     RestingRope &result = tied.rope;
@@ -880,7 +881,12 @@ TiedLace tieOnSneaker(
 
     QVector<Vec3> frames;
 
-    const Settling settling = settleRope(x, pinned, true, material, ground, &frames);
+    const Settling settling = settleRope(x, pinned, true, material, ground, &frames, progress);
+
+    result.cancelled = settling.cancelled;
+
+    if (settling.cancelled)
+        return tied;
 
     tied.pinned = pinned;
 

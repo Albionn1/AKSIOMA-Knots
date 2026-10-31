@@ -7,6 +7,7 @@
 #include <QMatrix4x4>
 #include <QVector>
 
+#include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <mutex>
@@ -20,6 +21,13 @@
  */
 namespace Photo
 {
+
+// How far laying a rope down has come (0..100), and a way to stop it.
+struct RopeProgress
+{
+    std::atomic<int> percent{0};
+    std::atomic<bool> cancel{false};
+};
 
 // a turn (the frame of a piece of rope)
 struct Quaternion
@@ -54,6 +62,9 @@ struct RestingRope
 
     // the rope came to rest (and was not stopped at the time limit)
     bool settled = false;
+
+    // stopped on request (RopeProgress): there is no rope
+    bool cancelled = false;
 };
 
 /*
@@ -70,7 +81,8 @@ RestingRope layOnTable(
     const QVector<KnotMath::Vec3> &curve,
     bool closed,
     double radius,
-    const RopeMaterial &material);
+    const RopeMaterial &material,
+    RopeProgress *progress = nullptr);
 
 /*
  * What the rope lies on, in units of its radius (y up): the height of the
@@ -87,6 +99,7 @@ struct Settling
     int steps = 0;
     double finalSpeed = 0.0;
     bool settled = false;
+    bool cancelled = false;
 };
 
 /*
@@ -102,7 +115,8 @@ Settling settleRope(
     bool closed,
     const RopeMaterial &material,
     const Ground &ground,
-    QVector<KnotMath::Vec3> *frames = nullptr);
+    QVector<KnotMath::Vec3> *frames = nullptr,
+    RopeProgress *progress = nullptr);
 
 /*
  * The same rope, one time step at a time, and a hand that can take hold

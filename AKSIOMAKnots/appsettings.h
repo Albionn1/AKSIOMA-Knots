@@ -50,6 +50,34 @@ Lighting::Options lighting();
 void setLighting(
     const Lighting::Options &options);
 
+/*
+ * The workspace as it was left: a number kept under a name (the open tool,
+ * which panels were folded, the last scene).
+ */
+int workspaceValue(
+    const QString &name,
+    int fallback);
+
+void setWorkspaceValue(
+    const QString &name,
+    int value);
+
+// knot files opened or saved, the newest first (at most eight)
+QStringList recentFiles();
+
+void addRecentFile(
+    const QString &path);
+
+void removeRecentFile(
+    const QString &path);
+
+void clearRecentFiles();
+
+// the first-run tour has been seen (or skipped)
+bool tourSeen();
+
+void setTourSeen();
+
 // the level Photo mode's automatic quality last settled on (1 high, 2
 // medium, 3 low): it starts there the next time
 int photoAutoLevel();

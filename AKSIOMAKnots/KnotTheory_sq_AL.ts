@@ -84,6 +84,13 @@
     </message>
 </context>
 <context>
+    <name>CommandPalette</name>
+    <message>
+        <source>Type an action or a knot</source>
+        <translation>Shkruani një veprim ose një nyjë</translation>
+    </message>
+</context>
+<context>
     <name>DiagramCanvas</name>
     <message>
         <source>That was too short - draw a bigger loop.</source>
@@ -1340,6 +1347,50 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Shpejtësia</translation>
     </message>
     <message>
+        <source>Undo</source>
+        <translation>Zhbëj</translation>
+    </message>
+    <message>
+        <source>Redo</source>
+        <translation>Ribëj</translation>
+    </message>
+    <message>
+        <source>Find anything...</source>
+        <translation>Gjej çdo gjë...</translation>
+    </message>
+    <message>
+        <source>Open recent</source>
+        <translation>Hap të fundit</translation>
+    </message>
+    <message>
+        <source>Keyboard shortcuts</source>
+        <translation>Shkurtesat e tastierës</translation>
+    </message>
+    <message>
+        <source>Show the tour</source>
+        <translation>Shfaq udhëzimin</translation>
+    </message>
+    <message>
+        <source>Undo  (Ctrl+Z)</source>
+        <translation>Zhbëj  (Ctrl+Z)</translation>
+    </message>
+    <message>
+        <source>Nothing to undo yet.</source>
+        <translation>Ende s&apos;ka asgjë për të zhbërë.</translation>
+    </message>
+    <message>
+        <source>Redo  (Ctrl+Y)</source>
+        <translation>Ribëj  (Ctrl+Y)</translation>
+    </message>
+    <message>
+        <source>Nothing to redo.</source>
+        <translation>S&apos;ka asgjë për të ribërë.</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>Mbyll</translation>
+    </message>
+    <message>
         <source>Show the knot as a real rope: it falls onto a table under its own weight and comes to rest, in a sunny place photographed with its real light.</source>
         <translation>Shfaq nyjën si një litar të vërtetë: bie mbi një tavolinë nga pesha e vet dhe qetësohet, në një vend me diell të fotografuar me dritën e tij të vërtetë.</translation>
     </message>
@@ -1350,6 +1401,38 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Shoelace on boards in a meadow, in the sun</source>
         <translation>Lidhëse këpucësh mbi dërrasa në livadh, në diell</translation>
+    </message>
+    <message>
+        <source>Nothing to go back to: the knot has not been moved.</source>
+        <translation>S&apos;ka ku të kthehet: nyja nuk është lëvizur.</translation>
+    </message>
+    <message>
+        <source>Start the unknotting first.</source>
+        <translation>Nisni më parë zgjidhjen.</translation>
+    </message>
+    <message>
+        <source>Start the unknotting first: its steps are listed here.</source>
+        <translation>Nisni më parë zgjidhjen: hapat e saj renditen këtu.</translation>
+    </message>
+    <message>
+        <source>Start the unknotting to move along it.</source>
+        <translation>Nisni zgjidhjen për të lëvizur përgjatë saj.</translation>
+    </message>
+    <message>
+        <source>Build the surface first.</source>
+        <translation>Ndërtoni më parë sipërfaqen.</translation>
+    </message>
+    <message>
+        <source>Let go of the rope first. A rope already cut has its two ends.</source>
+        <translation>Lëshoni më parë litarin. Një litar i prerë i ka tashmë dy skajet.</translation>
+    </message>
+    <message>
+        <source>Cut the rope first, and let go of it.</source>
+        <translation>Pritni më parë litarin dhe lëshojeni.</translation>
+    </message>
+    <message>
+        <source>Skip</source>
+        <translation>Kapërce</translation>
     </message>
     <message>
         <source>Unknot</source>
@@ -1681,6 +1764,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Kombinimi juaj i cilësimeve më poshtë.</translation>
     </message>
     <message>
+        <source>Turn on the key light first.</source>
+        <translation>Ndizni më parë dritën kryesore.</translation>
+    </message>
+    <message>
         <source>Working at: %1</source>
         <translation>Po punon në: %1</translation>
     </message>
@@ -1711,6 +1798,202 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Full screen  (F11)</source>
         <translation>Ekran i plotë  (F11)</translation>
+    </message>
+    <message>
+        <source>Save this knot before closing?</source>
+        <translation>Ta ruaj këtë nyjë para mbylljes?</translation>
+    </message>
+    <message>
+        <source>Its changes are not in a file yet.</source>
+        <translation>Ndryshimet e saj nuk janë ende në një skedar.</translation>
+    </message>
+    <message>
+        <source>Save...</source>
+        <translation>Ruaj...</translation>
+    </message>
+    <message>
+        <source>Don&apos;t save</source>
+        <translation>Mos e ruaj</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Anulo</translation>
+    </message>
+    <message>
+        <source>ANYWHERE</source>
+        <translation>KUDO</translation>
+    </message>
+    <message>
+        <source>Find anything</source>
+        <translation>Gjej çdo gjë</translation>
+    </message>
+    <message>
+        <source>Undo and redo</source>
+        <translation>Zhbëj dhe ribëj</translation>
+    </message>
+    <message>
+        <source>Open and save a knot</source>
+        <translation>Hap dhe ruaj një nyjë</translation>
+    </message>
+    <message>
+        <source>Export the picture and the diagram</source>
+        <translation>Ruaj figurën dhe diagramin</translation>
+    </message>
+    <message>
+        <source>Full screen on and off</source>
+        <translation>Ekran i plotë ndezur dhe fikur</translation>
+    </message>
+    <message>
+        <source>This list</source>
+        <translation>Kjo listë</translation>
+    </message>
+    <message>
+        <source>TOOLS</source>
+        <translation>MJETET</translation>
+    </message>
+    <message>
+        <source>Open a tool</source>
+        <translation>Hap një mjet</translation>
+    </message>
+    <message>
+        <source>Space</source>
+        <translation>Hapësirë</translation>
+    </message>
+    <message>
+        <source>Play or pause what the open tool does</source>
+        <translation>Luaj ose ndal atë që bën mjeti i hapur</translation>
+    </message>
+    <message>
+        <source>Step back and forward: unknotting, surface</source>
+        <translation>Hap mbrapa dhe para: zgjidhja, sipërfaqja</translation>
+    </message>
+    <message>
+        <source>MOUSE</source>
+        <translation>MIUSHI</translation>
+    </message>
+    <message>
+        <source>Drag</source>
+        <translation>Tërhiq</translation>
+    </message>
+    <message>
+        <source>Turn the view</source>
+        <translation>Rrotullo pamjen</translation>
+    </message>
+    <message>
+        <source>Right-drag</source>
+        <translation>Tërhiq me të djathtën</translation>
+    </message>
+    <message>
+        <source>Move the view</source>
+        <translation>Zhvendos pamjen</translation>
+    </message>
+    <message>
+        <source>Scroll</source>
+        <translation>Rrotëza</translation>
+    </message>
+    <message>
+        <source>Zoom</source>
+        <translation>Zmadho</translation>
+    </message>
+    <message>
+        <source>Shift+drag</source>
+        <translation>Shift+tërhiq</translation>
+    </message>
+    <message>
+        <source>Push the rope under another strand</source>
+        <translation>Shtyje litarin nën një fije tjetër</translation>
+    </message>
+    <message>
+        <source>Double-click a slider</source>
+        <translation>Klikim i dyfishtë mbi rrëshqitës</translation>
+    </message>
+    <message>
+        <source>Back to its usual value</source>
+        <translation>Kthehu te vlera e zakonshme</translation>
+    </message>
+    <message>
+        <source>Click a slider&apos;s number</source>
+        <translation>Klikim mbi numrin e rrëshqitësit</translation>
+    </message>
+    <message>
+        <source>Type an exact value</source>
+        <translation>Shkruaj një vlerë të saktë</translation>
+    </message>
+    <message>
+        <source>No files yet</source>
+        <translation>Ende s&apos;ka skedarë</translation>
+    </message>
+    <message>
+        <source>Clear the list</source>
+        <translation>Pastro listën</translation>
+    </message>
+    <message>
+        <source>%1 is no longer there, so it was taken off the list.</source>
+        <translation>%1 nuk është më aty, prandaj u hoq nga lista.</translation>
+    </message>
+    <message>
+        <source>Tool</source>
+        <translation>Mjet</translation>
+    </message>
+    <message>
+        <source>Knot</source>
+        <translation>Nyjë</translation>
+    </message>
+    <message>
+        <source>Recent</source>
+        <translation>Të fundit</translation>
+    </message>
+    <message>
+        <source>Pick a knot</source>
+        <translation>Zgjidhni një nyjë</translation>
+    </message>
+    <message>
+        <source>Try a tool</source>
+        <translation>Provoni një mjet</translation>
+    </message>
+    <message>
+        <source>See it as a real rope</source>
+        <translation>Shikojeni si litar të vërtetë</translation>
+    </message>
+    <message>
+        <source>Choose one here, browse all 12,965, or draw your own.</source>
+        <translation>Zgjidhni një këtu, shfletoni të 12 965-at ose vizatoni tuajën.</translation>
+    </message>
+    <message>
+        <source>Change its style, relax it, undo it, join two knots or build a surface. Click the open tool again to fold its panel.</source>
+        <translation>Ndryshoni stilin, relaksojeni, zgjidheni, bashkoni dy nyje ose ndërtoni një sipërfaqe. Klikoni sërish mjetin e hapur për të palosur panelin.</translation>
+    </message>
+    <message>
+        <source>Photo lays the knot down as real rope in the sun. Ctrl+K finds anything, and F1 lists every shortcut.</source>
+        <translation>Foto e shtrin nyjën si litar të vërtetë në diell. Ctrl+K gjen çdo gjë, F1 rendit çdo shkurtesë.</translation>
+    </message>
+    <message>
+        <source>Next</source>
+        <translation>Tjetri</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation>U krye</translation>
+    </message>
+    <message>
+        <source>The rope is back as it was laid down.</source>
+        <translation>Litari u kthye siç ishte shtrirë.</translation>
+    </message>
+    <message>
+        <source>The last knot was not saved when AKSIOMA closed.</source>
+        <translation>Nyja e fundit nuk u ruajt kur AKSIOMA u mbyll.</translation>
+    </message>
+    <message>
+        <source>Restore</source>
+        <translation>Rikthe</translation>
+    </message>
+    <message>
+        <source>Saved: %1</source>
+        <translation>U ruajt: %1</translation>
+    </message>
+    <message>
+        <source>Show folder</source>
+        <translation>Shfaq dosjen</translation>
     </message>
     <message>
         <source>The entire tube uses the selected base color.</source>
@@ -1807,22 +2090,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Laying the rope on the table</source>
         <translation>Litari vendoset mbi tavolinë</translation>
-    </message>
-    <message>
-        <source>It falls and comes to rest by its own weight.</source>
-        <translation>Bie dhe qetësohet nga pesha e vet.</translation>
-    </message>
-    <message>
-        <source>The photographed room could not be loaded.</source>
-        <translation>Dhoma e fotografuar nuk mund të ngarkohej.</translation>
-    </message>
-    <message>
-        <source>The requested curve could not be generated.
-
-%1</source>
-        <translation>Kurba e kërkuar nuk mund të krijohej.
-
-%1</translation>
     </message>
     <message>
         <source>Preparing...</source>
@@ -1974,28 +2241,12 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Nyje (*.aknot *.txt *.csv);;Skedarë nyjesh AKSIOMA (*.aknot);;Lista koordinatash (*.txt *.csv);;Të gjithë skedarët (*)</translation>
     </message>
     <message>
-        <source>The knot could not be opened.
-
-%1</source>
-        <translation>Nyja nuk mund të hapej.
-
-%1</translation>
-    </message>
-    <message>
         <source>Save knot</source>
         <translation>Ruaj nyjën</translation>
     </message>
     <message>
         <source>AKSIOMA knot file (*.aknot)</source>
         <translation>Skedar nyjeje AKSIOMA (*.aknot)</translation>
-    </message>
-    <message>
-        <source>The knot could not be saved.
-
-%1</source>
-        <translation>Nyja nuk mund të ruhej.
-
-%1</translation>
     </message>
     <message>
         <source>Export 3D picture</source>
@@ -2010,36 +2261,12 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Imazh JPEG (*.jpg)</translation>
     </message>
     <message>
-        <source>The picture could not be saved.</source>
-        <translation>Figura nuk mund të ruhej.</translation>
-    </message>
-    <message>
-        <source>A knot diagram can only be drawn for a single closed curve.</source>
-        <translation>Diagrami i nyjës mund të vizatohet vetëm për një kurbë të vetme të mbyllur.</translation>
-    </message>
-    <message>
-        <source>No knot diagram could be made.
-
-%1</source>
-        <translation>Nuk mund të krijohej diagrami i nyjës.
-
-%1</translation>
-    </message>
-    <message>
         <source>Export knot diagram</source>
         <translation>Ruaj diagramin e nyjës</translation>
     </message>
     <message>
         <source>SVG drawing (*.svg)</source>
         <translation>Vizatim SVG (*.svg)</translation>
-    </message>
-    <message>
-        <source>The diagram could not be saved.
-
-%1</source>
-        <translation>Diagrami nuk mund të ruhej.
-
-%1</translation>
     </message>
     <message>
         <source>Export coordinates</source>
@@ -2054,28 +2281,12 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Tabelë CSV (*.csv)</translation>
     </message>
     <message>
-        <source>The coordinates could not be saved.
-
-%1</source>
-        <translation>Koordinatat nuk mund të ruheshin.
-
-%1</translation>
-    </message>
-    <message>
         <source>Export analysis report</source>
         <translation>Ruaj raportin e analizës</translation>
     </message>
     <message>
         <source>Text (*.txt)</source>
         <translation>Tekst (*.txt)</translation>
-    </message>
-    <message>
-        <source>The report could not be saved.
-
-%1</source>
-        <translation>Raporti nuk mund të ruhej.
-
-%1</translation>
     </message>
     <message>
         <source>A Seifert surface is built here for a single closed knot. Choose a knot preset, a table knot or a custom curve.</source>
@@ -2246,6 +2457,18 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>NDËRTO SIPËRFAQEN</translation>
     </message>
     <message>
+        <source>Cancelled. Turn on Photo to lay the rope down again.</source>
+        <translation>U anulua. Ndizni Foto për ta shtrirë litarin përsëri.</translation>
+    </message>
+    <message>
+        <source>The photographed place could not be loaded. Installing AKSIOMA again brings it back.</source>
+        <translation>Vendi i fotografuar nuk u ngarkua. Rinstalimi i AKSIOMA-s e kthen përsëri.</translation>
+    </message>
+    <message>
+        <source>The curve could not be made: %1 Check the formula, or press Undo to go back.</source>
+        <translation>Kurba nuk u bë dot: %1 Kontrolloni formulën, ose shtypni Zhbëj për t&apos;u kthyer.</translation>
+    </message>
+    <message>
         <source>PAUSE</source>
         <translation>PAUZË</translation>
     </message>
@@ -2256,6 +2479,38 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>PLAY</source>
         <translation>LUAJ</translation>
+    </message>
+    <message>
+        <source>The knot could not be opened: %1 Choose an .aknot file or a text file of coordinates.</source>
+        <translation>Nyja nuk u hap: %1 Zgjidhni një skedar .aknot ose një skedar teksti me koordinata.</translation>
+    </message>
+    <message>
+        <source>The knot could not be saved: %1 Try another folder or file name.</source>
+        <translation>Nyja nuk u ruajt: %1 Provoni një dosje ose emër tjetër skedari.</translation>
+    </message>
+    <message>
+        <source>The picture could not be saved. Try another folder or file name.</source>
+        <translation>Figura nuk u ruajt. Provoni një dosje ose emër tjetër skedari.</translation>
+    </message>
+    <message>
+        <source>A knot diagram needs a single closed curve. Choose a knot instead of a structure of several strands.</source>
+        <translation>Një diagram nyje kërkon një kurbë të vetme të mbyllur. Zgjidhni një nyjë në vend të një strukture me disa fije.</translation>
+    </message>
+    <message>
+        <source>No knot diagram could be made: %1 Relaxing the knot first often clears up a crowded curve.</source>
+        <translation>Nuk u bë dot diagrami i nyjës: %1 Relaksimi i nyjës më parë shpesh e qartëson një kurbë të ngjeshur.</translation>
+    </message>
+    <message>
+        <source>The diagram could not be saved: %1 Try another folder or file name.</source>
+        <translation>Diagrami nuk u ruajt: %1 Provoni një dosje ose emër tjetër skedari.</translation>
+    </message>
+    <message>
+        <source>The coordinates could not be saved: %1 Try another folder or file name.</source>
+        <translation>Koordinatat nuk u ruajtën: %1 Provoni një dosje ose emër tjetër skedari.</translation>
+    </message>
+    <message>
+        <source>The report could not be saved: %1 Try another folder or file name.</source>
+        <translation>Raporti nuk u ruajt: %1 Provoni një dosje ose emër tjetër skedari.</translation>
     </message>
     <message>
         <source>BACK TO THE KNOT</source>
@@ -2750,6 +3005,13 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>&amp;No</source>
         <translation>&amp;Jo</translation>
+    </message>
+</context>
+<context>
+    <name>SliderValue</name>
+    <message>
+        <source>Click to type a value. Double-click the slider to reset it.</source>
+        <translation>Klikoni për të shkruar një vlerë. Klikoni dy herë rrëshqitësin për ta rikthyer.</translation>
     </message>
 </context>
 <context>

@@ -18,7 +18,7 @@ AboutDialog::AboutDialog(QWidget *parent)
     resize(620, 820);
 
     QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(20, 20, 20, 16);
+    layout->setContentsMargins(20, 20, 20, 20);
     layout->setSpacing(12);
 
     // The logo on its own dark background (it is drawn for one), in both

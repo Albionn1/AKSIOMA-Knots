@@ -692,8 +692,8 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
 
     QVBoxLayout *layout = new QVBoxLayout(this);
 
-    layout->setContentsMargins(14, 14, 14, 14);
-    layout->setSpacing(10);
+    layout->setContentsMargins(20, 20, 20, 20);
+    layout->setSpacing(12);
 
     QLabel *help = new QLabel(
         tr("Draw one closed loop with the left mouse button. "

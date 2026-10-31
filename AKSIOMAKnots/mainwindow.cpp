@@ -2,6 +2,8 @@
 
 #include "aboutdialog.h"
 #include "appsettings.h"
+#include "commandpalette.h"
+#include "controlhelp.h"
 #include "diagrameditor.h"
 #include "gpumemory.h"
 #include "icons.h"
@@ -17,7 +19,20 @@
 #include <QStandardItemModel>
 
 #include <QApplication>
+#include <QAbstractSpinBox>
 #include <QButtonGroup>
+#include <QDesktopServices>
+#include <QDir>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QGridLayout>
+#include <QKeyEvent>
+#include <QLineEdit>
+#include <QMimeData>
+#include <QPlainTextEdit>
+#include <QResizeEvent>
+#include <QStandardPaths>
+#include <QUrl>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -68,6 +83,30 @@
 
 namespace
 {
+
+// the example offered in an empty Custom Curve box: nothing worth keeping
+const char *const ExampleCurve =
+    "x=(2+cos(2*t))*cos(3*t);\n"
+    "y=(2+cos(2*t))*sin(3*t);\n"
+    "z=sin(4*t);";
+
+// where the knot being worked on is kept, against a crash
+QString autosavePath()
+{
+    const QString folder =
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+
+    QDir().mkpath(folder);
+
+    return folder + QStringLiteral("/autosave.aknot");
+}
+
+// what a crash left behind, out of the way of the next autosave until the
+// user has decided about it
+QString recoveredPath()
+{
+    return QFileInfo(autosavePath()).absolutePath() + QStringLiteral("/recovered.aknot");
+}
 
 // A hint that makes way: all of its text or, in too little room, nothing.
 class FittingLabel final
@@ -160,6 +199,8 @@ MainWindow::MainWindow(
     {
         QMenu *fileMenu = new QMenu(fileButton);
 
+        fileMenu_ = fileMenu;
+
         auto addFileAction = [this, fileMenu](const QString &text,
                                               const QKeySequence &shortcut,
                                               void (MainWindow::*slot)())
@@ -172,9 +213,25 @@ MainWindow::MainWindow(
             addAction(action);
 
             connect(action, &QAction::triggered, this, slot);
+
+            return action;
         };
 
+        undoAction_ = addFileAction(tr("Undo"), QKeySequence::Undo, &MainWindow::undo);
+        redoAction_ = addFileAction(tr("Redo"), QKeySequence::Redo, &MainWindow::redo);
+
+        fileMenu->addSeparator();
+
+        addFileAction(tr("Find anything..."), QKeySequence(Qt::CTRL | Qt::Key_K), &MainWindow::openCommandPalette);
+
+        fileMenu->addSeparator();
+
         addFileAction(tr("Open knot..."), QKeySequence::Open, &MainWindow::openKnotFile);
+
+        recentMenu_ = fileMenu->addMenu(tr("Open recent"));
+
+        connect(recentMenu_, &QMenu::aboutToShow, this, &MainWindow::fillRecentMenu);
+
         addFileAction(tr("Save knot..."), QKeySequence::Save, &MainWindow::saveKnotFile);
 
         fileMenu->addSeparator();
@@ -188,6 +245,11 @@ MainWindow::MainWindow(
         addFileAction(tr("Export coordinates..."), QKeySequence(), &MainWindow::exportCoordinates);
         addFileAction(tr("Export analysis report..."), QKeySequence(), &MainWindow::exportReport);
 
+        fileMenu->addSeparator();
+
+        addFileAction(tr("Keyboard shortcuts"), QKeySequence(Qt::Key_F1), &MainWindow::showShortcuts);
+        addFileAction(tr("Show the tour"), QKeySequence(), &MainWindow::startTour);
+
         // Opened by hand, not with setMenu(): a button with a menu keeps
         // room for a menu arrow and pushed its text out on the left.
         connect(fileButton,
@@ -198,6 +260,27 @@ MainWindow::MainWindow(
                     fileMenu->popup(fileButton->mapToGlobal(QPoint(0, fileButton->height())));
                 });
     }
+
+    undoButton_ = new QPushButton(topBar);
+
+    undoButton_->setObjectName(QStringLiteral("TopBarButton"));
+    undoButton_->setCursor(Qt::PointingHandCursor);
+    ControlHelp::explainDisabled(undoButton_, tr("Undo  (Ctrl+Z)"), tr("Nothing to undo yet."));
+    undoButton_->setAccessibleName(tr("Undo"));
+
+    Icons::set(undoButton_, QStringLiteral("undo"));
+
+    redoButton_ = new QPushButton(topBar);
+
+    redoButton_->setObjectName(QStringLiteral("TopBarButton"));
+    redoButton_->setCursor(Qt::PointingHandCursor);
+    ControlHelp::explainDisabled(redoButton_, tr("Redo  (Ctrl+Y)"), tr("Nothing to redo."));
+    redoButton_->setAccessibleName(tr("Redo"));
+
+    Icons::set(redoButton_, QStringLiteral("redo"));
+
+    connect(undoButton_, &QPushButton::clicked, this, &MainWindow::undo);
+    connect(redoButton_, &QPushButton::clicked, this, &MainWindow::redo);
 
     // something to do, not a window setting: a button among the text links
     QPushButton *practiceButton = new QPushButton(tr("Practice"), topBar);
@@ -222,6 +305,9 @@ MainWindow::MainWindow(
     topLayout->addWidget(brandDivider);
     topLayout->addSpacing(6);
     topLayout->addWidget(createKnotBar(topBar), 1);
+    topLayout->addWidget(undoButton_);
+    topLayout->addWidget(redoButton_);
+    topLayout->addSpacing(12);
     topLayout->addWidget(practiceButton);
     topLayout->addSpacing(8);
     topLayout->addWidget(fileButton);
@@ -267,6 +353,77 @@ MainWindow::MainWindow(
     glWidget_->setPhotoAutoLevel(AppSettings::photoAutoLevel());
 
     viewportLayout->addWidget(glWidget_, 1);
+
+    noticeBar_ = new QFrame(glWidget_);
+
+    noticeBar_->setObjectName(QStringLiteral("Notice"));
+    noticeBar_->hide();
+
+    {
+        QHBoxLayout *noticeLayout = new QHBoxLayout(noticeBar_);
+
+        noticeLayout->setContentsMargins(14, 8, 8, 8);
+        noticeLayout->setSpacing(12);
+
+        noticeText_ = new QLabel(noticeBar_);
+
+        noticeText_->setWordWrap(true);
+
+        noticeProgress_ = new QProgressBar(noticeBar_);
+
+        noticeProgress_->setRange(0, 100);
+        noticeProgress_->setTextVisible(false);
+        noticeProgress_->setFixedSize(110, 6);
+
+        noticeAction_ = new QPushButton(noticeBar_);
+        noticeAction_->setCursor(Qt::PointingHandCursor);
+
+        noticeClose_ = new QPushButton(QStringLiteral("\u2715"), noticeBar_);
+
+        noticeClose_->setObjectName(QStringLiteral("NoticeClose"));
+        noticeClose_->setCursor(Qt::PointingHandCursor);
+        noticeClose_->setToolTip(tr("Close"));
+        noticeClose_->setAccessibleName(tr("Close"));
+
+        noticeLayout->addWidget(noticeText_, 1);
+        noticeLayout->addWidget(noticeProgress_);
+        noticeLayout->addWidget(noticeAction_);
+        noticeLayout->addWidget(noticeClose_);
+    }
+
+    noticeTimer_ = new QTimer(this);
+
+    noticeTimer_->setSingleShot(true);
+
+    connect(noticeTimer_, &QTimer::timeout, this, &MainWindow::hideNotice);
+
+    connect(noticeClose_, &QPushButton::clicked, this, [this]()
+    {
+        const std::function<void()> dismissed = noticeDismissed_;
+
+        hideNotice();
+
+        if (dismissed)
+            dismissed();
+    });
+
+    connect(noticeAction_, &QPushButton::clicked, this, [this]()
+    {
+        const std::function<void()> action = noticeDo_;
+
+        hideNotice();
+
+        if (action)
+            action();
+    });
+
+    glWidget_->installEventFilter(this);
+
+    layingTimer_ = new QTimer(this);
+
+    layingTimer_->setInterval(100);
+
+    connect(layingTimer_, &QTimer::timeout, this, &MainWindow::updateLayingProgress);
 
     // The unknotting plays like a film: its controls under the picture, so
     // that they stay at hand with the panels folded away.
@@ -513,6 +670,7 @@ MainWindow::MainWindow(
         {
             updateLearnSection();
             rebuildMesh();
+            noteChange();
         });
 
     connect(
@@ -555,6 +713,7 @@ MainWindow::MainWindow(
                         2));
 
             scheduleUpdate(false);
+            noteChange();
         });
 
     connect(
@@ -588,6 +747,7 @@ MainWindow::MainWindow(
                         2));
 
             applySurface();
+            noteChange();
         });
 
     connect(
@@ -619,6 +779,7 @@ MainWindow::MainWindow(
                 defaultShine[std::clamp(material, 0, 3)]);
 
             applySurface();
+            noteChange();
         });
 
     /*
@@ -632,6 +793,12 @@ MainWindow::MainWindow(
     rebuildTimer_ = new QTimer(this);
     rebuildTimer_->setSingleShot(true);
     rebuildTimer_->setInterval(150);
+
+    historyTimer_ = new QTimer(this);
+    historyTimer_->setSingleShot(true);
+    historyTimer_->setInterval(350);
+
+    connect(historyTimer_, &QTimer::timeout, this, &MainWindow::recordState);
 
     connect(
         rebuildTimer_,
@@ -798,6 +965,124 @@ MainWindow::MainWindow(
     updateLearnSection();
 
     generateMesh();
+
+    // what cannot be used yet says why
+    ControlHelp::explainDisabled(
+        relaxResetButton_,
+        QString(),
+        tr("Nothing to go back to: the knot has not been moved."));
+
+    ControlHelp::explainDisabled(
+        unknotResetButton_,
+        QString(),
+        tr("Start the unknotting first."));
+
+    ControlHelp::explainDisabled(
+        unknotSummaryButton_,
+        unknotSummaryButton_->toolTip(),
+        tr("Start the unknotting first: its steps are listed here."));
+
+    ControlHelp::explainDisabled(
+        unknotScrubSlider_,
+        QString(),
+        tr("Start the unknotting to move along it."));
+
+    ControlHelp::explainDisabled(
+        seifertStepSlider_,
+        seifertStepSlider_->toolTip(),
+        tr("Build the surface first."));
+
+    ControlHelp::explainDisabled(
+        cutRopeButton_,
+        cutRopeButton_->toolTip(),
+        tr("Let go of the rope first. A rope already cut has its two ends."));
+
+    ControlHelp::explainDisabled(
+        tieEndsButton_,
+        tieEndsButton_->toolTip(),
+        tr("Cut the rope first, and let go of it."));
+
+    setAcceptDrops(true);
+
+    /*
+     * The first-run tour: a card that stands next to what it talks about.
+     */
+    tourCard_ = new QFrame(central);
+
+    tourCard_->setObjectName(QStringLiteral("Tour"));
+    tourCard_->setFixedWidth(330);
+    tourCard_->hide();
+
+    {
+        QVBoxLayout *tourLayout = new QVBoxLayout(tourCard_);
+
+        tourLayout->setContentsMargins(16, 14, 16, 14);
+        tourLayout->setSpacing(8);
+
+        tourCount_ = new QLabel(tourCard_);
+        tourCount_->setObjectName(QStringLiteral("Caption"));
+
+        tourTitle_ = new QLabel(tourCard_);
+        tourTitle_->setObjectName(QStringLiteral("Status"));
+
+        QFont bold = tourTitle_->font();
+
+        bold.setBold(true);
+
+        tourTitle_->setFont(bold);
+
+        tourText_ = new QLabel(tourCard_);
+        tourText_->setWordWrap(true);
+        tourText_->setObjectName(QStringLiteral("Subtitle"));
+
+        tourNext_ = new QPushButton(tourCard_);
+        tourNext_->setObjectName(QStringLiteral("GenerateButton"));
+        tourNext_->setMinimumHeight(34);
+
+        tourSkip_ = new QPushButton(tr("Skip"), tourCard_);
+        tourSkip_->setMinimumHeight(34);
+
+        QHBoxLayout *tourButtons = new QHBoxLayout();
+
+        tourButtons->setSpacing(8);
+        tourButtons->addWidget(tourSkip_);
+        tourButtons->addStretch(1);
+        tourButtons->addWidget(tourNext_);
+
+        tourLayout->addWidget(tourCount_);
+        tourLayout->addWidget(tourTitle_);
+        tourLayout->addWidget(tourText_);
+        tourLayout->addLayout(tourButtons);
+
+        connect(tourSkip_, &QPushButton::clicked, this, &MainWindow::endTour);
+
+        connect(tourNext_, &QPushButton::clicked, this, [this]()
+        {
+            ++tourStep_;
+
+            showTourStep();
+        });
+    }
+
+    central->installEventFilter(this);
+
+    // for Space, the arrows and ? wherever the keyboard is
+    qApp->installEventFilter(this);
+
+    // the keyboard starts on the view, not on the first button
+    glWidget_->setFocus();
+
+    // The state everything else can be undone back to. (Not by recordState:
+    // an autosave of the last session is still on the disk, to be offered.)
+    historyTimer_->stop();
+
+    history_.record(currentState());
+
+    history_.markSaved();
+
+    updateUndoControls();
+
+    restoreWorkspace();
 }
 
 namespace
@@ -853,7 +1138,8 @@ void addSliderRow(
     int minimum,
     int maximum,
     int value,
-    const QString &valueText)
+    const QString &valueText,
+    double unit)
 {
     QWidget *block = new QWidget(parent);
 
@@ -870,7 +1156,14 @@ void addSliderRow(
 
     captionLabel->setObjectName(QStringLiteral("Field"));
 
-    valueLabel = new QLabel(valueText, block);
+    slider = new QSlider(Qt::Horizontal, block);
+
+    slider->setRange(minimum, maximum);
+    slider->setValue(value);
+
+    ControlHelp::resetOnDoubleClick(slider, value);
+
+    valueLabel = new SliderValue(valueText, slider, unit, block);
 
     valueLabel->setObjectName(QStringLiteral("Value"));
     valueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -878,11 +1171,6 @@ void addSliderRow(
     captionRow->addWidget(captionLabel);
     captionRow->addStretch(1);
     captionRow->addWidget(valueLabel);
-
-    slider = new QSlider(Qt::Horizontal, block);
-
-    slider->setRange(minimum, maximum);
-    slider->setValue(value);
 
     blockLayout->addLayout(captionRow);
     blockLayout->addWidget(slider);
@@ -998,6 +1286,8 @@ QWidget *MainWindow::createRail(
     QWidget *parent)
 {
     QWidget *rail = new QWidget(parent);
+
+    railWidget_ = rail;
 
     rail->setObjectName(QStringLiteral("Rail"));
     rail->setAttribute(Qt::WA_StyledBackground, true);
@@ -1187,7 +1477,7 @@ QWidget *MainWindow::createLeftPanel()
     generateButton_ = new QPushButton(tr("APPLY"), customBox_);
 
     generateButton_->setObjectName(QStringLiteral("GenerateButton"));
-    generateButton_->setMinimumHeight(36);
+    generateButton_->setMinimumHeight(38);
 
     customLayout->addWidget(generateButton_);
 
@@ -1197,7 +1487,7 @@ QWidget *MainWindow::createLeftPanel()
 
     addSliderRow(layout, panel, tr("Tube thickness"),
                  thicknessSlider_, thicknessValueLabel_,
-                 2, 60, 16, QStringLiteral("0.16"));
+                 2, 60, 16, QStringLiteral("0.16"), 0.01);
 
     layout->addWidget(makeFieldLabel(tr("Material"), panel));
 
@@ -1269,11 +1559,11 @@ QWidget *MainWindow::createLeftPanel()
 
     addSliderRow(moreLayout, moreOptions, tr("Curve density"),
                  meshDensitySlider_, meshDensityValueLabel_,
-                 48, 320, 160, QStringLiteral("160"));
+                 48, 320, 160, QStringLiteral("160"), 1.0);
 
     addSliderRow(moreLayout, moreOptions, tr("Material shine"),
                  metallicSlider_, metallicValueLabel_,
-                 0, 100, 70, QStringLiteral("0.70"));
+                 0, 100, 70, QStringLiteral("0.70"), 0.01);
 
     auto showMoreOptions = [moreOptionsButton, moreOptions](bool shown)
     {
@@ -1334,15 +1624,15 @@ QWidget *MainWindow::createLeftPanel()
     Icons::set(relaxPlayButton_, QStringLiteral("play"));
 
     relaxPlayButton_->setObjectName(QStringLiteral("GenerateButton"));
-    relaxPlayButton_->setMinimumHeight(40);
+    relaxPlayButton_->setMinimumHeight(38);
 
     scrambleButton_ = new QPushButton(tr("Scramble"), relaxGroup);
 
-    scrambleButton_->setMinimumHeight(40);
+    scrambleButton_->setMinimumHeight(38);
 
     relaxResetButton_ = new QPushButton(tr("Reset"), relaxGroup);
 
-    relaxResetButton_->setMinimumHeight(40);
+    relaxResetButton_->setMinimumHeight(38);
     relaxResetButton_->setEnabled(false);
 
     relaxButtons->addWidget(relaxPlayButton_, 3);
@@ -1358,7 +1648,7 @@ QWidget *MainWindow::createLeftPanel()
     // the same look as a chosen brush in Practice when it is on
     grabButton_->setObjectName(QStringLiteral("BrushButton"));
     grabButton_->setCheckable(true);
-    grabButton_->setMinimumHeight(40);
+    grabButton_->setMinimumHeight(38);
     grabButton_->setToolTip(
         tr("Pull the knot about with the mouse: drag the rope with the "
            "left button."));
@@ -1374,7 +1664,7 @@ QWidget *MainWindow::createLeftPanel()
 
     Icons::set(cutRopeButton_, QStringLiteral("scissors"));
 
-    cutRopeButton_->setMinimumHeight(40);
+    cutRopeButton_->setMinimumHeight(38);
     cutRopeButton_->setToolTip(
         tr("Cut the rope on the table open: with two free ends it can be "
            "tied into another knot."));
@@ -1383,7 +1673,7 @@ QWidget *MainWindow::createLeftPanel()
 
     Icons::set(tieEndsButton_, QStringLiteral("tie"));
 
-    tieEndsButton_->setMinimumHeight(40);
+    tieEndsButton_->setMinimumHeight(38);
     tieEndsButton_->setToolTip(
         tr("Join the two ends of the rope: the knot tied in it becomes "
            "the knot shown and studied."));
@@ -1465,7 +1755,7 @@ QWidget *MainWindow::createLeftPanel()
 
     unknotSpeedCombo_ = new QComboBox(unknotGroup_);
 
-    unknotSpeedCombo_->setMinimumHeight(34);
+    unknotSpeedCombo_->setMinimumHeight(36);
     unknotSpeedCombo_->addItem(QStringLiteral("0.25×"), 0.25);
     unknotSpeedCombo_->addItem(QStringLiteral("0.5×"), 0.5);
     unknotSpeedCombo_->addItem(QStringLiteral("1×"), 1.0);
@@ -1521,7 +1811,7 @@ QWidget *MainWindow::createLeftPanel()
 
     joinSecondCombo_ = new QComboBox(panel);
 
-    joinSecondCombo_->setMinimumHeight(34);
+    joinSecondCombo_->setMinimumHeight(36);
     joinSecondCombo_->addItem(tr("Trefoil Knot (3₁)"), QStringLiteral("trefoil"));
     joinSecondCombo_->addItem(tr("Figure-Eight Knot (4₁)"), QStringLiteral("figure8"));
     joinSecondCombo_->addItem(tr("Cinquefoil (5₁)"), QStringLiteral("cinquefoil"));
@@ -1544,7 +1834,7 @@ QWidget *MainWindow::createLeftPanel()
     Icons::set(joinButton_, QStringLiteral("play"));
 
     joinButton_->setObjectName(QStringLiteral("GenerateButton"));
-    joinButton_->setMinimumHeight(40);
+    joinButton_->setMinimumHeight(38);
 
     layout->addWidget(joinButton_);
 
@@ -1595,7 +1885,7 @@ QWidget *MainWindow::createLeftPanel()
     Icons::set(seifertButton_, QStringLiteral("play"));
 
     seifertButton_->setObjectName(QStringLiteral("GenerateButton"));
-    seifertButton_->setMinimumHeight(40);
+    seifertButton_->setMinimumHeight(38);
 
     layout->addWidget(seifertButton_);
 
@@ -2185,7 +2475,7 @@ QWidget *MainWindow::createLightingPanel()
 
     addSliderRow(layout, panel, tr("Brightness"),
                  brightnessSlider_, brightnessValue_,
-                 50, 150, 100, QStringLiteral("100%"));
+                 50, 150, 100, QStringLiteral("100%"), 1.0);
 
     brightnessSlider_->setSingleStep(5);
     brightnessSlider_->setPageStep(10);
@@ -2216,7 +2506,7 @@ QWidget *MainWindow::createLightingPanel()
 
     addSliderRow(layout, panel, tr("Shadow softness"),
                  shadowSoftnessSlider_, shadowSoftnessValue_,
-                 25, 400, 100, QStringLiteral("100%"));
+                 25, 400, 100, QStringLiteral("100%"), 1.0);
 
     shadowSoftnessSlider_->setSingleStep(5);
     shadowSoftnessSlider_->setPageStep(25);
@@ -2492,6 +2782,7 @@ void MainWindow::updateLightingControls()
             entry.second == &Lighting::Options::floorShadow)
         {
             entry.first->setEnabled(options.keyLight);
+            entry.first->setToolTip(options.keyLight ? QString() : tr("Turn on the key light first."));
         }
     }
 
@@ -2763,6 +3054,11 @@ void MainWindow::changeEvent(
 
 void MainWindow::showInitially()
 {
+    QTimer::singleShot(600, this, &MainWindow::offerAutosave);
+
+    if (!AppSettings::tourSeen())
+        QTimer::singleShot(1200, this, &MainWindow::startTour);
+
     const QByteArray geometry =
         AppSettings::rememberWindow()
             ? AppSettings::windowGeometry()
@@ -2804,11 +3100,1029 @@ void MainWindow::showFullScreenLater()
 void MainWindow::closeEvent(
     QCloseEvent *event)
 {
+    if (!replaced_)
+    {
+        pauseRelaxation();
+
+        if (historyTimer_->isActive())
+        {
+            historyTimer_->stop();
+
+            recordState();
+        }
+
+        if (worthKeeping() && !history_.isSaved())
+        {
+            QMessageBox box(this);
+
+            box.setIcon(QMessageBox::Question);
+            box.setWindowTitle(tr("AKSIOMA: Knots"));
+            box.setText(tr("Save this knot before closing?"));
+            box.setInformativeText(tr("Its changes are not in a file yet."));
+
+            QPushButton *save = box.addButton(tr("Save..."), QMessageBox::AcceptRole);
+            QPushButton *discard = box.addButton(tr("Don't save"), QMessageBox::DestructiveRole);
+            QPushButton *cancel = box.addButton(tr("Cancel"), QMessageBox::RejectRole);
+
+            box.setDefaultButton(save);
+            box.setEscapeButton(cancel);
+
+            box.exec();
+
+            if (box.clickedButton() == cancel || (box.clickedButton() == save && !saveKnot()))
+            {
+                event->ignore();
+                return;
+            }
+
+            Q_UNUSED(discard);
+        }
+
+        // closed properly: nothing to bring back next time
+        QFile::remove(autosavePath());
+
+        saveWorkspace();
+    }
+
+    if (layingProgress_)
+        layingProgress_->cancel = true;
+
     if (AppSettings::rememberWindow())
         AppSettings::setWindowGeometry(saveGeometry());
 
     QMainWindow::closeEvent(
         event);
+}
+
+bool MainWindow::eventFilter(
+    QObject *object,
+    QEvent *event)
+{
+    if (object == glWidget_ && event->type() == QEvent::Resize)
+        placeNotice();
+
+    if (event->type() == QEvent::Resize && tourCard_ != nullptr && object == tourCard_->parent())
+        placeTour();
+
+    /*
+     * How the keyboard came to a control. Tabbed to with the real key, it
+     * answers to Space and the arrows itself; only clicked, they go on being
+     * the program's. (The reason Qt gives with the focus is no help: the
+     * first control of a new window also gets it "by tab".)
+     */
+    if (event->type() == QEvent::MouseButtonPress)
+        tabFocused_ = false;
+
+    if (event->type() == QEvent::KeyPress)
+    {
+        const int pressed = static_cast<QKeyEvent *>(event)->key();
+
+        if (pressed == Qt::Key_Tab || pressed == Qt::Key_Backtab)
+            tabFocused_ = true;
+    }
+
+    if (event->type() == QEvent::KeyPress && QApplication::activeWindow() == this &&
+        QApplication::activePopupWidget() == nullptr)
+    {
+        const QKeyEvent *key = static_cast<QKeyEvent *>(event);
+
+        QWidget *focus = QApplication::focusWidget();
+
+        const bool typing =
+            qobject_cast<QLineEdit *>(focus) != nullptr ||
+            qobject_cast<QTextEdit *>(focus) != nullptr ||
+            qobject_cast<QPlainTextEdit *>(focus) != nullptr ||
+            qobject_cast<QAbstractSpinBox *>(focus) != nullptr;
+
+        const bool plain = (key->modifiers() & (Qt::ControlModifier | Qt::AltModifier)) == 0;
+
+        if (!typing && plain)
+        {
+            if (key->text() == QStringLiteral("?"))
+            {
+                showShortcuts();
+                return true;
+            }
+
+            if (!tabFocused_ && !key->isAutoRepeat())
+            {
+                if (key->key() == Qt::Key_Space)
+                {
+                    playPause();
+                    return true;
+                }
+
+                if (key->key() == Qt::Key_Left || key->key() == Qt::Key_Right)
+                {
+                    stepBy(key->key() == Qt::Key_Right ? 1 : -1);
+                    return true;
+                }
+            }
+        }
+    }
+
+    return QMainWindow::eventFilter(object, event);
+}
+
+void MainWindow::dragEnterEvent(
+    QDragEnterEvent *event)
+{
+    for (const QUrl &url : event->mimeData()->urls())
+    {
+        const QString suffix = QFileInfo(url.toLocalFile()).suffix().toLower();
+
+        if (url.isLocalFile() &&
+            (suffix == QStringLiteral("aknot") || suffix == QStringLiteral("txt") || suffix == QStringLiteral("csv")))
+        {
+            event->acceptProposedAction();
+            return;
+        }
+    }
+}
+
+void MainWindow::dropEvent(
+    QDropEvent *event)
+{
+    const QList<QUrl> urls = event->mimeData()->urls();
+
+    if (urls.isEmpty())
+        return;
+
+    event->acceptProposedAction();
+
+    openKnotFilePath(urls.first().toLocalFile());
+}
+
+void MainWindow::playPause()
+{
+    if (unknotActive_)
+    {
+        unknotPlayPause();
+        return;
+    }
+
+    switch (leftPages_->currentIndex())
+    {
+    case 1:
+        relaxPlayPause();
+        break;
+
+    case 2:
+        unknotPlayPause();
+        break;
+
+    case 3:
+        joinPlayStop();
+        break;
+
+    case 4:
+        toggleSeifert();
+        break;
+
+    default:
+        autoRotationCheck_->toggle();
+        break;
+    }
+}
+
+void MainWindow::stepBy(
+    int direction)
+{
+    if (unknotActive_)
+    {
+        constexpr double Nudge = 0.05;
+
+        // to the next stage or crossing change, if there is one that way
+        double target = std::clamp(unknotT_ + direction * Nudge, 0.0, 1.0);
+
+        if (direction > 0)
+        {
+            for (const double stop : unknotStops_)
+            {
+                if (stop > unknotT_ + 1.0e-4)
+                {
+                    target = stop;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            for (int i = static_cast<int>(unknotStops_.size()) - 1; i >= 0; --i)
+            {
+                if (unknotStops_.at(i) < unknotT_ - 1.0e-4)
+                {
+                    target = unknotStops_.at(i);
+                    break;
+                }
+            }
+        }
+
+        showUnknotMoment(target);
+
+        return;
+    }
+
+    if (seifertActive_)
+    {
+        seifertTimer_->stop();
+
+        seifertStepSlider_->setValue(seifertStepSlider_->value() + direction);
+    }
+}
+
+void MainWindow::showShortcuts()
+{
+    QDialog dialog(this);
+
+    dialog.setWindowTitle(tr("Keyboard shortcuts"));
+
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+
+    layout->setContentsMargins(20, 20, 20, 20);
+    layout->setSpacing(12);
+
+    QGridLayout *grid = new QGridLayout();
+
+    grid->setHorizontalSpacing(24);
+    grid->setVerticalSpacing(7);
+
+    int row = 0;
+
+    auto heading = [&](const QString &text)
+    {
+        QLabel *label = new QLabel(text, &dialog);
+
+        label->setObjectName(QStringLiteral("Caption"));
+
+        grid->addWidget(label, row, 0, 1, 2);
+        grid->setRowMinimumHeight(row, 26);
+
+        ++row;
+    };
+
+    auto line = [&](const QString &keys, const QString &what)
+    {
+        QLabel *left = new QLabel(keys, &dialog);
+
+        left->setObjectName(QStringLiteral("Value"));
+
+        QLabel *right = new QLabel(what, &dialog);
+
+        right->setObjectName(QStringLiteral("Field"));
+
+        grid->addWidget(left, row, 0);
+        grid->addWidget(right, row, 1);
+
+        ++row;
+    };
+
+    heading(tr("ANYWHERE"));
+    line(QStringLiteral("Ctrl+K"), tr("Find anything"));
+    line(QStringLiteral("Ctrl+Z  /  Ctrl+Y"), tr("Undo and redo"));
+    line(QStringLiteral("Ctrl+O  /  Ctrl+S"), tr("Open and save a knot"));
+    line(QStringLiteral("Ctrl+E  /  Ctrl+D"), tr("Export the picture and the diagram"));
+    line(QStringLiteral("Ctrl+,"), tr("Settings"));
+    line(QStringLiteral("F11  /  Esc"), tr("Full screen on and off"));
+    line(QStringLiteral("F1  /  ?"), tr("This list"));
+
+    heading(tr("TOOLS"));
+    line(QStringLiteral("Ctrl+1 ... Ctrl+5"), tr("Open a tool"));
+    line(tr("Space"), tr("Play or pause what the open tool does"));
+    line(QStringLiteral("\u2190  /  \u2192"), tr("Step back and forward: unknotting, surface"));
+
+    heading(tr("MOUSE"));
+    line(tr("Drag"), tr("Turn the view"));
+    line(tr("Right-drag"), tr("Move the view"));
+    line(tr("Scroll"), tr("Zoom"));
+    line(tr("Shift+drag"), tr("Push the rope under another strand"));
+    line(tr("Double-click a slider"), tr("Back to its usual value"));
+    line(tr("Click a slider's number"), tr("Type an exact value"));
+
+    layout->addLayout(grid);
+
+    QPushButton *close = new QPushButton(tr("Close"), &dialog);
+
+    close->setMinimumHeight(36);
+
+    connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    layout->addWidget(close, 0, Qt::AlignRight);
+
+    dialog.exec();
+}
+
+void MainWindow::fillRecentMenu()
+{
+    recentMenu_->clear();
+
+    const QStringList files = AppSettings::recentFiles();
+
+    for (const QString &path : files)
+    {
+        QAction *action = recentMenu_->addAction(QFileInfo(path).fileName());
+
+        action->setToolTip(path);
+
+        connect(action, &QAction::triggered, this, [this, path]()
+        {
+            openRecentFile(path);
+        });
+    }
+
+    if (files.isEmpty())
+    {
+        recentMenu_->addAction(tr("No files yet"))->setEnabled(false);
+        return;
+    }
+
+    recentMenu_->addSeparator();
+
+    connect(recentMenu_->addAction(tr("Clear the list")), &QAction::triggered, this, []()
+    {
+        AppSettings::clearRecentFiles();
+    });
+}
+
+void MainWindow::openRecentFile(
+    const QString &path)
+{
+    if (!QFile::exists(path))
+    {
+        AppSettings::removeRecentFile(path);
+
+        showNotice(
+            tr("%1 is no longer there, so it was taken off the list.").arg(QFileInfo(path).fileName()),
+            Notice::Error);
+
+        return;
+    }
+
+    openKnotFilePath(path);
+}
+
+void MainWindow::openCommandPalette()
+{
+    QVector<PaletteItem> items;
+
+    // everything in the File menu, under its own name and shortcut
+    for (QAction *action : fileMenu_->actions())
+    {
+        if (action->isSeparator() || action->menu() != nullptr || !action->isEnabled() ||
+            action->shortcut() == QKeySequence(Qt::CTRL | Qt::Key_K))
+        {
+            continue;
+        }
+
+        QString title = action->text();
+
+        title.remove(QStringLiteral("..."));
+
+        items.push_back({title, action->shortcut().toString(QKeySequence::NativeText), [action]()
+                         {
+                             action->trigger();
+                         }});
+    }
+
+    // the tools
+    for (int page = 0; page < leftPages_->count(); ++page)
+    {
+        QAbstractButton *button = railGroup_->button(page);
+
+        items.push_back({button->text(), tr("Tool"), [this, page, button]()
+                         {
+                             if (leftPages_->currentIndex() != page || leftPages_->isHidden())
+                                 button->click();
+                         }});
+    }
+
+    // what the tools do: their page opens with them
+    auto doing = [this, &items](QAbstractButton *button, const QString &title, int page)
+    {
+        items.push_back({title, railGroup_->button(page)->text(), [this, button, page]()
+                         {
+                             if (leftPages_->currentIndex() != page || leftPages_->isHidden())
+                                 railGroup_->button(page)->click();
+
+                             if (button->isEnabled())
+                                 button->click();
+                         }});
+    };
+
+    doing(scrambleButton_, tr("Scramble"), 1);
+    doing(grabButton_, tr("Grab the rope"), 1);
+    doing(joinButton_, tr("JOIN"), 3);
+    doing(seifertButton_, tr("BUILD SURFACE"), 4);
+
+    items.push_back({tr("Browse..."), QString(), [this]() { openKnotBrowser(); }});
+    items.push_back({tr("Draw..."), QString(), [this]() { drawKnotDialog(); }});
+    items.push_back({tr("Practice"), QString(), [this]() { openPractice(); }});
+    items.push_back({tr("Settings"), QStringLiteral("Ctrl+,"), [this]() { showSettings(); }});
+    items.push_back({tr("About"), QString(), [this]() { showAbout(); }});
+    items.push_back({tr("Reset view"), QString(), [this]() { resetCamera(); }});
+    items.push_back({tr("Photo"), QString(), [this]() { photoButton_->toggle(); }});
+    items.push_back({tr("Analysis", "view bar"), QString(), [this]() { analysisButton_->toggle(); }});
+
+    // the knots in the list, and the scenes
+    for (int i = 0; i < presetCombo_->count(); ++i)
+    {
+        items.push_back({presetCombo_->itemText(i), tr("Knot"), [this, i]()
+                         {
+                             presetCombo_->setCurrentIndex(i);
+                         }});
+    }
+
+    for (int i = 0; i < photoSceneCombo_->count(); ++i)
+    {
+        items.push_back({photoSceneCombo_->itemText(i), tr("Photo"), [this, i]()
+                         {
+                             photoSceneCombo_->setCurrentIndex(i);
+
+                             if (!photoButton_->isChecked())
+                                 photoButton_->setChecked(true);
+                         }});
+    }
+
+    for (const QString &path : AppSettings::recentFiles())
+    {
+        items.push_back({QFileInfo(path).fileName(), tr("Recent"), [this, path]()
+                         {
+                             openRecentFile(path);
+                         }});
+    }
+
+    // the table of knots, by name, with or without its marks
+    auto searchKnots = [this](const QString &query)
+    {
+        struct Named
+        {
+            QString name;
+            QString text;
+        };
+
+        static const QVector<Named> names = []()
+        {
+            const KnotMath::KnotTable &table = KnotMath::KnotTable::instance();
+
+            QVector<Named> all;
+
+            all.reserve(table.size());
+
+            for (int i = 0; i < table.size(); ++i)
+            {
+                const QString &name = table.at(i).name;
+
+                all.push_back({name,
+                               Palette::folded(name + QLatin1Char(' ') +
+                                               KnotMath::KnotTable::displayName(name) + QLatin1Char(' ') +
+                                               KnotMath::KnotTable::commonName(name))});
+            }
+
+            return all;
+        }();
+
+        QVector<PaletteItem> found;
+
+        // only what really contains it: letters scattered over 13,000 names
+        // would match everything
+        for (const Named &entry : names)
+        {
+            if (!entry.text.contains(query))
+                continue;
+
+            const QString common = KnotMath::KnotTable::commonName(entry.name);
+            const QString shown = KnotMath::KnotTable::displayName(entry.name);
+
+            const QString name = entry.name;
+
+            found.push_back({common.isEmpty() ? shown : QStringLiteral("%1  %2").arg(shown, common), tr("Knot"),
+                             [this, name]()
+                             {
+                                 showTableKnot(name);
+                             }});
+
+            if (found.size() >= 20)
+                break;
+        }
+
+        return found;
+    };
+
+    CommandPalette palette(items, searchKnots, this);
+
+    palette.move(mapToGlobal(QPoint((width() - palette.width()) / 2, 90)));
+
+    // After the palette has gone: closing it hands the keyboard back to this
+    // window, which would take it from a window the action opens.
+    if (palette.exec() == QDialog::Accepted && palette.chosen().run)
+        QTimer::singleShot(0, this, palette.chosen().run);
+}
+
+void MainWindow::startTour()
+{
+    endTour();
+
+    // (seen is seen, however it ends)
+    AppSettings::setTourSeen();
+
+    tourStep_ = 0;
+
+    tourCard_->show();
+    tourCard_->raise();
+
+    showTourStep();
+}
+
+void MainWindow::showTourStep()
+{
+    constexpr int Steps = 3;
+
+    for (QWidget *widget : {static_cast<QWidget *>(presetCombo_), railWidget_, static_cast<QWidget *>(photoButton_)})
+    {
+        widget->setProperty("tour", false);
+        widget->style()->unpolish(widget);
+        widget->style()->polish(widget);
+    }
+
+    if (tourStep_ >= Steps)
+    {
+        endTour();
+        return;
+    }
+
+    const QString titles[Steps] = {
+        tr("Pick a knot"),
+        tr("Try a tool"),
+        tr("See it as a real rope")};
+
+    const QString texts[Steps] = {
+        tr("Choose one here, browse all 12,965, or draw your own."),
+        tr("Change its style, relax it, undo it, join two knots or build a "
+           "surface. Click the open tool again to fold its panel."),
+        tr("Photo lays the knot down as real rope in the sun. Ctrl+K finds "
+           "anything, and F1 lists every shortcut.")};
+
+    tourCount_->setText(QStringLiteral("%1 / %2").arg(tourStep_ + 1).arg(Steps));
+    tourTitle_->setText(titles[tourStep_]);
+    tourText_->setText(texts[tourStep_]);
+    tourNext_->setText(tourStep_ + 1 < Steps ? tr("Next") : tr("Done"));
+    tourSkip_->setVisible(tourStep_ + 1 < Steps);
+
+    QWidget *target =
+        tourStep_ == 0 ? static_cast<QWidget *>(presetCombo_)
+                       : (tourStep_ == 1 ? railWidget_ : static_cast<QWidget *>(photoButton_));
+
+    target->setProperty("tour", true);
+    target->style()->unpolish(target);
+    target->style()->polish(target);
+
+    placeTour();
+}
+
+void MainWindow::placeTour()
+{
+    if (tourCard_ == nullptr || tourCard_->isHidden() || tourStep_ < 0)
+        return;
+
+    QWidget *parent = tourCard_->parentWidget();
+
+    tourCard_->adjustSize();
+
+    QPoint place;
+
+    if (tourStep_ == 0)
+        place = presetCombo_->mapTo(parent, QPoint(0, presetCombo_->height() + 12));
+    else if (tourStep_ == 1)
+        place = railWidget_->mapTo(parent, QPoint(railWidget_->width() + 12, 24));
+    else
+        place = photoButton_->mapTo(parent, QPoint(photoButton_->width() - tourCard_->width(), -tourCard_->height() - 12));
+
+    tourCard_->move(
+        std::clamp(place.x(), 8, std::max(8, parent->width() - tourCard_->width() - 8)),
+        std::clamp(place.y(), 8, std::max(8, parent->height() - tourCard_->height() - 8)));
+}
+
+void MainWindow::endTour()
+{
+    tourStep_ = -1;
+
+    if (tourCard_ != nullptr)
+        tourCard_->hide();
+
+    for (QWidget *widget : {static_cast<QWidget *>(presetCombo_), railWidget_, static_cast<QWidget *>(photoButton_)})
+    {
+        if (widget != nullptr && widget->property("tour").toBool())
+        {
+            widget->setProperty("tour", false);
+            widget->style()->unpolish(widget);
+            widget->style()->polish(widget);
+        }
+    }
+}
+
+void MainWindow::restoreWorkspace()
+{
+    const int page =
+        std::clamp(AppSettings::workspaceValue(QStringLiteral("tool"), 0), 0, leftPages_->count() - 1);
+
+    leftPages_->setCurrentIndex(page);
+    railGroup_->button(page)->setChecked(true);
+    leftPages_->setVisible(AppSettings::workspaceValue(QStringLiteral("toolPanel"), 1) != 0);
+
+    analysisButton_->setChecked(AppSettings::workspaceValue(QStringLiteral("analysisPanel"), 1) != 0);
+
+    rightTabs_->setCurrentIndex(AppSettings::workspaceValue(QStringLiteral("rightTab"), 0));
+
+    {
+        const QSignalBlocker blocker(photoSceneCombo_);
+
+        const int scene = AppSettings::workspaceValue(QStringLiteral("photoScene"), 0);
+
+        if (scene >= 0 && scene < photoSceneCombo_->count())
+            photoSceneCombo_->setCurrentIndex(scene);
+    }
+
+    updateRailActivity();
+}
+
+void MainWindow::saveWorkspace()
+{
+    AppSettings::setWorkspaceValue(QStringLiteral("tool"), leftPages_->currentIndex());
+    AppSettings::setWorkspaceValue(QStringLiteral("toolPanel"), leftPages_->isHidden() ? 0 : 1);
+    AppSettings::setWorkspaceValue(QStringLiteral("analysisPanel"), analysisButton_->isChecked() ? 1 : 0);
+    AppSettings::setWorkspaceValue(QStringLiteral("rightTab"), rightTabs_->currentIndex());
+    AppSettings::setWorkspaceValue(QStringLiteral("photoScene"), photoSceneCombo_->currentIndex());
+}
+
+void MainWindow::noteChange()
+{
+    if (!restoring_ && historyTimer_ != nullptr)
+        historyTimer_->start();
+}
+
+void MainWindow::recordState()
+{
+    // the end of what is moving now will call again
+    if (relaxRunning_ || pulling_ || joinActive_ || unknotPreparing_)
+    {
+        historyTimer_->start();
+        return;
+    }
+
+    history_.record(currentState());
+
+    updateUndoControls();
+
+    writeAutosave();
+}
+
+KnotState MainWindow::currentState() const
+{
+    KnotState state;
+
+    state.presetIndex = presetCombo_->currentIndex();
+    state.torusP = torusPSpin_->value();
+    state.torusQ = torusQSpin_->value();
+    state.tableKnot = tableKnotName_;
+    state.customText = customInputEdit_->toPlainText();
+
+    if (relaxChanged_)
+        state.shape = relax_.isValid() ? relax_.curve() : currentData_.points;
+
+    state.thickness = thicknessSlider_->value();
+    state.samples = meshDensitySlider_->value();
+    state.material = materialCombo_->currentIndex();
+    state.shine = metallicSlider_->value();
+    state.colorMode = colorModeCombo_->currentIndex();
+    state.color = meshColor_;
+
+    return state;
+}
+
+void MainWindow::restoreState(
+    const KnotState &state)
+{
+    restoring_ = true;
+
+    // a new material also sets its own shine, so it goes first
+    thicknessSlider_->setValue(state.thickness);
+    meshDensitySlider_->setValue(state.samples);
+    materialCombo_->setCurrentIndex(state.material);
+    metallicSlider_->setValue(state.shine);
+    colorModeCombo_->setCurrentIndex(state.colorMode);
+
+    torusPSpin_->setValue(state.torusP);
+    torusQSpin_->setValue(state.torusQ);
+
+    tableKnotName_ = state.tableKnot;
+
+    customInputEdit_->setPlainText(state.customText);
+
+    {
+        const QSignalBlocker blocker(presetCombo_);
+
+        presetCombo_->setCurrentIndex(state.presetIndex);
+    }
+
+    lastPresetIndex_ = state.presetIndex;
+
+    meshColor_ = state.color;
+
+    updateColorSwatch();
+
+    glWidget_->setMeshColor(meshColor_);
+
+    updateCustomInputVisibility();
+
+    // one rebuild instead of one for every value set above
+    rebuildTimer_->stop();
+    pendingFullRegenerate_ = false;
+
+    generateMesh();
+
+    if (!state.shape.isEmpty())
+        applyShape(state.shape);
+
+    updateLearnSection();
+
+    restoring_ = false;
+
+    historyTimer_->stop();
+
+    updateUndoControls();
+
+    writeAutosave();
+}
+
+void MainWindow::applyShape(
+    const QVector<KnotMath::Vec3> &shape)
+{
+    currentData_.points = shape;
+
+    currentCrossings_ =
+        KnotMath::detectProjectionCrossings(
+            currentData_.points,
+            2,
+            700);
+
+    relaxChanged_ = true;
+
+    KnotMath::Invariants invariants =
+        KnotMath::computeInvariantsWithCrossings(
+            currentPreset(),
+            currentData_.points,
+            currentCrossings_,
+            currentData_.closed,
+            torusPSpin_->value(),
+            torusQSpin_->value(),
+            currentData_.tableIndex);
+
+    applyConnectedSumInvariants(invariants);
+
+    updateInvariantPanel(invariants);
+
+    rebuildMesh();
+
+    updateRelaxControls();
+}
+
+void MainWindow::undo()
+{
+    // the rope in the hand first: back as it was laid down
+    if (photoRopeTouched_)
+    {
+        photoRopeTouched_ = false;
+
+        stopPhotoRope();
+
+        generateMesh();
+
+        showNotice(tr("The rope is back as it was laid down."), Notice::Info);
+
+        updateUndoControls();
+
+        return;
+    }
+
+    pauseRelaxation();
+
+    if (historyTimer_->isActive())
+    {
+        historyTimer_->stop();
+
+        history_.record(currentState());
+    }
+
+    if (history_.canUndo())
+        restoreState(history_.undo());
+}
+
+void MainWindow::redo()
+{
+    if (history_.canRedo())
+        restoreState(history_.redo());
+}
+
+void MainWindow::updateUndoControls()
+{
+    if (undoAction_ == nullptr || undoButton_ == nullptr)
+        return;
+
+    const bool back = history_.canUndo() || photoRopeTouched_;
+    const bool forward = history_.canRedo() && !photoRopeTouched_;
+
+    undoAction_->setEnabled(back);
+    undoButton_->setEnabled(back);
+    redoAction_->setEnabled(forward);
+    redoButton_->setEnabled(forward);
+}
+
+bool MainWindow::worthKeeping() const
+{
+    if (!hasData_)
+        return false;
+
+    const bool written =
+        currentPreset() == KnotMath::Preset::CustomCoordinates &&
+        customInputEdit_->toPlainText().trimmed() != QString::fromLatin1(ExampleCurve).trimmed();
+
+    return written || relaxChanged_;
+}
+
+KnotExport::KnotFile MainWindow::currentKnotFile() const
+{
+    const KnotMath::Preset preset = currentPreset();
+
+    KnotExport::KnotFile file;
+
+    file.name = currentData_.name;
+    file.preset = preset;
+    file.torusP = torusPSpin_->value();
+    file.torusQ = torusQSpin_->value();
+
+    if (preset == KnotMath::Preset::KnotTable)
+        file.tableKnot = tableKnotName_;
+
+    if (preset == KnotMath::Preset::CustomCoordinates)
+        file.customText = customInputEdit_->toPlainText();
+
+    file.points = currentData_.points;
+    file.shapeChanged = relaxChanged_;
+
+    file.hasAppearance = true;
+    file.thickness = thicknessSlider_->value();
+    file.samples = meshDensitySlider_->value();
+    file.material = materialCombo_->currentIndex();
+    file.shine = metallicSlider_->value();
+    file.colorMode = colorModeCombo_->currentIndex();
+    file.color = meshColor_;
+
+    return file;
+}
+
+void MainWindow::writeAutosave()
+{
+    if (!worthKeeping() || history_.isSaved())
+    {
+        QFile::remove(autosavePath());
+        return;
+    }
+
+    QString error;
+
+    // (written whole or not at all; a failure here must not get in the way)
+    KnotExport::writeKnotFile(autosavePath(), currentKnotFile(), error);
+}
+
+void MainWindow::offerAutosave()
+{
+    // the newest, if a crash came after an unanswered offer
+    if (QFile::exists(autosavePath()))
+    {
+        QFile::remove(recoveredPath());
+        QFile::rename(autosavePath(), recoveredPath());
+    }
+
+    if (!QFile::exists(recoveredPath()))
+        return;
+
+    showNotice(
+        tr("The last knot was not saved when AKSIOMA closed."),
+        Notice::Info,
+        tr("Restore"),
+        [this]()
+        {
+            loadKnotFile(recoveredPath(), false);
+
+            QFile::remove(recoveredPath());
+        });
+
+    // it waits to be answered, and closing it lets the knot go
+    noticeTimer_->stop();
+
+    noticeDismissed_ = []()
+    {
+        QFile::remove(recoveredPath());
+    };
+}
+
+void MainWindow::showNotice(
+    const QString &text,
+    Notice kind,
+    const QString &actionText,
+    const std::function<void()> &action)
+{
+    noticeTimer_->stop();
+
+    noticeDo_ = action;
+    noticeDismissed_ = nullptr;
+
+    noticeText_->setText(text);
+
+    noticeBar_->setProperty("kind", kind == Notice::Error ? QStringLiteral("error") : QStringLiteral("info"));
+    noticeBar_->style()->unpolish(noticeBar_);
+    noticeBar_->style()->polish(noticeBar_);
+
+    noticeProgress_->setVisible(kind == Notice::Busy);
+    noticeClose_->setVisible(kind != Notice::Busy);
+
+    noticeAction_->setText(actionText);
+    noticeAction_->setVisible(!actionText.isEmpty());
+
+    noticeBar_->show();
+    noticeBar_->raise();
+
+    placeNotice();
+
+    if (kind == Notice::Info)
+        noticeTimer_->start(actionText.isEmpty() ? 5000 : 9000);
+}
+
+void MainWindow::hideNotice()
+{
+    noticeTimer_->stop();
+    noticeBar_->hide();
+
+    noticeDo_ = nullptr;
+    noticeDismissed_ = nullptr;
+}
+
+void MainWindow::placeNotice()
+{
+    if (noticeBar_ == nullptr || noticeBar_->isHidden())
+        return;
+
+    const int width = std::min(glWidget_->width() - 32, 620);
+
+    noticeBar_->setFixedWidth(width);
+    noticeBar_->adjustSize();
+    noticeBar_->move((glWidget_->width() - width) / 2, 16);
+}
+
+void MainWindow::showSaved(
+    const QString &path)
+{
+    const QFileInfo info(path);
+
+    const QString folder = info.absolutePath();
+
+    showNotice(
+        tr("Saved: %1").arg(info.fileName()),
+        Notice::Info,
+        tr("Show folder"),
+        [folder]()
+        {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+        });
+}
+
+void MainWindow::updateLayingProgress()
+{
+    if (!restingLaying_ || !layingProgress_)
+    {
+        layingTimer_->stop();
+        return;
+    }
+
+    // short jobs pass without a word
+    if (layingClock_.elapsed() < 400)
+        return;
+
+    if (noticeBar_->isHidden() || !noticeProgress_->isVisible())
+    {
+        const std::shared_ptr<Photo::RopeProgress> progress = layingProgress_;
+
+        showNotice(
+            tr("Laying the rope on the table"),
+            Notice::Busy,
+            tr("Cancel"),
+            [progress]()
+            {
+                progress->cancel = true;
+            });
+    }
+
+    noticeProgress_->setValue(layingProgress_->percent.load());
 }
 
 void MainWindow::rebuildWindow()
@@ -2842,6 +4156,8 @@ void MainWindow::rebuildWindow()
         replacement->showSettings();
     }
 
+    replaced_ = true;
+
     close();
 }
 
@@ -2857,6 +4173,8 @@ void MainWindow::takeOverFrom(
 {
     previous.stopUnknotting(
         false);
+
+    restoring_ = true;
 
     restoreGeometry(
         previous.saveGeometry());
@@ -2919,7 +4237,18 @@ void MainWindow::takeOverFrom(
 
     generateMesh();
 
+    if (previous.relaxChanged_)
+        applyShape(previous.currentState().shape);
+
     updateLearnSection();
+
+    restoring_ = false;
+
+    historyTimer_->stop();
+
+    history_ = previous.history_;
+
+    updateUndoControls();
 }
 
 QString MainWindow::buildEducationalHtml() const
@@ -3097,8 +4426,14 @@ bool MainWindow::chooseTableKnot()
 
 void MainWindow::openKnotBrowser()
 {
-    if (!chooseTableKnot())
-        return;
+    if (chooseTableKnot())
+        showTableKnot(tableKnotName_);
+}
+
+void MainWindow::showTableKnot(
+    const QString &name)
+{
+    tableKnotName_ = name;
 
     const int tableIndex =
         presetCombo_->findData(
@@ -3155,10 +4490,7 @@ void MainWindow::applyDefaultCustomText(
             .isEmpty())
     {
         customInputEdit_->setPlainText(
-            QStringLiteral(
-                "x=(2+cos(2*t))*cos(3*t);\n"
-                "y=(2+cos(2*t))*sin(3*t);\n"
-                "z=sin(4*t);"));
+            QString::fromLatin1(ExampleCurve));
     }
 }
 
@@ -3318,6 +4650,8 @@ void MainWindow::generateMesh()
         }
 
         updateLearnSection();
+
+        noteChange();
     }
     catch (const std::exception &exception)
     {
@@ -3715,6 +5049,8 @@ void MainWindow::chooseColor()
     updateColorSwatch();
 
     rebuildMesh();
+
+    noteChange();
 }
 
 void MainWindow::updateColorSwatch()
@@ -3805,10 +5141,6 @@ bool MainWindow::showRestingRope(double radius)
 
         if (!asked)
             layRestingRope(radius);
-
-        glWidget_->setCaption(
-            tr("Laying the rope on the table"),
-            tr("It falls and comes to rest by its own weight."));
 
         return false;
     }
@@ -3922,16 +5254,27 @@ void MainWindow::layRestingRope(double radius)
 
     auto result = std::make_shared<Photo::TiedLace>();
 
+    // what is still being laid down is for nothing now
+    if (layingProgress_)
+        layingProgress_->cancel = true;
+
+    auto progress = std::make_shared<Photo::RopeProgress>();
+
+    layingProgress_ = progress;
+
+    layingClock_.start();
+    layingTimer_->start();
+
     QThread *worker = QThread::create(
-        [points, closed, radius, material, sneaker, result]()
+        [points, closed, radius, material, sneaker, result, progress]()
         {
             Photo::TiedLace tied;
 
             // tied in the sneaker's lace, or dropped on the table
             if (sneaker)
-                tied = Photo::tieOnSneaker(points, radius, material);
+                tied = Photo::tieOnSneaker(points, radius, material, progress.get());
             else
-                tied.rope = Photo::layOnTable(points, closed, radius, material);
+                tied.rope = Photo::layOnTable(points, closed, radius, material, progress.get());
 
             /*
              * The rope never passes through itself, so it is the same knot
@@ -3967,6 +5310,25 @@ void MainWindow::layRestingRope(double radius)
                 return;
 
             restingLaying_ = false;
+
+            layingTimer_->stop();
+
+            if (noticeProgress_->isVisible())
+                hideNotice();
+
+            // given up: back to the plain knot, nothing half done
+            if (result->rope.cancelled)
+            {
+                restingJobFrom_.clear();
+
+                photoButton_->setChecked(false);
+
+                showNotice(
+                    tr("Cancelled. Turn on Photo to lay the rope down again."),
+                    Notice::Info);
+
+                return;
+            }
 
             restingRope_ = result->rope;
             restingTied_ = *result;
@@ -4043,10 +5405,10 @@ void MainWindow::applyPhotoMode()
 
         photoSceneCombo_->setVisible(false);
 
-        QMessageBox::warning(
-            this,
-            tr("AKSIOMA: Knots"),
-            tr("The photographed room could not be loaded."));
+        showNotice(
+            tr("The photographed place could not be loaded. Installing "
+               "AKSIOMA again brings it back."),
+            Notice::Error);
     }
 
     if (grabbing)
@@ -4058,13 +5420,10 @@ void MainWindow::applyPhotoMode()
 void MainWindow::showError(
     const QString &message)
 {
-    QMessageBox::critical(
-        this,
-        tr("AKSIOMA: Knots"),
-        tr(
-            "The requested curve could not be generated.\n\n%1")
-            .arg(
-                message));
+    showNotice(
+        tr("The curve could not be made: %1 Check the formula, or press "
+           "Undo to go back.").arg(message),
+        Notice::Error);
 }
 
 
@@ -5465,15 +6824,22 @@ void MainWindow::openKnotFilePath(
     AppSettings::setLastFolder(
         QFileInfo(path).absolutePath());
 
+    loadKnotFile(path, true);
+}
+
+void MainWindow::loadKnotFile(
+    const QString &path,
+    bool remembered)
+{
     KnotExport::KnotFile file;
     QString error;
 
     if (!KnotExport::readKnotFile(path, file, error))
     {
-        QMessageBox::warning(
-            this,
-            tr("AKSIOMA: Knots"),
-            tr("The knot could not be opened.\n\n%1").arg(error));
+        showNotice(
+            tr("The knot could not be opened: %1 Choose an .aknot file or a "
+               "text file of coordinates.").arg(error),
+            Notice::Error);
 
         return;
     }
@@ -5541,42 +6907,36 @@ void MainWindow::openKnotFilePath(
     updateLearnSection();
 
     resetCamera();
+
+    // this is what the file holds (or, restored, what is yet to be saved)
+    historyTimer_->stop();
+
+    history_.record(currentState());
+
+    if (remembered)
+    {
+        history_.markSaved();
+
+        AppSettings::addRecentFile(path);
+    }
+
+    updateUndoControls();
+
+    writeAutosave();
 }
 
 void MainWindow::saveKnotFile()
 {
+    saveKnot();
+}
+
+bool MainWindow::saveKnot()
+{
     if (!hasData_)
-        return;
+        return false;
 
     // a moving curve is kept where it is
     pauseRelaxation();
-
-    const KnotMath::Preset preset =
-        currentPreset();
-
-    KnotExport::KnotFile file;
-
-    file.name = currentData_.name;
-    file.preset = preset;
-    file.torusP = torusPSpin_->value();
-    file.torusQ = torusQSpin_->value();
-
-    if (preset == KnotMath::Preset::KnotTable)
-        file.tableKnot = tableKnotName_;
-
-    if (preset == KnotMath::Preset::CustomCoordinates)
-        file.customText = customInputEdit_->toPlainText();
-
-    file.points = currentData_.points;
-    file.shapeChanged = relaxChanged_;
-
-    file.hasAppearance = true;
-    file.thickness = thicknessSlider_->value();
-    file.samples = meshDensitySlider_->value();
-    file.material = materialCombo_->currentIndex();
-    file.shine = metallicSlider_->value();
-    file.colorMode = colorModeCombo_->currentIndex();
-    file.color = meshColor_;
 
     const QString path =
         askSavePath(
@@ -5586,17 +6946,33 @@ void MainWindow::saveKnotFile()
             {tr("AKSIOMA knot file (*.aknot)")});
 
     if (path.isEmpty())
-        return;
+        return false;
 
     QString error;
 
-    if (!KnotExport::writeKnotFile(path, file, error))
+    if (!KnotExport::writeKnotFile(path, currentKnotFile(), error))
     {
-        QMessageBox::warning(
-            this,
-            tr("AKSIOMA: Knots"),
-            tr("The knot could not be saved.\n\n%1").arg(error));
+        showNotice(
+            tr("The knot could not be saved: %1 Try another folder or file name.").arg(error),
+            Notice::Error);
+
+        return false;
     }
+
+    historyTimer_->stop();
+
+    history_.record(currentState());
+    history_.markSaved();
+
+    AppSettings::addRecentFile(path);
+
+    updateUndoControls();
+
+    writeAutosave();
+
+    showSaved(path);
+
+    return true;
 }
 
 void MainWindow::exportViewImage()
@@ -5627,11 +7003,14 @@ void MainWindow::exportViewImage()
 
     if (!output.save(path, nullptr, jpeg ? 92 : -1))
     {
-        QMessageBox::warning(
-            this,
-            tr("AKSIOMA: Knots"),
-            tr("The picture could not be saved."));
+        showNotice(
+            tr("The picture could not be saved. Try another folder or file name."),
+            Notice::Error);
+
+        return;
     }
+
+    showSaved(path);
 }
 
 void MainWindow::exportDiagram()
@@ -5643,10 +7022,10 @@ void MainWindow::exportDiagram()
 
     if (currentData_.multiStrand || !currentData_.closed)
     {
-        QMessageBox::information(
-            this,
-            tr("AKSIOMA: Knots"),
-            tr("A knot diagram can only be drawn for a single closed curve."));
+        showNotice(
+            tr("A knot diagram needs a single closed curve. Choose a knot "
+               "instead of a structure of several strands."),
+            Notice::Error);
 
         return;
     }
@@ -5661,10 +7040,10 @@ void MainWindow::exportDiagram()
 
     if (!diagram.isValid())
     {
-        QMessageBox::warning(
-            this,
-            tr("AKSIOMA: Knots"),
-            tr("No knot diagram could be made.\n\n%1").arg(error));
+        showNotice(
+            tr("No knot diagram could be made: %1 Relaxing the knot first "
+               "often clears up a crowded curve.").arg(error),
+            Notice::Error);
 
         return;
     }
@@ -5681,11 +7060,14 @@ void MainWindow::exportDiagram()
 
     if (!KnotExport::saveDiagram(diagram, path, currentData_.name, error))
     {
-        QMessageBox::warning(
-            this,
-            tr("AKSIOMA: Knots"),
-            tr("The diagram could not be saved.\n\n%1").arg(error));
+        showNotice(
+            tr("The diagram could not be saved: %1 Try another folder or file name.").arg(error),
+            Notice::Error);
+
+        return;
     }
+
+    showSaved(path);
 }
 
 void MainWindow::exportCoordinates()
@@ -5712,11 +7094,14 @@ void MainWindow::exportCoordinates()
 
     if (!writeTextFile(path, KnotExport::coordinatesText(currentData_, csv), error))
     {
-        QMessageBox::warning(
-            this,
-            tr("AKSIOMA: Knots"),
-            tr("The coordinates could not be saved.\n\n%1").arg(error));
+        showNotice(
+            tr("The coordinates could not be saved: %1 Try another folder or file name.").arg(error),
+            Notice::Error);
+
+        return;
     }
+
+    showSaved(path);
 }
 
 void MainWindow::exportReport()
@@ -5768,11 +7153,14 @@ void MainWindow::exportReport()
 
     if (!writeTextFile(path, KnotExport::reportText(report), error))
     {
-        QMessageBox::warning(
-            this,
-            tr("AKSIOMA: Knots"),
-            tr("The report could not be saved.\n\n%1").arg(error));
+        showNotice(
+            tr("The report could not be saved: %1 Try another folder or file name.").arg(error),
+            Notice::Error);
+
+        return;
     }
+
+    showSaved(path);
 }
 
 /*
@@ -6366,6 +7754,8 @@ void MainWindow::pauseRelaxation()
     requestRelaxAnalysis();
 
     updateRelaxControls();
+
+    noteChange();
 }
 
 void MainWindow::stopRelaxation()
@@ -7037,6 +8427,8 @@ void MainWindow::ropeReleased()
             tr("No strand passed through another, so this is still the "
                "same knot. Pull again, press Relax to let it settle, or "
                "Reset to go back to the original.")));
+
+    noteChange();
 }
 
 /*
@@ -7512,6 +8904,10 @@ void MainWindow::photoRopeReleased()
             tr("Let go"),
             tr("The rope falls back onto the table. Once it lies still, "
                "its knot is named.")));
+
+    photoRopeTouched_ = true;
+
+    updateUndoControls();
 }
 
 void MainWindow::cutPhotoRope()
@@ -7520,6 +8916,10 @@ void MainWindow::cutPhotoRope()
         return;
 
     finishPhotoRopeJob();
+
+    photoRopeTouched_ = true;
+
+    updateUndoControls();
 
     const QVector<KnotMath::Vec3> points = photoRope_->points();
     const int n = points.size();

@@ -250,7 +250,8 @@ RestingRope layOnTable(
     const QVector<Vec3> &curve,
     bool closed,
     double radius,
-    const RopeMaterial &material)
+    const RopeMaterial &material,
+    RopeProgress *progress)
 {
     RestingRope result;
 
@@ -321,7 +322,12 @@ RestingRope layOnTable(
 
     QVector<Vec3> frames;
 
-    const Settling settling = settleRope(x, QVector<bool>(n, false), closed, material, Ground(), &frames);
+    const Settling settling = settleRope(x, QVector<bool>(n, false), closed, material, Ground(), &frames, progress);
+
+    result.cancelled = settling.cancelled;
+
+    if (settling.cancelled)
+        return result;
 
     result.steps = settling.steps;
     result.seconds = settling.seconds;
@@ -361,7 +367,8 @@ Settling settleRope(
     bool closed,
     const RopeMaterial &material,
     const Ground &ground,
-    QVector<Vec3> *frames)
+    QVector<Vec3> *frames,
+    RopeProgress *progress)
 {
     Settling result;
 
@@ -383,6 +390,18 @@ Settling settleRope(
 
         if (simulation.atRest())
             break;
+
+        if (progress != nullptr)
+        {
+            if (progress->cancel.load())
+            {
+                result.cancelled = true;
+
+                return result;
+            }
+
+            progress->percent.store(100 * step / longest);
+        }
     }
 
     x = simulation.points();

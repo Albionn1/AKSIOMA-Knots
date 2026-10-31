@@ -1,7 +1,9 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "knotexport.h"
 #include "knotglwidget.h"
+#include "knothistory.h"
 #include "knotjoin.h"
 #include "knotmath.h"
 #include "knotrelax.h"
@@ -25,6 +27,7 @@
 #include <QElapsedTimer>
 #include <QPair>
 
+#include <functional>
 #include <future>
 #include <memory>
 #include <map>
@@ -32,7 +35,9 @@
 class QButtonGroup;
 class QCheckBox;
 class QDialog;
+class QFrame;
 class QGroupBox;
+class QMenu;
 class QProgressBar;
 class QShortcut;
 class QStackedWidget;
@@ -66,6 +71,17 @@ protected:
 
     void changeEvent(
         QEvent *event) override;
+
+    bool eventFilter(
+        QObject *object,
+        QEvent *event) override;
+
+    // a knot file dropped on the window
+    void dragEnterEvent(
+        QDragEnterEvent *event) override;
+
+    void dropEvent(
+        QDropEvent *event) override;
 
 private slots:
     void generateMesh();
@@ -267,6 +283,89 @@ private:
     void showError(
         const QString &message);
 
+    /*
+     * Undo and redo (knothistory.h). Anything that changes the knot or its
+     * look calls noteChange(); once things have been quiet for a moment the
+     * state is recorded as one step, so a slider dragged across its range
+     * is one step, not fifty. The rope in the hand is not a step: undo
+     * lays it down afresh.
+     */
+    void noteChange();
+    void recordState();
+    KnotState currentState() const;
+    void restoreState(const KnotState &state);
+    void undo();
+    void redo();
+    void updateUndoControls();
+
+    // the moved curve as the current knot, with its analysis
+    void applyShape(const QVector<KnotMath::Vec3> &shape);
+
+    /*
+     * Work that exists nowhere else: a drawn, joined, tied or moved knot.
+     * A knot from the table can always be had again, so it asks nothing.
+     */
+    bool worthKeeping() const;
+    KnotExport::KnotFile currentKnotFile() const;
+
+    // true when written; false when cancelled or failed (it says so)
+    bool saveKnot();
+    void writeAutosave();
+    void offerAutosave();
+
+    // opens a file; `remembered`: it counts as the file of this knot
+    void loadKnotFile(const QString &path, bool remembered);
+
+    /*
+     * The bar over the 3D view: what happened and what can be done about
+     * it, without stopping the work the way a window in the way does. Plain
+     * notes go by themselves; errors stay until read.
+     */
+    enum class Notice
+    {
+        Info,
+        Error,
+        Busy
+    };
+
+    void showNotice(
+        const QString &text,
+        Notice kind,
+        const QString &actionText = QString(),
+        const std::function<void()> &action = nullptr);
+
+    void hideNotice();
+    void placeNotice();
+
+    // says where a file went, with the way to it
+    void showSaved(const QString &path);
+
+    // laying a rope: progress in the bar, after a moment
+    void updateLayingProgress();
+
+    void restoreWorkspace();
+    void saveWorkspace();
+
+    // Space: what the open tool plays; left and right: a step
+    void playPause();
+    void stepBy(int direction);
+
+    // F1 or ?: every key, and Ctrl+K: find anything
+    void showShortcuts();
+    void openCommandPalette();
+
+    // a knot of the table as the current knot
+    void showTableKnot(const QString &name);
+
+    void fillRecentMenu();
+    void openRecentFile(const QString &path);
+
+    // the first-run tour: three steps, each pointing at its control
+    void startTour();
+    void showTourStep();
+    void endTour();
+    void placeTour();
+
     KnotMath::Preset currentPreset() const;
 
     // Rebuilds only the tube mesh from the cached curve (thickness, colour
@@ -368,6 +467,98 @@ private:
         double t);
 
 private:
+    KnotHistory history_;
+
+    QTimer *historyTimer_ =
+        nullptr;
+
+    // states are being put back, or taken over: nothing to record
+    bool restoring_ =
+        false;
+
+    // this window is being replaced (a new language): it asks nothing
+    bool replaced_ =
+        false;
+
+    // the rope in the hand was moved or cut
+    bool photoRopeTouched_ =
+        false;
+
+    QAction *undoAction_ =
+        nullptr;
+
+    QAction *redoAction_ =
+        nullptr;
+
+    QPushButton *undoButton_ =
+        nullptr;
+
+    QPushButton *redoButton_ =
+        nullptr;
+
+    QMenu *fileMenu_ =
+        nullptr;
+
+    QMenu *recentMenu_ =
+        nullptr;
+
+    QWidget *railWidget_ =
+        nullptr;
+
+    // the keyboard is on a control because it was tabbed to, so Space and
+    // the arrows belong to that control
+    bool tabFocused_ =
+        false;
+
+    QFrame *tourCard_ =
+        nullptr;
+
+    QLabel *tourTitle_ =
+        nullptr;
+
+    QLabel *tourText_ =
+        nullptr;
+
+    QLabel *tourCount_ =
+        nullptr;
+
+    QPushButton *tourNext_ =
+        nullptr;
+
+    QPushButton *tourSkip_ =
+        nullptr;
+
+    int tourStep_ =
+        -1;
+
+    QFrame *noticeBar_ =
+        nullptr;
+
+    QLabel *noticeText_ =
+        nullptr;
+
+    QProgressBar *noticeProgress_ =
+        nullptr;
+
+    QPushButton *noticeAction_ =
+        nullptr;
+
+    QPushButton *noticeClose_ =
+        nullptr;
+
+    QTimer *noticeTimer_ =
+        nullptr;
+
+    std::function<void()> noticeDo_;
+
+    // closing the notice decides something (an unrestored knot is let go)
+    std::function<void()> noticeDismissed_;
+
+    std::shared_ptr<Photo::RopeProgress> layingProgress_;
+    QTimer *layingTimer_ =
+        nullptr;
+    QElapsedTimer layingClock_;
+
     QSplitter *mainSplitter_ =
         nullptr;
 

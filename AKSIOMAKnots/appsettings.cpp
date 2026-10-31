@@ -197,6 +197,64 @@ Lighting::Options lighting()
     return options;
 }
 
+int workspaceValue(
+    const QString &name,
+    int fallback)
+{
+    return QSettings().value(QStringLiteral("workspace/") + name, fallback).toInt();
+}
+
+void setWorkspaceValue(
+    const QString &name,
+    int value)
+{
+    QSettings().setValue(QStringLiteral("workspace/") + name, value);
+}
+
+QStringList recentFiles()
+{
+    return QSettings().value(QStringLiteral("recentFiles")).toStringList();
+}
+
+void addRecentFile(
+    const QString &path)
+{
+    QStringList files = recentFiles();
+
+    files.removeAll(path);
+    files.prepend(path);
+
+    while (files.size() > 8)
+        files.removeLast();
+
+    QSettings().setValue(QStringLiteral("recentFiles"), files);
+}
+
+void removeRecentFile(
+    const QString &path)
+{
+    QStringList files = recentFiles();
+
+    files.removeAll(path);
+
+    QSettings().setValue(QStringLiteral("recentFiles"), files);
+}
+
+void clearRecentFiles()
+{
+    QSettings().remove(QStringLiteral("recentFiles"));
+}
+
+bool tourSeen()
+{
+    return QSettings().value(QStringLiteral("tourSeen"), false).toBool();
+}
+
+void setTourSeen()
+{
+    QSettings().setValue(QStringLiteral("tourSeen"), true);
+}
+
 int photoAutoLevel()
 {
     return std::clamp(QSettings().value(QStringLiteral("photoAutoLevel"), 1).toInt(), 1, 3);

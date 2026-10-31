@@ -104,7 +104,7 @@ UnknotSummaryDialog::UnknotSummaryDialog(
     const int changes = changeCount();
 
     QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(20, 18, 20, 14);
+    layout->setContentsMargins(20, 20, 20, 20);
     layout->setSpacing(12);
 
     /*

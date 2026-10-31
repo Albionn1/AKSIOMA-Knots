@@ -132,7 +132,8 @@ struct TiedLace
 TiedLace tieOnSneaker(
     const QVector<KnotMath::Vec3> &curve,
     double radius,
-    const RopeMaterial &material);
+    const RopeMaterial &material,
+    RopeProgress *progress = nullptr);
 
 } // namespace Photo
 

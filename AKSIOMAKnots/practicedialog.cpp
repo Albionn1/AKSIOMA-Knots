@@ -655,8 +655,8 @@ PracticeDialog::PracticeDialog(
 
     QVBoxLayout *layout = new QVBoxLayout(this);
 
-    layout->setContentsMargins(14, 14, 14, 14);
-    layout->setSpacing(10);
+    layout->setContentsMargins(20, 20, 20, 20);
+    layout->setSpacing(12);
 
     /*
      * exercise and knot
@@ -667,7 +667,7 @@ PracticeDialog::PracticeDialog(
     exerciseCombo_ = new QComboBox(this);
     exerciseCombo_->addItem(tr("Tricolouring"));
     exerciseCombo_->addItem(tr("Crossing signs"));
-    exerciseCombo_->setMinimumHeight(32);
+    exerciseCombo_->setMinimumHeight(36);
 
     knotLabel_ = new QLabel(this);
     knotLabel_->setObjectName(QStringLiteral("Subtitle"));
