@@ -6725,7 +6725,8 @@ void MainWindow::showUnknotMoment(
 void MainWindow::drawKnotDialog()
 {
     DiagramEditorDialog dialog(
-        this);
+        this,
+        static_cast<double>(thicknessSlider_->value()) / 100.0);
 
     if (dialog.exec() != QDialog::Accepted ||
         !dialog.diagram().isValid())

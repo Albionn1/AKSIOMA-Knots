@@ -150,6 +150,62 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>PËRDOR KËTË NYJË</translation>
     </message>
     <message>
+        <source>Spread apart</source>
+        <translation>Hapi fijet</translation>
+    </message>
+    <message>
+        <source>Moves the strands away from each other. The crossings stay, so it is the same knot.</source>
+        <translation>I largon fijet nga njëra-tjetra. Kryqëzimet mbeten, ndaj është e njëjta nyjë.</translation>
+    </message>
+    <message>
+        <source>Flip crossing</source>
+        <translation>Ndërro kryqëzimin</translation>
+    </message>
+    <message>
+        <source>Swap which strand goes over at the chosen crossing.</source>
+        <translation>Ndërroni se cila fije kalon sipër në kryqëzimin e zgjedhur.</translation>
+    </message>
+    <message>
+        <source>Remove loop</source>
+        <translation>Hiq lakun</translation>
+    </message>
+    <message>
+        <source>Takes out the smaller loop at the chosen crossing. If other strands cross that loop, the knot can change.</source>
+        <translation>Heq lakun më të vogël në kryqëzimin e zgjedhur. Nëse fije të tjera e presin atë lak, nyja mund të ndryshojë.</translation>
+    </message>
+    <message>
+        <source>Back to drawing</source>
+        <translation>Kthehu te vizatimi</translation>
+    </message>
+    <message>
+        <source>There is no more room to move these strands: remove a loop or go back and draw it larger.</source>
+        <translation>Nuk ka më vend për t’i lëvizur këto fije: hiqni një lak ose kthehuni dhe vizatojeni më të madhe.</translation>
+    </message>
+    <message>
+        <source>The strands are apart: it is the same knot.</source>
+        <translation>Fijet u ndanë: është e njëjta nyjë.</translation>
+    </message>
+    <message>
+        <source>Moved as far as the picture has room: it is the same knot. Remove a loop for more room.</source>
+        <translation>U lëvizën aq sa lejon vendi në figurë: është e njëjta nyjë. Hiqni një lak për më shumë vend.</translation>
+    </message>
+    <message>
+        <source>The crossing is flipped: this can change the knot.</source>
+        <translation>Kryqëzimi u ndërrua: kjo mund ta ndryshojë nyjën.</translation>
+    </message>
+    <message>
+        <source>The loop is gone: it was only a twist, so it is the same knot.</source>
+        <translation>Laku u hoq: ishte vetëm një përdredhje, ndaj është e njëjta nyjë.</translation>
+    </message>
+    <message>
+        <source>The loop is gone, with the crossings on it: this can be another knot now.</source>
+        <translation>Laku u hoq bashkë me kryqëzimet e tij: tani kjo mund të jetë një nyjë tjetër.</translation>
+    </message>
+    <message>
+        <source>That loop cannot be taken out without changing the rest of the picture.</source>
+        <translation>Ky lak nuk mund të hiqet pa ndryshuar pjesën tjetër të figurës.</translation>
+    </message>
+    <message>
         <source>Reidemeister move I: the twist is gone - the same knot with one crossing fewer.</source>
         <translation>Lëvizja I e Reidemeister-it: laku u hoq - e njëjta nyjë me një kryqëzim më pak.</translation>
     </message>
@@ -164,6 +220,34 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>That move would change the knot here, so it was not made.</source>
         <translation>Kjo lëvizje do ta ndryshonte nyjën këtu, prandaj nuk u bë.</translation>
+    </message>
+    <message>
+        <source>Check your knot</source>
+        <translation>Kontrolloni nyjën tuaj</translation>
+    </message>
+    <message>
+        <source>Some strands lie too close together, and one tight place makes the whole tube thin. Click a ring or a crossing to choose it, then change it or take its loop out.</source>
+        <translation>Disa fije janë shumë afër njëra-tjetrës, dhe një vend i ngushtë e bën të gjithë tubin të hollë. Klikoni një rreth ose një kryqëzim për ta zgjedhur, pastaj ndryshojeni ose hiqni lakun e tij.</translation>
+    </message>
+    <message>
+        <source>All clear: the tube fits at full thickness (%1).</source>
+        <translation>Gjithçka në rregull: tubi hyn me trashësinë e plotë (%1).</translation>
+    </message>
+    <message>
+        <source>Too tight in %1 place(s): the tube would be %2 thick instead of %3.</source>
+        <translation>Shumë ngushtë në %1 vend(e): tubi do të kishte trashësi %2 në vend të %3.</translation>
+    </message>
+    <message>
+        <source>USE IT ANYWAY</source>
+        <translation>PËRDORE GJITHSESI</translation>
+    </message>
+    <message>
+        <source>Crossing chosen: flip it, or take out its loop.</source>
+        <translation>Kryqëzimi u zgjodh: ndërrojeni ose hiqni lakun e tij.</translation>
+    </message>
+    <message>
+        <source>Nothing chosen. Spread apart needs no choice.</source>
+        <translation>Asgjë e zgjedhur. “Hapi fijet” nuk ka nevojë për zgjedhje.</translation>
     </message>
     <message>
         <source>No knot drawn yet.</source>
@@ -200,6 +284,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Point at a shaded region to see which move it is.</source>
         <translation>Vendosni miun mbi një zonë të hijezuar për të parë cila lëvizje është.</translation>
+    </message>
+    <message>
+        <source>Ringed: strands too close for the tube. You can fix them on the next screen.</source>
+        <translation>Të rrethuara: fije shumë afër për tubin. Mund t’i rregulloni në ekranin tjetër.</translation>
     </message>
 </context>
 <context>

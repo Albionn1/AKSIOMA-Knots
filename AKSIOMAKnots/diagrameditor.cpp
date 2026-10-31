@@ -2,6 +2,7 @@
 
 #include "theme.h"
 
+#include <QApplication>
 #include <QHBoxLayout>
 #include <QKeySequence>
 #include <QLabel>
@@ -29,6 +30,10 @@ constexpr double kHalfExtent = 2.0;
 
 // a press that moves less than this is a click (it makes a move)
 constexpr double kClickPixels = 6.0;
+
+// the ring around a place too tight for the tube (red on either theme)
+constexpr double kTightRingPixels = 22.0;
+const QColor kTight(224, 82, 74);
 
 // how long each move takes on screen (ms)
 constexpr int kMoveDuration[4] = {0, 1100, 1300, 1500};
@@ -162,12 +167,131 @@ void DiagramCanvas::setDiagram(
 
     moves_ = KnotMath::findReidemeisterMoves(diagram_);
 
+    tightSpots_ =
+        tubeRadius_ > 0.0 ? KnotMath::findTightSpots(diagram_, tubeRadius_) : QVector<KnotMath::TightSpot>();
+
+    hover_ = -1;
+    hoverMove_ = -1;
+    picked_ = -1;
+
+    setCursor(reviewing_ ? Qt::ArrowCursor : Qt::CrossCursor);
+
+    update();
+}
+
+void DiagramCanvas::setTubeRadius(double radius)
+{
+    tubeRadius_ = radius;
+
+    setDiagram(diagram_, false);
+}
+
+const QVector<KnotMath::TightSpot> &DiagramCanvas::tightSpots() const
+{
+    return tightSpots_;
+}
+
+void DiagramCanvas::setReviewing(bool reviewing)
+{
+    reviewing_ = reviewing;
+    picked_ = -1;
     hover_ = -1;
     hoverMove_ = -1;
 
-    setCursor(Qt::CrossCursor);
+    setCursor(reviewing_ ? Qt::ArrowCursor : Qt::CrossCursor);
 
     update();
+}
+
+int DiagramCanvas::pickedCrossing() const
+{
+    return picked_;
+}
+
+bool DiagramCanvas::spreadApart()
+{
+    KnotMath::KnotDiagram d = diagram_;
+
+    if (!KnotMath::spreadDiagram(d, tubeRadius_))
+        return false;
+
+    setDiagram(d, true);
+
+    emit diagramChanged();
+
+    return true;
+}
+
+void DiagramCanvas::flipPicked()
+{
+    if (picked_ < 0 || picked_ >= diagram_.crossings.size())
+        return;
+
+    const int picked = picked_;
+
+    KnotMath::KnotDiagram d = diagram_;
+
+    d.crossings[picked].aOver = !d.crossings.at(picked).aOver;
+
+    setDiagram(d, true);
+
+    picked_ = picked;
+
+    emit diagramChanged();
+}
+
+int DiagramCanvas::removePickedLoop()
+{
+    if (picked_ < 0 || picked_ >= diagram_.crossings.size())
+        return 0;
+
+    KnotMath::KnotDiagram d = diagram_;
+
+    if (!KnotMath::removeDiagramLoop(d, picked_))
+        return 0;
+
+    const int gone = diagram_.crossings.size() - d.crossings.size();
+
+    setDiagram(d, true);
+
+    emit diagramChanged();
+
+    return gone == 1 ? 1 : 2;
+}
+
+int DiagramCanvas::tightSpotAt(const QPointF &pos) const
+{
+    for (int i = 0; i < tightSpots_.size(); ++i)
+    {
+        const KnotMath::Vec3 &p = tightSpots_.at(i).position;
+        const QPointF centre = toWidget(p.x, p.y);
+
+        if (std::hypot(pos.x() - centre.x(), pos.y() - centre.y()) <= kTightRingPixels)
+            return i;
+    }
+
+    return -1;
+}
+
+void DiagramCanvas::pickAt(const QPointF &pos)
+{
+    const KnotMath::Vec3 p = toDiagram(pos);
+
+    int crossing = KnotMath::nearestDiagramCrossing(diagram_, p.x, p.y, 16.0 / widgetScale());
+
+    if (crossing < 0)
+    {
+        const int spot = tightSpotAt(pos);
+
+        if (spot >= 0)
+            crossing = tightSpots_.at(spot).crossing;
+    }
+
+    picked_ = crossing;
+
+    update();
+
+    emit pickChanged();
 }
 
 void DiagramCanvas::clearDrawing()
@@ -285,6 +409,19 @@ void DiagramCanvas::updateHover(const QPointF &pos)
     if (!diagram_.isValid())
         return;
 
+    if (reviewing_)
+    {
+        const KnotMath::Vec3 q = toDiagram(pos);
+
+        const bool onSomething =
+            KnotMath::nearestDiagramCrossing(diagram_, q.x, q.y, 16.0 / widgetScale()) >= 0 ||
+            tightSpotAt(pos) >= 0;
+
+        setCursor(onSomething ? Qt::PointingHandCursor : Qt::ArrowCursor);
+
+        return;
+    }
+
     const KnotMath::Vec3 p = toDiagram(pos);
 
     const int k = KnotMath::nearestDiagramCrossing(
@@ -315,6 +452,12 @@ void DiagramCanvas::mousePressEvent(QMouseEvent *event)
         return;
 
     const QPointF pos = event->position();
+
+    if (reviewing_)
+    {
+        pickAt(pos);
+        return;
+    }
 
     if (diagram_.isValid())
     {
@@ -573,6 +716,47 @@ void DiagramCanvas::drawMoves(QPainter &painter) const
     }
 }
 
+// The places too tight for the tube: a numbered ring around each.
+void DiagramCanvas::drawTightSpots(QPainter &painter) const
+{
+    QFont font = painter.font();
+
+    font.setPointSize(9);
+    font.setBold(true);
+
+    painter.setFont(font);
+
+    const QColor warning = kTight;
+
+    for (int i = 0; i < tightSpots_.size(); ++i)
+    {
+        const KnotMath::Vec3 &p = tightSpots_.at(i).position;
+
+        const QPointF centre = toWidget(p.x, p.y);
+
+        QColor fill = warning;
+
+        fill.setAlpha(40);
+
+        painter.setBrush(fill);
+        painter.setPen(QPen(warning, 2.0));
+        painter.drawEllipse(centre, kTightRingPixels, kTightRingPixels);
+
+        painter.setBrush(warning);
+        painter.setPen(Qt::NoPen);
+
+        const QPointF badge = centre + QPointF(kTightRingPixels * 0.8, -kTightRingPixels * 0.8);
+
+        painter.drawEllipse(badge, 9.0, 9.0);
+
+        painter.setPen(kBackground());
+        painter.drawText(
+            QRectF(badge.x() - 9.0, badge.y() - 9.0, 18.0, 18.0),
+            Qt::AlignCenter,
+            QString::number(i + 1));
+    }
+}
+
 void DiagramCanvas::paintEvent(QPaintEvent *)
 {
     QPainter painter(this);
@@ -623,9 +807,13 @@ void DiagramCanvas::paintEvent(QPaintEvent *)
         return;
     }
 
-    drawMoves(painter);
+    // (in the review the strands are what counts, not the moves)
+    if (!reviewing_)
+        drawMoves(painter);
 
     drawDiagram(painter, diagram_);
+
+    drawTightSpots(painter);
 
     // the crossings of the move under the mouse
     QVector<int> moveCrossings;
@@ -642,7 +830,12 @@ void DiagramCanvas::paintEvent(QPaintEvent *)
 
         painter.setBrush(Qt::NoBrush);
 
-        if (k == hover_ || moveCrossings.contains(k))
+        if (k == picked_)
+        {
+            painter.setPen(QPen(kAccent(), 3.0));
+            painter.drawEllipse(centre, 17.0, 17.0);
+        }
+        else if (k == hover_ || moveCrossings.contains(k))
         {
             painter.setPen(QPen(kAccent(), 2.0));
             painter.drawEllipse(centre, 15.0, 15.0);
@@ -653,6 +846,9 @@ void DiagramCanvas::paintEvent(QPaintEvent *)
             painter.drawEllipse(centre, 13.0, 13.0);
         }
     }
+
+    if (reviewing_)
+        return;
 
     // the names of the moves, in their regions
     QFont font = painter.font();
@@ -683,8 +879,9 @@ void DiagramCanvas::paintEvent(QPaintEvent *)
  * =========================================================
  */
 
-DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
-    : QDialog(parent)
+DiagramEditorDialog::DiagramEditorDialog(QWidget *parent, double tubeRadius)
+    : QDialog(parent),
+      tubeRadius_(tubeRadius)
 {
     setWindowTitle(tr("Draw a knot"));
 
@@ -695,19 +892,16 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
     layout->setContentsMargins(20, 20, 20, 20);
     layout->setSpacing(12);
 
-    QLabel *help = new QLabel(
-        tr("Draw one closed loop with the left mouse button. "
-           "Crossings are found automatically; click a crossing "
-           "(circle) to swap which strand goes over. The shaded regions "
-           "R1, R2 and R3 are Reidemeister moves: click one to watch it."),
-        this);
+    helpLabel_ = new QLabel(this);
 
-    help->setObjectName(QStringLiteral("Subtitle"));
-    help->setWordWrap(true);
+    helpLabel_->setObjectName(QStringLiteral("Subtitle"));
+    helpLabel_->setWordWrap(true);
 
-    layout->addWidget(help);
+    layout->addWidget(helpLabel_);
 
     canvas_ = new DiagramCanvas(this);
+
+    canvas_->setTubeRadius(tubeRadius_);
 
     layout->addWidget(canvas_, 1);
 
@@ -724,7 +918,11 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
 
     layout->addWidget(moveLabel_);
 
-    QHBoxLayout *buttons = new QHBoxLayout();
+    drawButtons_ = new QWidget(this);
+
+    QHBoxLayout *buttons = new QHBoxLayout(drawButtons_);
+
+    buttons->setContentsMargins(0, 0, 0, 0);
 
     QPushButton *clearButton = new QPushButton(tr("Clear"), this);
 
@@ -754,7 +952,117 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
     buttons->addWidget(cancelButton);
     buttons->addWidget(okButton_);
 
-    layout->addLayout(buttons);
+    layout->addWidget(drawButtons_);
+
+    /*
+     * The review of a drawing too tight for the tube: the strands can be
+     * moved apart, a crossing changed, a loop taken out; or the drawing is
+     * used as it is, thin.
+     */
+    reviewButtons_ = new QWidget(this);
+
+    QHBoxLayout *review = new QHBoxLayout(reviewButtons_);
+
+    review->setContentsMargins(0, 0, 0, 0);
+
+    QPushButton *spreadButton = new QPushButton(tr("Spread apart"), this);
+
+    spreadButton->setObjectName(QStringLiteral("GenerateButton"));
+    spreadButton->setToolTip(
+        tr("Moves the strands away from each other. The crossings stay, so "
+           "it is the same knot."));
+
+    flipButton_ = new QPushButton(tr("Flip crossing"), this);
+    flipButton_->setToolTip(tr("Swap which strand goes over at the chosen crossing."));
+
+    removeButton_ = new QPushButton(tr("Remove loop"), this);
+    removeButton_->setToolTip(
+        tr("Takes out the smaller loop at the chosen crossing. If other "
+           "strands cross that loop, the knot can change."));
+
+    reviewUndoButton_ = new QPushButton(tr("Undo"), this);
+
+    QPushButton *backButton = new QPushButton(tr("Back to drawing"), this);
+    reviewUseButton_ = new QPushButton(this);
+
+    reviewUseButton_->setObjectName(QStringLiteral("GenerateButton"));
+
+    review->addWidget(spreadButton);
+    review->addWidget(flipButton_);
+    review->addWidget(removeButton_);
+    review->addWidget(reviewUndoButton_);
+    review->addStretch(1);
+    review->addWidget(backButton);
+    review->addWidget(reviewUseButton_);
+
+    reviewButtons_->hide();
+
+    layout->addWidget(reviewButtons_);
+
+    connect(spreadButton, &QPushButton::clicked,
+            this, [this]()
+            {
+                QApplication::setOverrideCursor(Qt::WaitCursor);
+
+                const bool done = canvas_->spreadApart();
+
+                QApplication::restoreOverrideCursor();
+
+                reviewNote_ =
+                    !done
+                        ? tr("There is no more room to move these strands: "
+                             "remove a loop or go back and draw it larger.")
+                    : canvas_->tightSpots().isEmpty()
+                        ? tr("The strands are apart: it is the same knot.")
+                        : tr("Moved as far as the picture has room: it is the "
+                             "same knot. Remove a loop for more room.");
+
+                updateStatus();
+            });
+
+    connect(flipButton_, &QPushButton::clicked,
+            this, [this]()
+            {
+                canvas_->flipPicked();
+
+                reviewNote_ = tr("The crossing is flipped: this can change the knot.");
+
+                updateStatus();
+            });
+
+    connect(removeButton_, &QPushButton::clicked,
+            this, [this]()
+            {
+                const int result = canvas_->removePickedLoop();
+
+                reviewNote_ =
+                    result == 1
+                        ? tr("The loop is gone: it was only a twist, so it is the same knot.")
+                    : result == 2
+                        ? tr("The loop is gone, with the crossings on it: this "
+                             "can be another knot now.")
+                        : tr("That loop cannot be taken out without changing "
+                             "the rest of the picture.");
+
+                updateStatus();
+            });
+
+    connect(reviewUndoButton_, &QPushButton::clicked,
+            canvas_, &DiagramCanvas::undo);
+
+    connect(backButton, &QPushButton::clicked,
+            this, [this]() { setReviewing(false); });
+
+    connect(reviewUseButton_, &QPushButton::clicked,
+            this, &QDialog::accept);
+
+    connect(canvas_, &DiagramCanvas::pickChanged,
+            this, [this]()
+            {
+                reviewNote_.clear();
+
+                updateStatus();
+            });
 
     connect(clearButton, &QPushButton::clicked,
             canvas_, &DiagramCanvas::clearDrawing);
@@ -772,7 +1080,7 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
             this, &QDialog::reject);
 
     connect(okButton_, &QPushButton::clicked,
-            this, &QDialog::accept);
+            this, &DiagramEditorDialog::useKnot);
 
     // any change of the picture ends the note about the last move (a
     // finished move sets its own note right after)
@@ -780,6 +1088,7 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
             this, [this]()
             {
                 lastMove_.clear();
+                reviewNote_.clear();
 
                 updateStatus();
             });
@@ -827,7 +1136,7 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent)
 
     resize(760, 720);
 
-    updateStatus();
+    setReviewing(false);
 }
 
 const KnotMath::KnotDiagram &DiagramEditorDialog::diagram() const
@@ -835,8 +1144,96 @@ const KnotMath::KnotDiagram &DiagramEditorDialog::diagram() const
     return canvas_->diagram();
 }
 
+void DiagramEditorDialog::setReviewing(bool reviewing)
+{
+    reviewing_ = reviewing;
+    reviewNote_.clear();
+
+    canvas_->setReviewing(reviewing);
+
+    drawButtons_->setVisible(!reviewing);
+    reviewButtons_->setVisible(reviewing);
+
+    setWindowTitle(reviewing ? tr("Check your knot") : tr("Draw a knot"));
+
+    helpLabel_->setText(
+        reviewing
+            ? tr("Some strands lie too close together, and one tight place "
+                 "makes the whole tube thin. Click a ring or a crossing to "
+                 "choose it, then change it or take its loop out.")
+            : tr("Draw one closed loop with the left mouse button. "
+                 "Crossings are found automatically; click a crossing "
+                 "(circle) to swap which strand goes over. The shaded regions "
+                 "R1, R2 and R3 are Reidemeister moves: click one to watch it."));
+
+    updateStatus();
+}
+
+void DiagramEditorDialog::useKnot()
+{
+    // too tight for the tube: a look at it first
+    if (!canvas_->tightSpots().isEmpty())
+    {
+        setReviewing(true);
+        return;
+    }
+
+    accept();
+}
+
+void DiagramEditorDialog::updateReviewStatus()
+{
+    const KnotMath::KnotDiagram &d = canvas_->diagram();
+
+    const int places = canvas_->tightSpots().size();
+    const double thickness = KnotMath::diagramTubeRadius(d, tubeRadius_);
+
+    // (the thickness measured, not the one asked for)
+    if (places == 0)
+    {
+        statusLabel_->setText(
+            tr("All clear: the tube fits at full thickness (%1).")
+                .arg(thickness, 0, 'f', 2));
+    }
+    else
+    {
+        statusLabel_->setText(
+            tr("Too tight in %1 place(s): the tube would be %2 thick instead of %3.")
+                .arg(places)
+                .arg(thickness, 0, 'f', 2)
+                .arg(tubeRadius_, 0, 'f', 2));
+    }
+
+    // (still too tight, it is used only if that is what is wanted)
+    reviewUseButton_->setText(places == 0 ? tr("USE THIS KNOT") : tr("USE IT ANYWAY"));
+
+    const bool picked = canvas_->pickedCrossing() >= 0;
+
+    flipButton_->setEnabled(picked);
+    removeButton_->setEnabled(picked);
+    reviewUndoButton_->setEnabled(canvas_->canUndo());
+
+    QString line = reviewNote_;
+
+    if (line.isEmpty())
+    {
+        line = picked
+                   ? tr("Crossing chosen: flip it, or take out its loop.")
+                   : tr("Nothing chosen. Spread apart needs no choice.");
+    }
+
+    moveLabel_->setText(line);
+    moveLabel_->setVisible(true);
+}
+
 void DiagramEditorDialog::updateStatus()
 {
+    if (reviewing_)
+    {
+        updateReviewStatus();
+        return;
+    }
+
     const KnotMath::KnotDiagram &d = canvas_->diagram();
 
     const bool valid = d.isValid();
@@ -916,6 +1313,10 @@ void DiagramEditorDialog::updateStatus()
     {
         line = tr("Point at a shaded region to see which move it is.");
     }
+
+    // what comes first: a drawing too tight for the tube says so
+    if (valid && !busy && !canvas_->tightSpots().isEmpty() && shown == 0)
+        line = tr("Ringed: strands too close for the tube. You can fix them on the next screen.");
 
     moveLabel_->setText(line);
     moveLabel_->setVisible(!line.isEmpty());

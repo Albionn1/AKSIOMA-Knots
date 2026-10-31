@@ -92,6 +92,51 @@ QVector<Vec3> diagramToCurve(
     const KnotDiagram &diagram,
     double height = 0.3);
 
+// A place where two strands of the drawing lie too close for a tube of the
+// wanted thickness: the whole tube would have to be thinned to fit it.
+struct TightSpot
+{
+    Vec3 position;
+
+    // the thickest tube that fits here
+    double radius = 0.0;
+
+    // the crossing whose smallest loop holds this place (see removeDiagramLoop),
+    // or -1 if it lies on no small loop
+    int crossing = -1;
+};
+
+// the tube thickness the drawing allows, at most `tubeRadius`
+double diagramTubeRadius(
+    const KnotDiagram &diagram,
+    double tubeRadius,
+    double height = 0.3);
+
+// The tight spots, the tightest first.
+QVector<TightSpot> findTightSpots(
+    const KnotDiagram &diagram,
+    double tubeRadius,
+    double height = 0.3);
+
+// Moves the strands apart until a tube of `tubeRadius` fits, as far as there
+// is room in the picture. Only the shape changes: every step keeps the signed
+// Gauss code of the diagram (the same crossings in the same order, with the
+// same over and under), so it is the same knot. False if nothing got better.
+bool spreadDiagram(
+    KnotDiagram &diagram,
+    double tubeRadius,
+    double height = 0.3,
+    double halfExtent = 2.0);
+
+// Takes out the smaller of the two loops at the crossing: the curve goes
+// straight on through it, and the crossings of that loop are gone. Unless
+// nothing else crosses the loop this can change the knot. False if the rest
+// could not be kept as it was.
+bool removeDiagramLoop(
+    KnotDiagram &diagram,
+    int crossing,
+    double halfExtent = 2.0);
+
 // "x, y, z" per line - the format of the Custom Curve input.
 QString diagramToCoordinateText(
     const QVector<Vec3> &curve);

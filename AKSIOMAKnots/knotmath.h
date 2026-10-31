@@ -327,6 +327,11 @@ double safeTubeRadius(
     const CurveData &data,
     double requestedRadius);
 
+// the smallest distance between two segments of a curve
+double strandDistance(
+    const Vec3 &p1, const Vec3 &q1,
+    const Vec3 &p2, const Vec3 &q2);
+
 // Depth cue: darkens every vertex by the parts of the tube(s) close to it
 // (other strands, or the same strand further along), treating the centre
 // line as a chain of spheres. Fills mesh.occlusion.

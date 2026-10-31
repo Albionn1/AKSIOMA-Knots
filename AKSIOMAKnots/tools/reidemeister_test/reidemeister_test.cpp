@@ -79,9 +79,247 @@ static bool same(const Inv &x, const Inv &y)
            x.j == y.j;
 }
 
+// the thickness the main window really gives the drawing: its curve as text,
+// read back as a Custom Curve (see MainWindow::drawKnotDialog)
+static double appRadius(const KnotDiagram &d, double radius, int density)
+{
+    const QString text = diagramToCoordinateText(diagramToCurve(d, 0.30));
+
+    const CurveData data = buildPreset(Preset::CustomCoordinates, density, 2, 3, text);
+
+    return safeTubeRadius(data, radius);
+}
+
+// a drawing done in a hurry: few mouse positions, strands doubling back over
+// each other, so that crossings lie almost on top of each other
+static KnotDiagram hurriedDiagram(std::mt19937 &rng)
+{
+    std::uniform_real_distribution<double> wobble(10.0, 45.0);
+    std::uniform_real_distribution<double> phase(0.0, 6.28);
+    std::uniform_int_distribution<int> coin(0, 1);
+
+    const double a = wobble(rng);
+    const double b = wobble(rng);
+    const double p = phase(rng);
+    const double q = phase(rng);
+
+    QVector<Vec3> stroke;
+
+    for (int i = 0; i < 90; ++i)
+    {
+        const double t = 2.0 * M_PI * i / 90.0;
+
+        stroke.push_back(Vec3(
+            150.0 * std::cos(t) + a * std::cos(4.0 * t + p) + b * std::sin(7.0 * t + q),
+            120.0 * std::sin(2.0 * t) + a * std::sin(5.0 * t + q) + b * std::cos(7.0 * t + p),
+            0.0));
+    }
+
+    KnotDiagram d = makeDiagramFromStroke(stroke, 160, 2.0);
+
+    for (DiagramCrossing &c : d.crossings)
+        c.aOver = coin(rng) == 1;
+
+    return d;
+}
+
+// "spread": random drawings spread apart (the same knot, a thicker tube), and
+// loops taken out of them (a loop nothing else crosses keeps the knot)
+static int spreadTest(int count)
+{
+    constexpr double Radius = 0.16;
+
+    std::mt19937 rng(20261031);
+    std::uniform_int_distribution<int> terms(3, 7);
+
+    // the worst drawings: where the tube all but vanishes
+    int slivers = 0;
+    int sliversRepaired = 0;
+    int sliversChanged = 0;
+
+    for (int k = 0; k < count; ++k)
+    {
+        const KnotDiagram d = k % 2 == 0 ? hurriedDiagram(rng) : randomDiagram(rng, terms(rng));
+
+        if (!d.isValid() || d.crossings.size() > 22)
+            continue;
+
+        if (diagramTubeRadius(d, Radius) >= 0.04)
+            continue;
+
+        ++slivers;
+
+        KnotDiagram spread = d;
+
+        if (!spreadDiagram(spread, Radius))
+            continue;
+
+        if (diagramTubeRadius(spread, Radius) >= 0.08)
+            ++sliversRepaired;
+
+        if (spread.crossings.size() != d.crossings.size() || !same(invariants(d), invariants(spread)))
+            ++sliversChanged;
+    }
+
+    std::printf("tube under 0.04: %d drawings, %d brought to 0.08 or more, knot changed in %d\n",
+                slivers, sliversRepaired, sliversChanged);
+
+    // does the number shown in the editor hold in the main window?
+    {
+        std::mt19937 again(7);
+
+        int compared = 0;
+        int differs = 0;
+        int unringed = 0;
+        double worst = 0.0;
+
+        for (int k = 0; k < count; ++k)
+        {
+            KnotDiagram d = hurriedDiagram(again);
+
+            if (!d.isValid() || d.crossings.size() > 22)
+                continue;
+
+            spreadDiagram(d, Radius);
+
+            const double shown = diagramTubeRadius(d, Radius);
+            const double real = appRadius(d, Radius, 200);
+
+            ++compared;
+
+            // no ring must mean a full tube, in the main window as well
+            if (findTightSpots(d, Radius).isEmpty() && real < Radius * 0.9)
+            {
+                ++unringed;
+                std::printf("  NO RING but the main window has %.3f (editor %.3f)\n", real, shown);
+            }
+
+            if (real < shown * 0.8)
+                ++differs;
+
+            worst = std::max(worst, shown - real);
+
+            if (k < 6)
+                std::printf("  editor %.3f, main window %.3f\n", shown, real);
+        }
+
+        std::printf("editor against main window: %d compared, %d more than 20 %% thinner, worst %.3f; "
+                    "thin with no ring: %d\n",
+                    compared, differs, worst, unringed);
+    }
+
+    int tight = 0;
+    int better = 0;
+    int full = 0;
+    int changed = 0;
+    int skipped = 0;
+    int loopsTaken = 0;
+    int loopsRefused = 0;
+    int loopsChanged = 0;
+    int twists = 0;
+    int twistsChanged = 0;
+    double before = 0.0;
+    double after = 0.0;
+    double slowest = 0.0;
+
+    for (int k = 0; k < count; ++k)
+    {
+        const KnotDiagram d = randomDiagram(rng, terms(rng));
+
+        if (!d.isValid() || d.crossings.size() > 22)
+        {
+            ++skipped;
+            continue;
+        }
+
+        const double start = diagramTubeRadius(d, Radius);
+
+        // taking out a loop
+        for (const TightSpot &spot : findTightSpots(d, Radius))
+        {
+            if (spot.crossing < 0)
+                continue;
+
+            KnotDiagram cut = d;
+
+            if (!removeDiagramLoop(cut, spot.crossing))
+            {
+                ++loopsRefused;
+                continue;
+            }
+
+            ++loopsTaken;
+
+            if (cut.crossings.size() >= d.crossings.size())
+                ++loopsChanged;
+
+            // only its own crossing went: nothing else touched the loop, so
+            // that was a twist undone and it is the same knot
+            if (cut.crossings.size() == d.crossings.size() - 1)
+            {
+                ++twists;
+
+                if (!same(invariants(d), invariants(cut)))
+                    ++twistsChanged;
+            }
+        }
+
+        if (start >= Radius * 0.999)
+            continue;
+
+        ++tight;
+
+        KnotDiagram spread = d;
+
+        QElapsedTimer clock;
+
+        clock.start();
+
+        const bool done = spreadDiagram(spread, Radius);
+
+        slowest = std::max(slowest, static_cast<double>(clock.elapsed()));
+
+        if (!done)
+        {
+            before += start;
+            after += start;
+            continue;
+        }
+
+        const double end = diagramTubeRadius(spread, Radius);
+
+        before += start;
+        after += end;
+
+        if (end > start * 1.05)
+            ++better;
+
+        if (end >= Radius * 0.9)
+            ++full;
+
+        if (spread.crossings.size() != d.crossings.size() || !same(invariants(d), invariants(spread)))
+        {
+            ++changed;
+            std::printf("KNOT CHANGED at %d: %d crossings\n", k, static_cast<int>(d.crossings.size()));
+        }
+    }
+
+    std::printf("%d drawings, %d too large skipped, %d too tight for radius %.2f\n", count, skipped, tight, Radius);
+    std::printf("spread: %d thicker, %d reach 90 %% of the radius, average radius %.3f -> %.3f, slowest %.0f ms\n",
+                better, full, before / std::max(tight, 1), after / std::max(tight, 1), slowest);
+    std::printf("spread changed the knot: %d (%d not computed)\n", changed, g_unknown);
+    std::printf("loops taken out: %d, refused %d, wrong crossing count %d\n", loopsTaken, loopsRefused, loopsChanged);
+    std::printf("simple twists among them: %d, knot changed in %d\n", twists, twistsChanged);
+
+    return changed == 0 && twistsChanged == 0 && sliversChanged == 0 ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+
+    if (argc > 1 && QString::fromLatin1(argv[1]) == QStringLiteral("spread"))
+        return spreadTest(argc > 2 ? QString::fromLatin1(argv[2]).toInt() : 200);
 
     // "trefoil": where things are in a drawn trefoil (for clicking them in
     // the real app): the crossings, and the moves after flipping each one

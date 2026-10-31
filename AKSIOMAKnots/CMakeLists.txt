@@ -136,8 +136,8 @@ else()
     # The relaxation runs tens of thousands of steps while you watch, and
     # the rope in Photo mode is simulated and rebuilt for every frame while
     # it is in the hand, so these are optimised in Debug builds too (about
-    # ten times faster).
-    set_source_files_properties(knotrelax.cpp ropephysics.cpp knotmath.cpp knotglwidget.cpp PROPERTIES
+    # ten times faster). The same for spreading a drawing apart.
+    set_source_files_properties(knotrelax.cpp ropephysics.cpp knotmath.cpp knotglwidget.cpp knotdiagram.cpp PROPERTIES
         COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
 endif()
 

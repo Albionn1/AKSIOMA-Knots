@@ -5622,6 +5622,13 @@ double safeTubeRadius(const CurveData &data, double requestedRadius)
     return std::min(requestedRadius, factor * best);
 }
 
+double strandDistance(
+    const Vec3 &p1, const Vec3 &q1,
+    const Vec3 &p2, const Vec3 &q2)
+{
+    return segmentDistance3D(p1, q1, p2, q2);
+}
+
 /*
  * =============================================================
  * ALEXANDER POLYNOMIAL
