@@ -1324,10 +1324,10 @@ void addLooseFibres(KnotMath::Mesh &mesh, bool closed, double radius, bool braid
 
     // fibres per radius of rope, their length and thickness (in radii)
     // (a moving rope: half of them, the same ones)
-    const double density = (braided ? 1.2 : 5.0) * (quick ? 0.5 : 1.0);
-    const double shortest = braided ? 0.12 : 0.2;
-    const double longest = braided ? 0.45 : 1.3;
-    const double thickness = braided ? 0.012 : 0.02;
+    const double density = (braided ? 9.0 : 16.0) * (quick ? 0.4 : 1.0);
+    const double shortest = braided ? 0.1 : 0.16;
+    const double longest = braided ? 0.5 : 1.3;
+    const double thickness = braided ? 0.009 : 0.012;
 
     const int count = std::clamp(static_cast<int>(density * length / radius), 0, 40000);
 

@@ -12,7 +12,9 @@
 # long): the upper is a dome over the footprint whose sides rise steeply
 # from the sole and round over into the top; the opening for the foot and
 # the slot for the tongue are cut out of it, the eyelets are punched
-# through the flaps on both sides of the slot.
+# through the flaps on both sides of the slot. Panels of canvas lie over it,
+# as on a real shoe (the quarters, the eyestay, the heel strip), sewn on with
+# rows of real stitches.
 
 import bpy
 import bmesh
@@ -273,7 +275,7 @@ def material(name, color, roughness, metallic=0.0, sheen=0.0):
 
 
 # app material numbers (the shoe shader in knotglwidget.cpp)
-CANVAS, RUBBER, METAL, LINING, TOECAP, TONGUE = 0, 1, 2, 3, 4, 5
+CANVAS, RUBBER, METAL, LINING, TOECAP, TONGUE, THREAD = 0, 1, 2, 3, 4, 5, 6
 
 MATERIALS = [
     material("canvas", (0.035, 0.055, 0.11), 0.85, sheen=0.4),
@@ -282,12 +284,16 @@ MATERIALS = [
     material("lining", (0.55, 0.53, 0.50), 0.9),
     material("toecap", (0.82, 0.81, 0.77), 0.5),
     material("tongue", (0.035, 0.055, 0.11), 0.85, sheen=0.4),
+    material("thread", (0.75, 0.74, 0.70), 0.8),
 ]
 
 
 def assign(obj, index):
-    while len(obj.data.materials) < len(MATERIALS):
-        obj.data.materials.append(MATERIALS[len(obj.data.materials)])
+    # (a boolean leaves the cutter's empty slot behind)
+    obj.data.materials.clear()
+
+    for m in MATERIALS:
+        obj.data.materials.append(m)
 
     for p in obj.data.polygons:
         p.material_index = index
@@ -396,7 +402,16 @@ def build_upper():
     remove(collar)
     remove(slot)
 
-    # the holes of the eyelets, along the surface's normal
+    cut_eyelet_holes(obj)
+
+    # material numbers to the app's
+    fix_materials(obj, {0: CANVAS, 1: LINING})
+
+    return obj
+
+
+def cut_eyelet_holes(obj):
+    """The holes of the eyelets, along the surface's normal."""
     for row in EYELETS:
         for (x, y) in row:
             centre, normal = surface_point(x, y)
@@ -411,10 +426,271 @@ def build_upper():
             boolean(obj, hole)
             remove(hole)
 
-    # material numbers to the app's
-    fix_materials(obj, {0: CANVAS, 1: LINING})
+
+# --------------------------------------------------------------------------
+# Panels and stitches
+# --------------------------------------------------------------------------
+
+def seam_x(y):
+    """Where the quarter ends, in plan: the seam runs from the end of the
+    eyestay down and back to the sole."""
+    return 215.0 - 58.0 * (np.abs(y) / 62.0) ** 0.8
+
+
+def quarter_outline():
+    ys = np.linspace(-90.0, 90.0, 61)
+
+    front = [(float(seam_x(y)), float(y)) for y in ys]
+
+    return np.array(front + [(-40.0, 90.0), (-40.0, -90.0)])[::-1]
+
+
+def eyestay_side(x):
+    return slot_halfwidth(x) + 16.0
+
+
+def eyestay_outline():
+    xs = np.linspace(118.0, 222.0, 53)
+    w = eyestay_side(xs)
+
+    right = np.stack([xs, -w], axis=1)
+    left = np.stack([xs[::-1], w[::-1]], axis=1)
+
+    end = []
+
+    r = float(w[-1])
+
+    for a in np.linspace(-math.pi / 2, math.pi / 2, 22)[1:-1]:
+        end.append((222.0 + 13.0 * math.cos(a), r * math.sin(a)))
+
+    return np.vstack([right, np.array(end), left])
+
+
+def heel_strip_outline():
+    return np.array([(-30.0, -13.0), (24.0, -11.0), (24.0, 11.0), (-30.0, 13.0)])
+
+
+def panel(name, outline, thickness):
+    """A layer of canvas on the upper, its edge standing proud."""
+    obj = dome_surface(name)
+
+    s = obj.modifiers.new("cloth", "SOLIDIFY")
+    s.thickness = thickness
+    s.offset = 1.0
+    s.use_even_offset = True
+
+    apply_modifiers(obj)
+
+    region = prism(name + "_cut", outline, -10.0, 200.0)
+
+    boolean(obj, region, "INTERSECT")
+    remove(region)
+
+    collar = prism("collar_cut", COLLAR, SOLE + 7.0, 400.0)
+    slot = prism("slot_cut", SLOT, SOLE + 7.0, 400.0)
+
+    boolean(obj, collar)
+    boolean(obj, slot)
+
+    remove(collar)
+    remove(slot)
 
     return obj
+
+
+def trim_above(obj, amount):
+    """Takes away what stands more than `amount` above the upper: where a
+    hole lies at a thin panel's edge, the cut can leave a piece of the
+    cutter behind."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+
+    verts = list(bm.verts)
+    xy = np.array([[v.co.x, v.co.y] for v in verts])
+    z = np.array([v.co.z for v in verts])
+
+    high = z > dome(xy) + amount
+
+    bmesh.ops.delete(bm, geom=[v for v, h in zip(verts, high) if h], context="VERTS")
+
+    bm.to_mesh(obj.data)
+    bm.free()
+
+    obj.data.update()
+
+
+def build_panels():
+    # the quarter stops under the eyestay's edge: only the eyestay is punched
+    stay_area = prism("stay_cut", eyestay_outline()[::1] + inward_normals(eyestay_outline()) * 3.0 * orientation(eyestay_outline()), -10.0, 400.0)
+
+    quarter = panel("quarter", quarter_outline(), 0.7)
+    boolean(quarter, stay_area)
+    remove(stay_area)
+    assign(quarter, CANVAS)
+
+    stay = panel("eyestay", eyestay_outline(), 1.3)
+    cut_eyelet_holes(stay)
+    trim_above(stay, 2.0)
+    assign(stay, CANVAS)
+
+    heel = panel("heel_strip", heel_strip_outline(), 1.4)
+    assign(heel, CANVAS)
+
+    return [quarter, stay, heel]
+
+
+STITCH_VERTS = []
+STITCH_FACES = []
+
+
+def height_normal(xy, height):
+    e = 0.4
+
+    z = height(np.array([xy, xy + (e, 0.0), xy - (e, 0.0), xy + (0.0, e), xy - (0.0, e)]))
+
+    normal = np.array([-(z[1] - z[2]) / (2 * e), -(z[3] - z[4]) / (2 * e), 1.0])
+
+    return float(z[0]), normal / np.linalg.norm(normal)
+
+
+def stitches(path, height, lift, keep=None, pitch=3.1, length=2.5, radius=0.34):
+    """A row of thread along the path (in plan): each stitch a little
+    flattened sausage that dives into the cloth at both ends."""
+    path = np.array(path, dtype=float)
+
+    seg = np.linalg.norm(np.diff(path, axis=0), axis=1)
+    plan = np.concatenate([[0.0], np.cumsum(seg)])
+
+    # evenly along the cloth, not along its plan: down the steep sides of the
+    # shoe a step in plan is a long way on the surface
+    steps = np.arange(0.0, plan[-1], 0.25)
+
+    dense = np.stack([np.interp(steps, plan, path[:, 0]), np.interp(steps, plan, path[:, 1])], axis=1)
+    rise = np.array(height(dense))
+
+    s = np.concatenate([[0.0], np.cumsum(np.sqrt(
+        np.sum(np.diff(dense, axis=0) ** 2, axis=1) + np.diff(rise) ** 2))])
+
+    path = dense
+
+    sides = 6
+    rings = [(-0.5, 0.25, -0.35), (-0.36, 0.8, 0.0), (0.0, 1.0, 0.18), (0.36, 0.8, 0.0), (0.5, 0.25, -0.35)]
+
+    for centre in np.arange(pitch * 0.5, s[-1], pitch):
+        xy = np.array([np.interp(centre, s, path[:, 0]), np.interp(centre, s, path[:, 1])])
+
+        if keep is not None and not keep(xy):
+            continue
+
+        ahead = np.array([np.interp(centre + 0.4, s, path[:, 0]), np.interp(centre + 0.4, s, path[:, 1])])
+        behind = np.array([np.interp(centre - 0.4, s, path[:, 0]), np.interp(centre - 0.4, s, path[:, 1])])
+
+        z, normal = height_normal(xy, height)
+
+        along = np.append(ahead - behind, 0.0)
+        along -= normal * along.dot(normal)
+        along /= max(np.linalg.norm(along), 1e-9)
+
+        side = np.cross(normal, along)
+
+        base = np.array([xy[0], xy[1], z]) + normal * lift
+        first = len(STITCH_VERTS)
+
+        for (t, width, up) in rings:
+            for k in range(sides):
+                a = 2.0 * math.pi * k / sides
+
+                STITCH_VERTS.append(tuple(
+                    base + along * (t * length) +
+                    side * (math.cos(a) * radius * 1.15 * width) +
+                    normal * (math.sin(a) * radius * 0.7 * width + up * radius)))
+
+        for r in range(len(rings) - 1):
+            for k in range(sides):
+                j = (k + 1) % sides
+
+                STITCH_FACES.append([first + r * sides + k, first + r * sides + j,
+                                     first + (r + 1) * sides + j, first + (r + 1) * sides + k])
+
+
+def off_rim(xy):
+    """Above the sole, and in the cloth rather than in an opening."""
+    p = xy[None]
+
+    return (inside(p, UPPER)[0] and distance_to_curve(p, UPPER)[0] > 4.0 and
+            not inside(p, COLLAR)[0] and not inside(p, SLOT)[0])
+
+
+def on_cloth(xy):
+    return off_rim(xy) and distance_to_curve(xy[None], COLLAR)[0] > 3.0
+
+
+def build_stitches():
+    def over(amount):
+        return lambda xy: dome(xy) + amount
+
+    centres = np.array([p for row in EYELETS for p in row])
+
+    def clear_of_eyelets(xy):
+        # (behind the first eyelet the stay runs into the padded band)
+        return (xy[0] > 136.0 and on_cloth(xy) and
+                np.min(np.linalg.norm(centres - xy, axis=1)) > HOLE + 2.6)
+
+    # the eyestay: two rows along its edge, one along the slot
+    outline = eyestay_outline()
+    inward = inward_normals(outline)
+
+    # (the outline is drawn the other way round: its inside is on the left)
+    closed = np.vstack([outline, outline[:1]])
+
+    for inset in (2.2, 4.4):
+        offset = outline + inward * inset * orientation(outline)
+        stitches(np.vstack([offset, offset[:1]]), over(1.3), 0.0, clear_of_eyelets)
+
+    for side in (1.0, -1.0):
+        xs = np.linspace(122.0, 216.0, 60)
+        row = np.stack([xs, side * (slot_halfwidth(xs) + 2.6)], axis=1)
+        stitches(row, over(1.3), 0.0, clear_of_eyelets)
+
+    # the heel strip
+    for y in (-9.0, 9.0):
+        stitches([(-20.0, y * 1.1), (22.0, y)], over(2.1), 0.0, on_cloth)
+
+    # around the opening, on the padded band
+    ring = COLLAR + inward_normals(COLLAR) * (-7.5) * orientation(COLLAR)
+
+    def beside_stay(xy, line=outline):
+        return (on_cloth(xy) and not inside(xy[None], line)[0] and
+                distance_to_curve(xy[None], line)[0] > 6.0)
+
+    stitches(np.vstack([ring, ring[:1]]), over(0.7), 0.0, beside_stay)
+
+    # behind the toe cap
+    ys = np.linspace(-60.0, 60.0, 50)
+    stitches(np.stack([246.0 + 0.004 * ys * ys, ys], axis=1), over(0.0), 0.0, on_cloth)
+    stitches(np.stack([243.8 + 0.004 * ys * ys, ys], axis=1), over(0.0), 0.0, on_cloth)
+
+    # around the tongue
+    tongue = tongue_outline()
+    t_in = tongue + inward_normals(tongue) * 3.0 * orientation(tongue)
+
+    stitches(np.vstack([t_in, t_in[:1]]), tongue_top, 0.0, lambda xy: xy[0] < 134.0)
+
+    obj = new_object("stitches", mesh_from("stitches", STITCH_VERTS, STITCH_FACES))
+
+    assign(obj, THREAD)
+
+    print("stitches: %d" % (len(STITCH_FACES) // 24))
+
+    return obj
+
+
+def orientation(curve):
+    """1 for a counter-clockwise curve (inward_normals are inward), -1
+    otherwise."""
+    x, y = curve[:, 0], curve[:, 1]
+
+    return 1.0 if 0.5 * np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y) > 0.0 else -1.0
 
 
 def fix_materials(obj, mapping):
@@ -661,7 +937,7 @@ def build_collar():
 
     z = dome(pts) - 2.0
 
-    roll = tube_along("collar", np.column_stack([pts, z]), 4.5, False, CANVAS)
+    roll = tube_along("collar", np.column_stack([pts, z]), 3.1, False, CANVAS)
 
     edges = []
 
@@ -698,6 +974,32 @@ def build_eyelets():
     return objs
 
 
+def build_vents():
+    """Two small rings for the air on the inner side of the shoe."""
+    objs = []
+
+    for x in (112.0, 127.0):
+        y = 24.0
+
+        centre, normal = surface_point(x, y)
+
+        bpy.ops.mesh.primitive_torus_add(
+            major_radius=2.5, minor_radius=0.8,
+            major_segments=28, minor_segments=8,
+            location=centre + normal * 0.9,
+            rotation=normal.to_track_quat("Z", "Y").to_euler())
+
+        ring = bpy.context.active_object
+
+        for p in ring.data.polygons:
+            p.use_smooth = True
+
+        assign(ring, METAL)
+        objs.append(ring)
+
+    return objs
+
+
 def build_insole():
     inner = UPPER + inward_normals(UPPER) * (SHELL + 0.5)
     verts = [(x, y, SOLE + 4.0 + spring(x)) for x, y in inner]
@@ -723,8 +1025,11 @@ def build():
     clear_scene()
 
     parts = [build_upper(), build_tongue(), build_sole(), build_toecap(), build_insole()]
+    parts += build_panels()
     parts += build_collar()
     parts += build_eyelets()
+    parts += build_vents()
+    parts.append(build_stitches())
 
     for p in parts:
         p.select_set(True)

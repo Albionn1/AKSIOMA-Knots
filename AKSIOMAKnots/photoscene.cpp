@@ -702,7 +702,7 @@ SceneInfo sceneInfo(Scene scene)
         info.rope.roughness = 0.8f;
 
         info.sneaker = true;
-        info.canvas = QColor(28, 38, 66);
+        info.canvas = QColor(37, 50, 84);
         break;
 
     case Scene::BallroomFloor:

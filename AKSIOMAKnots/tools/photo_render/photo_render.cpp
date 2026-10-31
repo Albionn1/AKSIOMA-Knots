@@ -234,8 +234,11 @@ int main(int argc, char **argv)
 
         const qint64 loading = clock.restart();
 
+        // the frames add up to the clean picture
         QImage picture = view.grabFramebuffer();
-        picture = view.grabFramebuffer();
+
+        for (int frame = 0; frame < 70; ++frame)
+            picture = view.grabFramebuffer();
 
         const qint64 drawing = clock.restart();
 

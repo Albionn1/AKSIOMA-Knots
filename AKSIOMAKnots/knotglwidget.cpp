@@ -116,6 +116,7 @@ uniform int uPcss;
 uniform float uLightTan;        // tangent of the light's angular radius
 uniform float uDepthRange;      // world units per unit of map depth
 uniform float uMapWorld;        // world units across the map
+uniform float uPatternTurn;     // turns the random patterns from frame to frame
 
 const vec2 Disk[16] = vec2[16](
     vec2(-0.942, -0.399), vec2(0.946, -0.769), vec2(-0.094, -0.929), vec2(0.345, 0.294),
@@ -145,7 +146,7 @@ float keyShadow(vec3 p, vec3 n)
 
     // the disk turned differently at every pixel: fine grain instead of
     // stripes along the soft edge
-    float angle = 6.2831853 *
+    float angle = uPatternTurn + 6.2831853 *
         fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     mat2 turn = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
 
@@ -207,6 +208,15 @@ uniform vec3 uKeyIrradiance;     // the sun, on a surface facing it
 uniform float uKeySize;          // its size (widens its highlight)
 uniform vec3 uFloorBounce;       // light the surface under the knot throws back up (pi L)
 
+// how much of the room each pixel sees past what lies close by
+uniform sampler2D uShade;
+uniform int uUseShade;
+
+float shadeHere()
+{
+    return uUseShade != 0 ? texelFetch(uShade, ivec2(gl_FragCoord.xy), 0).r : 1.0;
+}
+
 // The room's shape: the floor and walls the photograph was taken among,
 // where it was taken (view units), how far its walls are and how low its
 // floor lies. Parts of the room seen past the table are where they would
@@ -216,6 +226,14 @@ uniform float uRoomRadius;
 uniform float uRoomFloor;
 
 const float PhotoPi = 3.14159265;
+
+// Light that went wrong (a normal of nothing at the very edge of a thread)
+// must not reach the frame: its blurred levels would spread it over a whole
+// block of the picture. Not a number fails every comparison.
+vec3 cleanLight(vec3 c)
+{
+    return all(lessThan(abs(c), vec3(1.0e5))) ? c : vec3(0.0);
+}
 
 // where direction d (in the view) is in the picture of the room
 vec2 roomUv(vec3 d)
@@ -491,6 +509,9 @@ KnotGLWidget::~KnotGLWidget()
         developProgram_.reset();
         occlusionProgram_.reset();
         shoeProgram_.reset();
+        shadeProgram_.reset();
+        shadeSmoothProgram_.reset();
+        accumulateProgram_.reset();
 
         doneCurrent();
     }
@@ -594,6 +615,7 @@ uniform int uMaterial;      // 0 glossy, 1 satin, 2 metal, 3 rope, 4 lace,
                             // 5 and 6 the real rope and lace of Photo mode
 uniform int uDarkTheme;
 uniform float uRopeRadius;  // Photo mode: the rope's radius (view units)
+uniform float uMirrorLevel; // Photo mode: height of the surface it lies on
 
 // Settings, Lighting: 1 on, 0 off; brightness (1 = normal)
 uniform float uKeyOn;
@@ -603,7 +625,10 @@ uniform float uReflections;
 uniform float uOcclusion;
 uniform float uExposure;
 
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
+
+// the mirror pass: here is something, this high above the surface
+layout(location = 1) out vec2 mirrorData;
 
 const float PI = 3.14159265;
 
@@ -759,6 +784,71 @@ vec3 environment(vec3 d, float rough, float keyLit)
     return c;
 }
 
+/*
+ * A surface of fibres lying side by side along `t`, under a small light
+ * (after Marschner et al. 2003, Kajiya and Kay 1989): the cuticle of each
+ * fibre reflects along a cone around it, tilted by its scales, a little
+ * light comes back from inside it, tinted, and much passes through and
+ * leaves on the far side, which is why a rope against the sun has a glowing
+ * edge. The body of the fibres gives a flat, forgiving diffuse light that
+ * reaches a little past the shadow line (it has entered the fibres).
+ */
+vec3 fibreLight(vec3 t, vec3 n, vec3 v, vec3 l, vec3 radiance, vec3 albedo, float through)
+{
+    float tl = dot(t, l);
+    float tv = dot(t, v);
+
+    float cosL = sqrt(max(1.0 - tl * tl, 1.0e-4));
+    float cosV = sqrt(max(1.0 - tv * tv, 1.0e-4));
+
+    // how far round the fibre the light is seen: 1 facing, -1 from behind
+    float around = clamp(dot(l - t * tl, v - t * tv) / (cosL * cosV), -1.0, 1.0);
+
+    float half1 = tl + tv;
+
+    float reflected = exp(-pow(half1 + 0.14, 2.0) / 0.045) * 2.0;
+    float returned = exp(-pow(half1 - 0.22, 2.0) / 0.13) * 1.1;
+    float passed = exp(-pow(half1 + 0.07, 2.0) / 0.09) * 2.4;
+
+    float facing = 0.5 + 0.5 * around;
+
+    float nl = dot(n, l);
+
+    // a touch of wrap: the light that entered the fibres leaves past the line
+    float body = max(nl + 0.22, 0.0) / 1.22;
+
+    vec3 tint = sqrt(max(albedo, vec3(0.001)));
+
+    vec3 color = albedo / PI * body;
+
+    color += 0.045 * reflected * facing * facing * max(nl + 0.35, 0.0) * vec3(1.0);
+    color += 0.05 * returned * tint * facing * max(nl + 0.35, 0.0);
+
+    // through the fibres, towards the camera
+    color += through * passed * pow(1.0 - facing, 3.0) * albedo * tint * max(0.35 + 0.65 * (1.0 - abs(nl)), 0.0);
+
+    return color * radiance;
+}
+
+// The direction of fibres along which `coordinate` does not change.
+vec3 fibreAlong(vec3 n, float coordinate, vec3 fallback)
+{
+    vec3 dpdx = dFdx(vWorldPosition);
+    vec3 dpdy = dFdy(vWorldPosition);
+
+    vec3 r1 = cross(dpdy, n);
+    vec3 r2 = cross(n, dpdx);
+
+    float det = dot(dpdx, r1);
+
+    vec3 across = sign(det) * (dFdx(coordinate) * r1 + dFdy(coordinate) * r2);
+    vec3 t = cross(n, across);
+
+    float l = length(t);
+
+    return l > 1.0e-30 && !isnan(l) && !isinf(l) ? t / l : fallback;
+}
+
 // `size`: the light is not a point; its highlight is as wide as on a
 // surface that much rougher (the energy stays the same).
 vec3 directLight(vec3 n, vec3 v, vec3 l, vec3 radiance, float size, Surface s)
@@ -793,6 +883,8 @@ vec3 directLight(vec3 n, vec3 v, vec3 l, vec3 radiance, float size, Surface s)
 
 void main()
 {
+    mirrorData = vec2(1.0, vWorldPosition.y - uMirrorLevel);
+
     // Seifert surface: a thin painted card whatever the tube material
     bool sheet = vSheet > 0.5;
 
@@ -814,6 +906,10 @@ void main()
     s.sheen = vec3(0.0);
     s.sheenRough = 0.5;
     s.coat = 0.0;
+
+    // the fibres of the real rope, and how much light passes through them
+    vec3 fibre = vec3(0.0);
+    float through = 0.0;
 
     if (sheet)
     {
@@ -890,10 +986,15 @@ void main()
          * each a little different; at grazing angles it shines (the halo
          * of fuzz around a rope against the light).
          */
-        albedo *= 1.08 + 0.2 * (vTexcoord.z - 0.5);
+        albedo *= 1.08 + 0.3 * (vTexcoord.z - 0.5);
 
-        s.sheen = 0.9 * mix(albedo, vec3(1.0), 0.15);
-        s.sheenRough = 0.45;
+        // along the hair: the way its root-to-tip coordinate grows
+        vec3 grows = dFdx(vTexcoord.x) * dFdx(vWorldPosition) + dFdy(vTexcoord.x) * dFdy(vWorldPosition);
+        float l = length(grows);
+
+        fibre = l > 1.0e-20 && !isnan(l) ? grows / l : normalize(cross(n, vec3(0.31, 0.53, 0.79)));
+        through = 1.0;
+        rough = 1.0;
     }
     else if (uMaterial == 5)
     {
@@ -915,20 +1016,38 @@ void main()
         float yarnBump = sqrt(max(sin(PI * fract(yarn)), 0.0));
 
         vec2 fibreAt = vec2(yarn * 9.0, along * 1.5 + 3.0 * across);
-        float fibre = 0.6 * noise2(fibreAt) + 0.4 * noise2(fibreAt * 2.7 + 13.1);
+        float fine = 0.6 * noise2(fibreAt) + 0.4 * noise2(fibreAt * 2.7 + 13.1);
 
-        n = bumped(n, (0.035 * yarnBump + 0.012 * fibre) * uRopeRadius);
+        n = bumped(n, (0.035 * yarnBump + 0.014 * fine) * uRopeRadius);
 
-        // natural fibre: every strand and every yarn a little different
-        float tone = 1.0 + 0.06 * (strand - 1.0)
-                   + 0.10 * (hash12(vec2(floor(yarn), strand)) - 0.5)
-                   + 0.08 * (noise2(vec2(along * 0.12, strand * 5.0)) - 0.5);
+        /*
+         * Natural fibre: no two yarns the same. Long pale and dark streaks
+         * run along them (each fibre grew differently), here and there a
+         * brown fleck of the plant's stem, and the rope has weathered in
+         * patches, longer than a hand. Dust and dark sits in the grooves.
+         */
+        float id = hash12(vec2(floor(yarn), strand));
 
-        albedo *= tone * mix(0.72, 1.0, yarnBump) * mix(0.84, 1.0, fibre);
+        float streak = noise2(vec2(yarn * 5.0, along * 0.35 + 7.0 * id));
+        float fine2 = noise2(vec2(yarn * 17.0 + 3.0, along * 0.9));
+        float fleck = smoothstep(0.78, 0.92, noise2(vec2(yarn * 11.0, along * 0.7 + 3.1 * strand)));
+        float weather = noise2(vec2(along * 0.07, strand * 3.7 + 1.0)) * 0.6 +
+                        noise2(vec2(along * 0.31, strand * 9.1)) * 0.4;
 
-        // loose fibre ends catch the light at grazing angles
-        s.sheen = 0.45 * albedo;
-        s.sheenRough = 0.6;
+        float tone = 0.86 + 0.05 * (strand - 1.0) + 0.24 * id + 0.32 * (streak - 0.5) + 0.12 * (fine2 - 0.5);
+
+        vec3 pale = vec3(1.10, 1.05, 0.94);
+        vec3 aged = vec3(0.83, 0.77, 0.69);
+
+        albedo *= tone * mix(aged, pale, smoothstep(0.25, 0.8, weather));
+        albedo = mix(albedo, albedo * vec3(0.42, 0.34, 0.26), 0.75 * fleck);
+
+        albedo *= mix(0.70, 1.0, yarnBump) * mix(0.86, 1.0, fine);
+
+        fibre = fibreAlong(n, yarn, normalize(cross(n, vec3(0.31, 0.53, 0.79))));
+        through = 0.55;
+
+        s.sheen = vec3(0.0);
     }
     else if (uMaterial == 6)
     {
@@ -945,15 +1064,29 @@ void main()
 
         float twist = fract(along * 3.0 + across * 1.2);
         float ridge = sqrt(max(sin(PI * twist), 0.0));
-        float fibre = noise2(vec2(along * 14.0, across * 5.0 + yarnId * 7.0));
+        float fine = noise2(vec2(along * 14.0, across * 5.0 + yarnId * 7.0));
+        float fine2 = noise2(vec2(along * 37.0, across * 13.0 + yarnId * 3.0));
 
-        n = bumped(n, (0.02 * ridge + 0.008 * fibre) * uRopeRadius);
+        n = bumped(n, (0.022 * ridge + 0.012 * fine + 0.006 * fine2) * uRopeRadius);
 
-        albedo *= mix(0.86, 1.0, ridge) * mix(0.93, 1.0, fibre) *
-                  (1.0 + 0.04 * (hash12(vec2(yarnId, 3.0)) - 0.5));
+        /*
+         * Cotton is never quite white: it has yellowed a little from yarn
+         * to yarn, and a lace that has been worn has picked up a soft grey
+         * where it rubbed, in patches along it.
+         */
+        float id = hash12(vec2(yarnId, 3.0));
+        float worn = noise2(vec2(vWorldPosition.xz / uRopeRadius * 0.11)) * 0.6 +
+                     noise2(vec2(vWorldPosition.zy / uRopeRadius * 0.37)) * 0.4;
 
-        s.sheen = 0.6 * mix(albedo, vec3(1.0), 0.2);
-        s.sheenRough = 0.55;
+        albedo *= mix(0.84, 1.0, ridge) * mix(0.9, 1.0, fine) *
+                  mix(vec3(0.97, 0.94, 0.89), vec3(1.0, 0.985, 0.955), id) *
+                  mix(vec3(0.88, 0.87, 0.85), vec3(1.0), smoothstep(0.3, 0.7, worn));
+
+        // along the plies of the yarn
+        fibre = fibreAlong(n, along * 3.0 + across * 1.2, normalize(cross(n, vec3(0.31, 0.53, 0.79))));
+        through = 0.8;
+
+        s.sheen = vec3(0.0);
     }
 
     // Where the normal turns quickly across a pixel (thin or far tubes) a
@@ -985,7 +1118,11 @@ void main()
         matte.f0 = vec3(0.0);
         matte.coat = 0.0;
 
-        vec3 photo = directLight(n, v, uKeyDir, uKeyIrradiance * keyLit, uKeySize, matte);
+        bool fibrous = dot(fibre, fibre) > 0.0;
+
+        vec3 photo = fibrous
+            ? fibreLight(fibre, n, v, uKeyDir, uKeyIrradiance * keyLit, albedo, through)
+            : directLight(n, v, uKeyDir, uKeyIrradiance * keyLit, uKeySize, matte);
 
         // the real rope shadows itself (the shadow map sees its strands);
         // other tubes keep the depth cue
@@ -993,6 +1130,15 @@ void main()
 
         if (!rope)
             photo *= mix(1.0, ao, 0.6);
+
+        // what lies close by (the other strands, the table under the rope)
+        float near = shadeHere();
+
+        ao *= near;
+
+        // a hair is lit from all round, the side away from the camera too
+        if (through >= 1.0)
+            photo += roomIrradiance(v) * 0.5 * albedo * sqrt(albedo) * ao / PI;
 
         // The room's light, less what the rest of the rope hides (the
         // occlusion is the share of the room still seen); the parts that
@@ -1021,13 +1167,17 @@ void main()
 
         float perceptual = sqrt(a);
 
+        // Fibres scatter what they reflect: their share of the room is the
+        // soft sheen of a dull surface, weaker than from a smooth one.
+        float dull = fibrous ? 0.55 : 1.0;
+
         photo += roomSpecular(pr, perceptual) * roomReflectance(s.f0, perceptual, pnv) *
-                 occluded * (1.0 - coatRoom) * uReflections;
+                 occluded * (1.0 - coatRoom) * uReflections * dull;
 
         photo += roomSpecular(pr, sqrt(s.coatA)) * coatRoom * occluded * uReflections;
 
         // light as it is (the camera develops the frame)
-        fragColor = vec4(photo, 1.0);
+        fragColor = vec4(cleanLight(photo), 1.0);
 
         return;
     }
@@ -1401,6 +1551,189 @@ void main()
 
     /*
      * ---------------------------------------------------------
+     * The shade of what lies close by, from the depth of the frame: for
+     * every pixel a few points of the scene around it, each hiding the
+     * room by how far it rises above the pixel's surface and how near it
+     * is (after McGuire et al., Scalable Ambient Obscurance). The pattern
+     * of the points is the same every 4 x 4 pixels, so that smoothing over
+     * that square takes the noise away exactly; it turns with the frames.
+     * ---------------------------------------------------------
+     */
+
+    const char *shadeFragmentShader = R"(
+#version 330 core
+
+in vec2 vUv;
+
+uniform sampler2D uDepth;
+uniform vec4 uProject;     // the projection: P00, P11, P22, P32
+uniform vec2 uTexel;
+uniform float uReach;      // view units
+uniform float uPixelsPerUnit;
+uniform float uStrength;
+uniform float uPatternTurn;
+
+out vec4 fragColor;
+
+vec3 viewAt(vec2 uv)
+{
+    float d = texture(uDepth, uv).r * 2.0 - 1.0;
+    float far = uProject.w / (d + uProject.z);
+
+    vec2 ndc = uv * 2.0 - 1.0;
+
+    return vec3(ndc.x * far / uProject.x, ndc.y * far / uProject.y, -far);
+}
+
+void main()
+{
+    float raw = texture(uDepth, vUv).r;
+
+    if (raw >= 0.99999)
+    {
+        fragColor = vec4(1.0);
+        return;
+    }
+
+    vec3 c = viewAt(vUv);
+
+    vec3 l = viewAt(vUv - vec2(uTexel.x, 0.0));
+    vec3 r = viewAt(vUv + vec2(uTexel.x, 0.0));
+    vec3 b = viewAt(vUv - vec2(0.0, uTexel.y));
+    vec3 t = viewAt(vUv + vec2(0.0, uTexel.y));
+
+    // the nearer side of each pair: across an edge the far one lies elsewhere
+    vec3 dx = abs(r.z - c.z) < abs(c.z - l.z) ? r - c : c - l;
+    vec3 dy = abs(t.z - c.z) < abs(c.z - b.z) ? t - c : c - b;
+
+    vec3 n = normalize(cross(dx, dy));
+
+    if (dot(n, c) > 0.0)
+        n = -n;
+
+    const int Count = 14;
+
+    ivec2 tile = ivec2(gl_FragCoord.xy) & 3;
+
+    const float Order[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0,
+                                      3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+
+    float turn = uPatternTurn + 6.2831853 * Order[tile.y * 4 + tile.x] / 16.0;
+
+    float circle = min(uReach * uPixelsPerUnit / max(-c.z, 1.0e-3), 160.0);
+
+    float reach2 = uReach * uReach;
+
+    float sum = 0.0;
+
+    for (int i = 0; i < Count; ++i)
+    {
+        float along = (float(i) + 0.5) / float(Count);
+        float angle = along * 6.2831853 * 5.0 + turn;
+
+        vec2 uv = vUv + vec2(cos(angle), sin(angle)) * (along * sqrt(along) * circle) * uTexel;
+
+        vec3 v = viewAt(uv) - c;
+
+        float vv = dot(v, v);
+
+        if (vv > reach2 || vv < 1.0e-12)
+            continue;
+
+        float falloff = 1.0 - vv / reach2;
+
+        sum += falloff * falloff * max(dot(v, n) / sqrt(vv) - 0.08, 0.0);
+    }
+
+    fragColor = vec4(clamp(1.0 - uStrength * sum / float(Count), 0.0, 1.0));
+}
+)";
+
+    const char *shadeSmoothFragmentShader = R"(
+#version 330 core
+
+in vec2 vUv;
+
+uniform sampler2D uShadeRaw;
+uniform sampler2D uDepth;
+uniform vec4 uProject;
+
+out vec4 fragColor;
+
+float farAt(ivec2 p)
+{
+    float d = texelFetch(uDepth, p, 0).r * 2.0 - 1.0;
+
+    return uProject.w / (d + uProject.z);
+}
+
+void main()
+{
+    ivec2 centre = ivec2(gl_FragCoord.xy);
+    float far = farAt(centre);
+
+    float sum = 0.0;
+    float weight = 0.0;
+
+    // the square of the pattern, across no edge
+    for (int y = -2; y < 2; ++y)
+    {
+        for (int x = -2; x < 2; ++x)
+        {
+            ivec2 p = centre + ivec2(x, y);
+
+            float w = 1.0 / (1.0e-3 + abs(farAt(p) - far) / max(0.004 * far, 1.0e-5));
+
+            sum += texelFetch(uShadeRaw, p, 0).r * w;
+            weight += w;
+        }
+    }
+
+    fragColor = vec4(sum / weight);
+}
+)";
+
+    // adds a frame to the frames before it; a broken pixel must not stay
+    const char *accumulateFragmentShader = R"(
+#version 330 core
+
+in vec2 vUv;
+
+uniform sampler2D uFrame;
+uniform float uWeight;
+
+out vec4 fragColor;
+
+void main()
+{
+    vec3 c = texelFetch(uFrame, ivec2(gl_FragCoord.xy), 0).rgb;
+
+    if (any(isnan(c)) || any(isinf(c)))
+    {
+        discard;
+    }
+
+    fragColor = vec4(min(c, vec3(4096.0)), uWeight);
+}
+)";
+
+    auto screenProgram = [&screenVertexShader](std::unique_ptr<QOpenGLShaderProgram> &program, const char *fragment)
+    {
+        program = std::make_unique<QOpenGLShaderProgram>();
+
+        if (program->addShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
+            program->addShaderFromSourceCode(QOpenGLShader::Fragment, fragment))
+        {
+            program->link();
+        }
+    };
+
+    screenProgram(shadeProgram_, shadeFragmentShader);
+    screenProgram(shadeSmoothProgram_, shadeSmoothFragmentShader);
+    screenProgram(accumulateProgram_, accumulateFragmentShader);
+
+    /*
+     * ---------------------------------------------------------
      * The surface under the knot: the table top and its sides (or the
      * room's floor), wood from colour, normal and roughness pictures at
      * their real size, lit by the sun (with the rope's shadow) and by the
@@ -1471,7 +1804,81 @@ uniform sampler2D uShoeShade;
 uniform vec4 uShoeArea;
 uniform int uUseShoeShade;
 
+// the rope and the shoe seen in the surface (premultiplied, half size), and
+// how high above it they are; how many pixels of the frame one view unit
+// covers at a distance of one
+uniform sampler2D uMirror;
+uniform sampler2D uMirrorHeight;
+uniform int uUseMirror;
+uniform vec2 uFrameSize;
+uniform float uPixelsPerUnit;
+uniform float uMirrorTurn;
+
 out vec4 fragColor;
+
+// the crystal at p: stone is grains packed side by side (a Voronoi diagram),
+// each with a colour of its own
+float crystal(vec2 p)
+{
+    vec2 cell = floor(p);
+    vec2 inside = fract(p);
+
+    float nearest = 8.0;
+    float id = 0.0;
+
+    for (int y = -1; y <= 1; ++y)
+    {
+        for (int x = -1; x <= 1; ++x)
+        {
+            vec2 g = cell + vec2(x, y);
+            vec2 to = vec2(x, y) + vec2(hash12(g), hash12(g + 7.31)) - inside;
+
+            float d = dot(to, to);
+
+            if (d < nearest)
+            {
+                nearest = d;
+                id = hash12(g + 31.7);
+            }
+        }
+    }
+
+    return id;
+}
+
+/*
+ * What the surface reflects of the rope and the shoe. In the mirror image
+ * the point of contact is sharp and what stands higher blurs, the more the
+ * rougher the surface: a pixel gathers from a circle as wide as the height
+ * times the spread of the reflection, which is what ties a thing to the
+ * surface it stands on.
+ */
+vec4 mirrorHere(vec3 n, vec3 geometric, float a, float distance)
+{
+    vec2 uv = gl_FragCoord.xy / uFrameSize + (n.xz - geometric.xz) * 0.035;
+
+    vec2 place = textureLod(uMirrorHeight, uv, 3.0).rg;
+
+    float height = place.y / max(place.x, 1.0e-3);
+
+    // half a frame's pixels wide, across the blur circle
+    float spread = 0.5 * max(height, 0.0) * a * uPixelsPerUnit / max(distance, 1.0e-3);
+    float level = clamp(log2(max(spread, 1.0)), 0.0, 6.0);
+
+    float angle = uMirrorTurn + 6.2831853 *
+        fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+
+    vec2 side = vec2(cos(angle), sin(angle)) * 2.0 * spread / uFrameSize;
+
+    vec4 sum = textureLod(uMirror, uv, level);
+
+    sum += textureLod(uMirror, uv + side * 0.7, level);
+    sum += textureLod(uMirror, uv - side * 0.7, level);
+    sum += textureLod(uMirror, uv + vec2(-side.y, side.x) * 0.7, level);
+    sum += textureLod(uMirror, uv + vec2(side.y, -side.x) * 0.7, level);
+
+    return sum / 5.0;
+}
 
 void main()
 {
@@ -1498,14 +1905,39 @@ void main()
      */
     if (uStage > 0.0)
     {
-        float speckle = smoothstep(0.78, 0.95, noise2(vUv * 1.1));
-        float cloud = noise2(vUv * 0.012) * 0.6 + noise2(vUv * 0.05) * 0.4;
+        /*
+         * Black granite: grains a millimetre or two across, most nearly
+         * black, some grey, a few pale; a slow cloud across the slab. Where
+         * a pixel covers many grains it shows their average, or they would
+         * shimmer as the camera moves.
+         */
+        float pixel = length(fwidth(vUv));
+        float sharp = 1.0 - smoothstep(0.7, 2.2, pixel);
 
-        vec3 stone = vec3(0.034, 0.036, 0.040) * (0.8 + 0.4 * cloud) + vec3(0.10, 0.10, 0.11) * speckle;
+        float cloud = noise2(vUv * 0.009) * 0.5 + noise2(vUv * 0.031) * 0.3 + noise2(vUv * 0.13) * 0.2;
+
+        float speckle = 0.0;
+        float tone = 0.0;
+
+        if (sharp > 0.0)
+        {
+            float big = crystal(vUv * 1.15);
+            float small = crystal(vUv * 2.6 + 19.0);
+
+            speckle = smoothstep(0.93, 0.95, big) * 0.7 + smoothstep(0.95, 0.97, small) * 0.5;
+            tone = (big - 0.5) * 0.45 + (small - 0.5) * 0.3;
+        }
+
+        vec3 stone = mix(vec3(0.021, 0.022, 0.025), vec3(0.038, 0.039, 0.043), cloud) * (1.0 + sharp * tone) +
+                     mix(vec3(0.0022), vec3(0.042, 0.041, 0.043) * speckle, sharp);
 
         albedo = mix(albedo, stone, uStage);
-        n = normalize(mix(n, geometric, uStage));
-        rough = mix(rough, 0.38 + 0.1 * speckle, uStage);
+
+        // a honed slab: not quite flat at the scale of the eye
+        vec2 wave = vec2(noise2(vUv * 0.021 + 3.0), noise2(vUv * 0.021 + 17.0)) - 0.5;
+
+        n = normalize(mix(n, normalize(geometric + vec3(wave.x, 0.0, wave.y) * 0.012), uStage));
+        rough = mix(rough, 0.27 + 0.06 * sharp * speckle + 0.1 * cloud, uStage);
     }
 
     vec3 v = normalize(uCameraPosition - vWorld);
@@ -1522,7 +1954,7 @@ void main()
     }
 
     // what the rope hides is replaced by the rope itself, lit by the room
-    float seen = 1.0 - hidden + hidden * 0.5 * dot(uRopeAlbedo, vec3(0.2126, 0.7152, 0.0722));
+    vec3 seen = vec3(1.0 - hidden) + hidden * 0.5 * uRopeAlbedo;
 
     if (uUseShoeShade != 0)
     {
@@ -1539,6 +1971,10 @@ void main()
 
     float sunLit = keyShadow(vWorld, geometric);
 
+    float near = shadeHere();
+
+    seen *= near;
+
     vec3 light =
         uKeyIrradiance * max(dot(n, uKeyDir), 0.0) * sunLit +
         roomIrradiance(n) * seen;
@@ -1547,8 +1983,19 @@ void main()
 
     vec3 r = reflect(-v, n);
 
-    color += roomSpecular(r, rough) * roomReflectance(vec3(0.04), rough, nv) *
-             (1.0 - hidden) * mix(1.0, sunLit, pow(max(dot(r, uKeyDir), 0.0), 4.0)) * uReflections;
+    vec3 reflected = roomSpecular(r, rough) * (1.0 - hidden) * near *
+                     mix(1.0, sunLit, pow(max(dot(r, uKeyDir), 0.0), 4.0));
+
+    // in front of the room stand the rope and the shoe, in the mirror
+    if (uUseMirror != 0 && geometric.y > 0.5)
+    {
+        vec4 seenInIt = mirrorHere(n, geometric, rough * rough, length(uCameraPosition - vWorld));
+
+        reflected = roomSpecular(r, rough) * near * (1.0 - seenInIt.a) * mix(1.0, sunLit, pow(max(dot(r, uKeyDir), 0.0), 4.0)) +
+                    seenInIt.rgb;
+    }
+
+    color += reflected * roomReflectance(vec3(0.04), rough, nv) * uReflections;
 
     float fade = uFadeRadius > 0.0
         ? 1.0 - smoothstep(0.5, 1.0, length(vWorld.xz - uFadeCentre) / uFadeRadius)
@@ -1557,7 +2004,7 @@ void main()
     if (fade <= 0.002)
         discard;
 
-    fragColor = vec4(color, fade);
+    fragColor = vec4(cleanLight(color), fade);
 }
 )";
 
@@ -1698,7 +2145,22 @@ void main()
         }
     }
 
-    vec3 light = sum / weight * uExposure;
+    /*
+     * No lens is perfect: a little of the light of every point lands
+     * around it (veiling glare), so bright parts soften into their
+     * surroundings and the blacks are never quite black.
+     */
+    vec3 glare = vec3(0.0);
+
+    for (int i = 0; i < 4; ++i)
+    {
+        vec2 corner = vec2(i & 1, i >> 1) * 2.0 - 1.0;
+
+        glare += textureLod(uColor, vUv + corner * uTexel * 12.0, 4.0).rgb * 0.5 +
+                 textureLod(uColor, vUv + corner * uTexel * 48.0, 6.0).rgb * 0.5;
+    }
+
+    vec3 light = mix(sum / weight, glare * 0.25, 0.03) * uExposure;
 
     if (uStage > 0.0)
     {
@@ -1716,8 +2178,11 @@ void main()
         float colourless = clamp((uStage - 0.7) / 0.3, 0.0, 1.0);
 
         light = mix(light, vec3(grey), colourless * 0.75 * behind);
-        light *= mix(1.0, 0.12, uStage * behind);
-        light *= mix(1.0, mix(0.3, 1.0, spot), uStage);
+        // (the calm stage leaves most of the room and only falls off gently)
+        float pool = smoothstep(0.7, 1.0, uStage);
+
+        light *= mix(1.0, 0.12, mix(0.45, 1.0, pool) * uStage * behind);
+        light *= mix(1.0, mix(0.3, 1.0, spot), mix(0.3, 1.0, pool) * uStage);
     }
 
     fragColor = develop(light, vUv);
@@ -1757,6 +2222,12 @@ uniform vec3 uArea;            // x, z of the middle, half size
 uniform float uTableY;
 uniform float uRadius;
 
+// The room's light from direction d, against what falls on the table:
+// uRoomBase + dot(uRoomLobe, d) (its lowest harmonics). A table sees the rope
+// in front of the windows hide more than the rope on the side of the wall.
+uniform float uRoomBase;
+uniform vec3 uRoomLobe;
+
 out vec4 fragColor;
 
 void main()
@@ -1795,10 +2266,11 @@ void main()
         float sine = length(cross(s / ds, d));
         float clamped = max(distance, uRadius);
 
-        hidden += 2.0 * uRadius * sine * d.y * ds / (3.14159265 * clamped * clamped);
+        hidden += max(uRoomBase + dot(uRoomLobe, d), 0.08) *
+                  2.0 * uRadius * sine * d.y * ds / (3.14159265 * clamped * clamped);
     }
 
-    fragColor = vec4(min(hidden, 0.97), 0.0, 0.0, 1.0);
+    fragColor = vec4(min(hidden, 0.985), 0.0, 0.0, 1.0);
 }
 )";
 
@@ -1972,8 +2444,10 @@ flat in int vMaterial;
 uniform vec3 uCameraPosition;
 uniform vec3 uCanvas;          // the canvas's colour (linear)
 uniform float uReflections;
+uniform float uMirrorLevel;
 
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
+layout(location = 1) out vec2 mirrorData;
 
 float ggx(float nh, float a)
 {
@@ -2013,8 +2487,27 @@ float weave(vec3 p, vec3 n, out vec2 slope)
     return mix(1.0, 0.86 + 0.14 * h, fade);
 }
 
+// the normal of a surface raised by `height` (millimetres), as on the rope
+vec3 raised(vec3 n, float height)
+{
+    vec3 dpdx = dFdx(vMm);
+    vec3 dpdy = dFdy(vMm);
+
+    vec3 r1 = cross(dpdy, n);
+    vec3 r2 = cross(n, dpdx);
+
+    float det = dot(dpdx, r1);
+
+    vec3 b = abs(det) * n - sign(det) * (dFdx(height) * r1 + dFdy(height) * r2);
+    float l = length(b);
+
+    return l > 1.0e-30 && !isnan(l) && !isinf(l) ? b / l : n;
+}
+
 void main()
 {
+    mirrorData = vec2(1.0, vWorld.y - uMirrorLevel);
+
     vec3 geometric = normalize(vNormal);
     vec3 n = geometric;
 
@@ -2037,22 +2530,60 @@ void main()
         vec2 slope;
         float threads = weave(vMm, geometric, slope);
 
-        albedo = uCanvas * threads * (0.9 + 0.2 * cloth);
-        rough = 0.85;
-        sheen = 0.25;
+        /*
+         * Cotton duck. Its threads are not even: thicker lengths (slubs) run
+         * along warp and weft for a centimetre or two and stay visible long
+         * after the threads themselves are too fine to see. The cloth has
+         * been worn: it creases where the foot bends behind the toe, it
+         * drapes softly over the rest, and the dye has rubbed paler on what
+         * stands out.
+         */
+        vec3 w = abs(geometric);
+        vec2 face = w.x > w.y && w.x > w.z ? vMm.zy : (w.y > w.z ? vMm.xz : vMm.xy);
 
-        vec3 helper = abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-        vec3 t1 = normalize(cross(helper, n));
-        vec3 t2 = cross(n, t1);
+        float slub = 0.5 * noise2(vec2(face.x * 2.1, face.y * 0.09)) +
+                     0.5 * noise2(vec2(face.x * 0.09 + 40.0, face.y * 2.1));
 
-        n = normalize(n + t1 * slope.x + t2 * slope.y);
+        float flex = smoothstep(196.0, 214.0, vMm.x) * (1.0 - smoothstep(244.0, 252.0, vMm.x));
+
+        float wave = noise2(vec2(vMm.x * 0.2 + 6.0 * noise2(vMm.xz * 0.025), vMm.z * 0.03));
+        float crease = 1.0 - abs(wave * 2.0 - 1.0);
+
+        float drape = noise2(vMm.xz * 0.11 + vMm.y * 0.13) * 0.65 + noise2(vMm.zy * 0.27) * 0.35;
+
+        n = raised(n, 0.55 * flex * crease * crease + 1.1 * drape + 0.05 * slub);
+
+        n = normalize(n + (abs(n.y) < 0.9 ? normalize(cross(vec3(0.0, 1.0, 0.0), n)) : vec3(1.0, 0.0, 0.0)) * slope.x);
+
+        float rubbed = smoothstep(0.55, 0.85, drape) * 0.1 + flex * crease * crease * crease * 0.28;
+
+        albedo = uCanvas * threads * (0.84 + 0.2 * cloth) * (0.76 + 0.48 * slub);
+        albedo = mix(albedo, uCanvas * vec3(1.9, 2.0, 2.1) + vec3(0.012), rubbed);
+
+        rough = 0.96;
+        sheen = 0.6;
+    }
+    else if (vMaterial == 6)
+    {
+        // waxed cotton thread, twisted
+        float twist = sin((vMm.x + vMm.z) * 11.0 + vMm.y * 5.0);
+
+        albedo = vec3(0.70, 0.69, 0.64) * (0.86 + 0.14 * twist) * (0.85 + 0.15 * cloth);
+        rough = 0.72;
+        sheen = 0.35;
     }
     else if (vMaterial == 1)
     {
         // the rubber sole, with a stripe of the canvas's colour round it
         // and a thin one above; its underside worn grey
-        albedo = vec3(0.78, 0.76, 0.71);
-        rough = 0.6;
+        albedo = vec3(0.74, 0.72, 0.665);
+        rough = 0.55 + 0.2 * cloth;
+
+        // moulded with a fine stipple; ribbed around the toe
+        float stipple = noise2(vec2(vMm.x + vMm.z, vMm.y) * 2.3);
+        float ribs = vMm.x > 232.0 && vMm.y < 26.0 ? sin(vMm.y * 2.2) * smoothstep(232.0, 244.0, vMm.x) : 0.0;
+
+        n = raised(n, 0.05 * stipple + 0.16 * ribs);
 
         float side = 1.0 - smoothstep(0.3, 0.6, abs(geometric.y));
 
@@ -2064,7 +2595,11 @@ void main()
         if (geometric.y < -0.5)
             albedo = vec3(0.35, 0.34, 0.32);
 
-        albedo *= 0.94 + 0.06 * cloth;
+        // walked in: grey along the ground, scuffed here and there
+        float ground = 1.0 - smoothstep(0.0, 12.0, vMm.y + 3.0 * noise2(vMm.xz * 0.05));
+        float scuff = smoothstep(0.6, 0.72, noise2(vec2((vMm.x + vMm.z) * 0.32, vMm.y * 2.4)));
+
+        albedo *= (0.94 + 0.06 * cloth) * mix(1.0, 0.62, ground) * mix(1.0, 0.8, scuff * 0.7);
     }
     else if (vMaterial == 2)
     {
@@ -2075,8 +2610,13 @@ void main()
     }
     else if (vMaterial == 4)
     {
-        albedo = vec3(0.80, 0.78, 0.73) * (0.95 + 0.05 * cloth);
-        rough = 0.5;
+        // the rubber toe cap: a little yellowed and scuffed where it meets things
+        float scuff = smoothstep(0.66, 0.82, noise2(vMm.xz * vec2(0.42, 1.3))) * smoothstep(268.0, 286.0, vMm.x);
+
+        n = raised(n, 0.04 * noise2(vMm.xz * 2.7) + 0.12 * noise2(vMm.xz * 0.08));
+
+        albedo = vec3(0.76, 0.74, 0.685) * (0.95 + 0.05 * cloth) * mix(1.0, 0.86, scuff);
+        rough = 0.42 + 0.18 * cloth + 0.25 * scuff;
     }
     else
     {
@@ -2093,7 +2633,8 @@ void main()
 
     float sunLit = keyShadow(vWorld, geometric);
 
-    vec3 f0 = mix(vec3(0.04), albedo, metal);
+    // (a cloth reflects little: its light goes in among the threads)
+    vec3 f0 = mix(vec3(sheen > 0.5 ? 0.018 : 0.04), albedo, metal);
     vec3 diffuse = albedo * (1.0 - metal);
 
     // the sun
@@ -2106,17 +2647,23 @@ void main()
 
     vec3 color = (diffuse / PhotoPi + specular) * uKeyIrradiance * nl * sunLit;
 
+    float open = vOpen * shadeHere();
+
     // the room
-    color += diffuse * roomIrradiance(n) * vOpen / PhotoPi;
+    color += diffuse * roomIrradiance(n) * open / PhotoPi;
+
+    // What the shoe's baked shade counts as hidden is, on its way down, the
+    // sunlit floor: it sends its light back up the sides.
+    color += diffuse * uFloorBounce * (0.5 - 0.5 * n.y) * (1.0 - vOpen) * shadeHere() * 0.7 / PhotoPi;
 
     vec3 r = reflect(-v, n);
 
-    color += roomSpecular(r, rough) * roomReflectance(f0, rough, nv) * vOpen * uReflections;
+    color += roomSpecular(r, rough) * roomReflectance(f0, rough, nv) * open * uReflections;
 
     // the soft glow of cloth at grazing angles
-    color += sheen * pow(1.0 - nv, 4.0) * roomIrradiance(n) * vOpen * albedo * 2.0 / PhotoPi;
+    color += sheen * pow(1.0 - nv, 3.0) * roomIrradiance(n) * open * sqrt(albedo) * 0.35 / PhotoPi;
 
-    fragColor = vec4(color, 1.0);
+    fragColor = vec4(cleanLight(color), 1.0);
 }
 )";
 
@@ -2387,6 +2934,7 @@ void KnotGLWidget::setShadowUniforms(QOpenGLShaderProgram &program, bool wanted)
     program.setUniformValue("uShadowDepth", 2);
     program.setUniformValue("uShadows", shadows ? 1 : 0);
     program.setUniformValue("uPcss", photo_ ? 1 : 0);
+    program.setUniformValue("uPatternTurn", 2.3999632f * static_cast<float>(photoSample_));
     program.setUniformValue("uLightTan", std::tan(environment_.sunRadius));
     program.setUniformValue("uDepthRange", shadowDepthRange_);
     program.setUniformValue("uMapWorld", shadowMapWorld_);
@@ -2885,6 +3433,8 @@ void KnotGLWidget::setRopeTinted(bool tinted)
 {
     ropeTinted_ = tinted;
 
+    ++photoVersion_;
+
     update();
 }
 
@@ -3189,6 +3739,8 @@ void KnotGLWidget::setLighting(const Lighting::Options &options)
 {
     lighting_ = options;
 
+    ++photoVersion_;
+
     normalShadowMapSize_ = Lighting::shadowMapSize(options.shadowQuality);
 
     // Photo mode always uses the sharpest map
@@ -3258,6 +3810,8 @@ void KnotGLWidget::setSurface(int material, float roughness)
 
 void KnotGLWidget::uploadMesh()
 {
+    ++photoVersion_;
+
     if (!glInitialized_ || !context())
         return;
 
@@ -3735,7 +4289,7 @@ void KnotGLWidget::drawMesh(
 
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
-    glFrontFace(GL_CCW);
+    glFrontFace(mirrorPass_ ? GL_CW : GL_CCW);
 
     meshProgram_->bind();
 
@@ -3744,9 +4298,8 @@ void KnotGLWidget::drawMesh(
     meshProgram_->setUniformValue("uProjection", projection);
     meshProgram_->setUniformValue("uNormalMatrix", model.normalMatrix());
 
-    meshProgram_->setUniformValue(
-        "uCameraPosition",
-        computeCameraPosition() + panOffset_);
+    meshProgram_->setUniformValue("uCameraPosition", photoEye());
+    meshProgram_->setUniformValue("uMirrorLevel", photo_ ? photoFloorLevel() : 0.0f);
 
     // Photo mode: the rope of the scene (colours that carry meaning, such
     // as the two sides of a Seifert surface, are kept)
@@ -3798,6 +4351,7 @@ void KnotGLWidget::drawMesh(
     meshProgram_->release();
 
     glDisable(GL_CULL_FACE);
+    glFrontFace(GL_CCW);
 }
 
 void KnotGLWidget::drawParticles(const QMatrix4x4 &viewProjection)
@@ -4001,7 +4555,7 @@ void KnotGLWidget::paintGL()
 
     const QMatrix4x4 model = modelMatrix();
     const QMatrix4x4 view = viewMatrix();
-    const QMatrix4x4 projection = projectionMatrix();
+    QMatrix4x4 projection = projectionMatrix();
 
     lastViewProjection_ = projection * view * model;
 
@@ -4012,6 +4566,47 @@ void KnotGLWidget::paintGL()
 
     if (photo_ && preparePhotoFrame(frameWidth, frameHeight))
     {
+        /*
+         * Nothing changed since the last frame: this one adds to it. It is
+         * taken a fraction of a pixel aside (a Halton sequence covers the
+         * pixel evenly); anything that moves starts again, sharp and whole.
+         */
+        const bool sameFrame =
+            photoLastVersion_ == photoVersion_ && photoLastPlace_ == view * model &&
+            photoLastProjection_ == projection && stage_ == stageTarget_ &&
+            photoFNumber_ == photoFNumberTarget_;
+
+        photoLastVersion_ = photoVersion_;
+        photoLastPlace_ = view * model;
+        photoLastProjection_ = projection;
+
+        photoSample_ = sameFrame ? std::min(photoSample_ + 1, PhotoSamples) : 0;
+
+        if (photoSample_ > 0 && photoSample_ < PhotoSamples)
+        {
+            auto halton = [](int index, int base)
+            {
+                float fraction = 1.0f;
+                float result = 0.0f;
+
+                for (; index > 0; index /= base)
+                {
+                    fraction /= static_cast<float>(base);
+                    result += fraction * static_cast<float>(index % base);
+                }
+
+                return result;
+            };
+
+            QMatrix4x4 aside;
+
+            aside.translate(
+                (2.0f * halton(photoSample_, 2) - 1.0f) / static_cast<float>(frameWidth),
+                (2.0f * halton(photoSample_, 3) - 1.0f) / static_cast<float>(frameHeight));
+
+            projection = aside * projection;
+        }
+
         // the table and the rope's shade on it follow the rope
         if (surfaceDirty_)
             rebuildSurfaceGeometry();
@@ -4020,6 +4615,15 @@ void KnotGLWidget::paintGL()
             bakeSurfaceOcclusion();
 
         stage(1);
+
+        drawPhotoDepth(model, projection * view);
+        drawPhotoShade(projection);
+
+        stage(6);
+
+        drawPhotoMirror(model, view, projection);
+
+        stage(7);
 
         // the light of the scene as it is, then the camera
         glBindFramebuffer(GL_FRAMEBUFFER, photoFramebuffer_);
@@ -4042,7 +4646,8 @@ void KnotGLWidget::paintGL()
 
         if (profiling && ++profileFrames_ == 60)
         {
-            const char *names[ProfileStages] = {"shadow map", "table, shade", "room", "table", "rope (shoe)", "camera"};
+            const char *names[ProfileStages] = {"shadow map", "table, shade", "room", "table", "rope (shoe)", "camera",
+                                                "depth, shade", "mirror"};
 
             QString line = QStringLiteral("frame %1x%2:").arg(frameWidth).arg(frameHeight);
             double total = 0.0;
@@ -4067,6 +4672,10 @@ void KnotGLWidget::paintGL()
 
             profileFrames_ = 0;
         }
+
+        // the next frame adds to this one, up to a clean picture
+        if (photoSample_ < PhotoSamples)
+            update();
     }
     else
     {
@@ -5146,6 +5755,8 @@ bool KnotGLWidget::setPhotoMode(bool enabled, Photo::Scene scene)
     surfaceDirty_ = true;
     occlusionDirty_ = true;
 
+    ++photoVersion_;
+
     if (!photo_)
     {
         restingRope_ = false;
@@ -5734,12 +6345,91 @@ bool KnotGLWidget::preparePhotoFrame(int width, int height)
 
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
 
+    auto makeTexture = [this](GLuint &texture, GLenum format, GLenum source, GLenum type, int w, int h, bool mipmaps)
+    {
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(format), w, h, 0, source, type, nullptr);
+
+        if (mipmaps)
+            glGenerateMipmap(GL_TEXTURE_2D);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    };
+
+    auto makeFramebuffer = [this, &ok](GLuint &framebuffer, GLuint color, GLuint depth)
+    {
+        glGenFramebuffers(1, &framebuffer);
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+
+        if (color != 0)
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
+
+        if (depth != 0)
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth, 0);
+
+        if (color == 0)
+        {
+            const GLenum none = GL_NONE;
+
+            context()->extraFunctions()->glDrawBuffers(1, &none);
+            context()->extraFunctions()->glReadBuffer(GL_NONE);
+        }
+
+        ok = ok && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    };
+
+    makeTexture(shadeDepth_, GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, width, height, false);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+    makeFramebuffer(shadeDepthFramebuffer_, 0, shadeDepth_);
+
+    makeTexture(rawShade_, GL_R8, GL_RED, GL_UNSIGNED_BYTE, width, height, false);
+    makeFramebuffer(rawShadeFramebuffer_, rawShade_, 0);
+
+    makeTexture(shade_, GL_R8, GL_RED, GL_UNSIGNED_BYTE, width, height, false);
+    makeFramebuffer(shadeFramebuffer_, shade_, 0);
+
+    makeTexture(accumulated_, GL_RGBA32F, GL_RGBA, GL_FLOAT, width, height, false);
+    makeFramebuffer(accumulatedFramebuffer_, accumulated_, 0);
+
+    const int mirrorWidth = std::max(width / 2, 1);
+    const int mirrorHeight = std::max(height / 2, 1);
+
+    makeTexture(mirrorColor_, GL_RGBA16F, GL_RGBA, GL_FLOAT, mirrorWidth, mirrorHeight, true);
+    makeTexture(mirrorHeight_, GL_RG16F, GL_RG, GL_FLOAT, mirrorWidth, mirrorHeight, true);
+
+    glGenRenderbuffers(1, &mirrorDepthBuffer_);
+    glBindRenderbuffer(GL_RENDERBUFFER, mirrorDepthBuffer_);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, mirrorWidth, mirrorHeight);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+    makeFramebuffer(mirrorFramebuffer_, mirrorColor_, 0);
+
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, mirrorHeight_, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, mirrorDepthBuffer_);
+
+    const GLenum both[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+
+    extra->glDrawBuffers(2, both);
+
+    ok = ok && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+
     photoFrameWidth_ = width;
     photoFrameHeight_ = height;
+    photoSample_ = 0;
 
     const qint64 pixels = static_cast<qint64>(width) * height;
 
-    photoFrameBytes_ = pixels * samples * (8 + 4) + pixels * 8 * 4 / 3 + pixels * 4;
+    photoFrameBytes_ = pixels * samples * (8 + 4) + pixels * 8 * 4 / 3 + pixels * 4 +
+                       pixels * (4 + 1 + 1 + 16) + pixels / 4 * (8 + 4) * 4 / 3 + pixels;
 
     if (!ok)
         destroyPhotoFrame();
@@ -5749,7 +6439,9 @@ bool KnotGLWidget::preparePhotoFrame(int width, int height)
 
 void KnotGLWidget::destroyPhotoFrame()
 {
-    for (GLuint *framebuffer : {&photoFramebuffer_, &resolveFramebuffer_})
+    for (GLuint *framebuffer : {&photoFramebuffer_, &resolveFramebuffer_, &shadeDepthFramebuffer_,
+                                &rawShadeFramebuffer_, &shadeFramebuffer_, &mirrorFramebuffer_,
+                                &accumulatedFramebuffer_})
     {
         if (*framebuffer != 0)
             glDeleteFramebuffers(1, framebuffer);
@@ -5757,7 +6449,7 @@ void KnotGLWidget::destroyPhotoFrame()
         *framebuffer = 0;
     }
 
-    for (GLuint *buffer : {&photoColorBuffer_, &photoDepthBuffer_})
+    for (GLuint *buffer : {&photoColorBuffer_, &photoDepthBuffer_, &mirrorDepthBuffer_})
     {
         if (*buffer != 0)
             glDeleteRenderbuffers(1, buffer);
@@ -5765,7 +6457,8 @@ void KnotGLWidget::destroyPhotoFrame()
         *buffer = 0;
     }
 
-    for (GLuint *texture : {&resolvedColor_, &resolvedDepth_})
+    for (GLuint *texture : {&resolvedColor_, &resolvedDepth_, &shadeDepth_, &rawShade_, &shade_,
+                            &mirrorColor_, &mirrorHeight_, &accumulated_})
     {
         if (*texture != 0)
             glDeleteTextures(1, texture);
@@ -5802,10 +6495,16 @@ void KnotGLWidget::setPhotoUniforms(QOpenGLShaderProgram &program)
     // share a unit
     program.setUniformValue("uEnvironment", 3);
     program.setUniformValue("uSpecular", 4);
+    program.setUniformValue("uShade", 10);
     program.setUniformValue("uPhoto", photo_ ? 1 : 0);
+    program.setUniformValue("uUseShade", photo_ && !mirrorPass_ && lighting_.occlusion && shade_ != 0 ? 1 : 0);
 
     if (!photo_)
         return;
+
+    glActiveTexture(GL_TEXTURE10);
+    glBindTexture(GL_TEXTURE_2D, mirrorPass_ ? 0 : shade_);
+    glActiveTexture(GL_TEXTURE0);
 
     program.setUniformValue("uRoomScale", photoRoomScale_);
 
@@ -6073,6 +6772,30 @@ void KnotGLWidget::bakeSurfaceOcclusion()
     occlusionProgram_->setUniformValue("uTableY", photoFloorLevel());
     occlusionProgram_->setUniformValue("uRadius", radius);
 
+    {
+        const QVector3D weights(0.2126f, 0.7152f, 0.0722f);
+
+        const QVector3D *c = environment_.irradiance;
+
+        const float onTable =
+            std::max(QVector3D::dotProduct(weights, environment_.irradianceAt(QVector3D(0.0f, 1.0f, 0.0f))), 1.0e-3f);
+
+        QMatrix4x4 turn;
+
+        turn.rotate(photoInfo_.environmentYaw, 0.0f, 1.0f, 0.0f);
+
+        // pi L(d) / E from the harmonics (the coefficients hold the cosine
+        // lobe: pi for the first, 2 pi / 3 for the next three)
+        const QVector3D lobe =
+            turn.mapVector(QVector3D(QVector3D::dotProduct(weights, c[3]),
+                                     QVector3D::dotProduct(weights, c[1]),
+                                     QVector3D::dotProduct(weights, c[2]))) *
+            (0.7329f / onTable);
+
+        occlusionProgram_->setUniformValue("uRoomBase", 0.282095f * QVector3D::dotProduct(weights, c[0]) / onTable);
+        occlusionProgram_->setUniformValue("uRoomLobe", lobe);
+    }
+
     backgroundVao_.bind();
     glDrawArrays(GL_TRIANGLES, 0, 3);
     backgroundVao_.release();
@@ -6338,7 +7061,8 @@ void KnotGLWidget::drawShoe(const QMatrix4x4 &viewProjection)
 
     shoeProgram_->setUniformValue("uViewProjection", viewProjection);
     shoeProgram_->setUniformValue("uScale", worldPerMm());
-    shoeProgram_->setUniformValue("uCameraPosition", computeCameraPosition() + panOffset_);
+    shoeProgram_->setUniformValue("uCameraPosition", photoEye());
+    shoeProgram_->setUniformValue("uMirrorLevel", photoFloorLevel());
     shoeProgram_->setUniformValue("uReflections", lighting_.reflections ? 1.0f : 0.0f);
 
     const QColor canvas = photoInfo_.canvas;
@@ -6479,6 +7203,21 @@ void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
     photoFloorProgram_->setUniformValue("uShoeShade", 9);
     photoFloorProgram_->setUniformValue("uUseShoeShade", shoeShade ? 1 : 0);
 
+    glActiveTexture(GL_TEXTURE11);
+    glBindTexture(GL_TEXTURE_2D, mirrorColor_);
+    glActiveTexture(GL_TEXTURE12);
+    glBindTexture(GL_TEXTURE_2D, mirrorHeight_);
+    glActiveTexture(GL_TEXTURE0);
+
+    photoFloorProgram_->setUniformValue("uMirror", 11);
+    photoFloorProgram_->setUniformValue("uMirrorHeight", 12);
+    photoFloorProgram_->setUniformValue("uUseMirror", lighting_.reflections && mirrorColor_ != 0 ? 1 : 0);
+    photoFloorProgram_->setUniformValue("uFrameSize", QVector2D(photoFrameWidth_, photoFrameHeight_));
+    photoFloorProgram_->setUniformValue(
+        "uPixelsPerUnit",
+        0.5f * static_cast<float>(photoFrameHeight_) / std::tan(qDegreesToRadians(0.5f * FieldOfView)));
+    photoFloorProgram_->setUniformValue("uMirrorTurn", 2.3999632f * static_cast<float>(photoSample_));
+
     if (shoeShade)
     {
         const QRectF area = Photo::sneaker().floorArea;
@@ -6495,8 +7234,169 @@ void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
     surfaceVao_.release();
     photoFloorProgram_->release();
 
+    for (const GLenum unit : {GL_TEXTURE11, GL_TEXTURE12})
+    {
+        glActiveTexture(unit);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+
     glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE);
+}
+
+QVector3D KnotGLWidget::photoEye() const
+{
+    QVector3D eye = computeCameraPosition() + panOffset_;
+
+    if (mirrorPass_)
+        eye.setY(2.0f * photoFloorLevel() - eye.y());
+
+    return eye;
+}
+
+void KnotGLWidget::drawPhotoDepth(const QMatrix4x4 &model, const QMatrix4x4 &viewProjection)
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, shadeDepthFramebuffer_);
+    glViewport(0, 0, photoFrameWidth_, photoFrameHeight_);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    depthProgram_->bind();
+    depthProgram_->setUniformValue("uLightViewProjection", viewProjection);
+
+    if (surfaceVertexCount_ > 0)
+    {
+        surfaceVao_.bind();
+        glDrawArrays(GL_TRIANGLES, 0, surfaceVertexCount_);
+        surfaceVao_.release();
+    }
+
+    if (showShoe())
+    {
+        QMatrix4x4 scale;
+
+        scale.scale(worldPerMm());
+
+        depthProgram_->setUniformValue("uLightViewProjection", viewProjection * model * scale);
+
+        shoeVao_.bind();
+        glDrawElements(GL_TRIANGLES, shoeIndexCount_, GL_UNSIGNED_INT, nullptr);
+        shoeVao_.release();
+    }
+
+    if (mesh_.isValid() && indexCount_ > 0)
+    {
+        depthProgram_->setUniformValue("uLightViewProjection", viewProjection * model);
+
+        meshVao_.bind();
+        glDrawElements(GL_TRIANGLES, indexCount_, GL_UNSIGNED_INT, nullptr);
+        meshVao_.release();
+    }
+
+    depthProgram_->release();
+}
+
+void KnotGLWidget::drawPhotoShade(const QMatrix4x4 &projection)
+{
+    if (!lighting_.occlusion || !shadeProgram_->isLinked() || !shadeSmoothProgram_->isLinked())
+        return;
+
+    const QVector4D project(projection(0, 0), projection(1, 1), projection(2, 2), projection(2, 3));
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDepthMask(GL_FALSE);
+
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D, shadeDepth_);
+    glActiveTexture(GL_TEXTURE0);
+
+    backgroundVao_.bind();
+
+    glBindFramebuffer(GL_FRAMEBUFFER, rawShadeFramebuffer_);
+
+    shadeProgram_->bind();
+    shadeProgram_->setUniformValue("uDepth", 5);
+    shadeProgram_->setUniformValue("uProject", project);
+    shadeProgram_->setUniformValue("uTexel", QVector2D(1.0f / photoFrameWidth_, 1.0f / photoFrameHeight_));
+
+    const float tube = mesh_.centerline.size() >= 4 ? mesh_.centerline.at(3) : 0.1f;
+
+    shadeProgram_->setUniformValue("uReach", 2.2f * tube);
+    shadeProgram_->setUniformValue(
+        "uPixelsPerUnit",
+        0.5f * static_cast<float>(photoFrameHeight_) / std::tan(qDegreesToRadians(0.5f * FieldOfView)));
+    shadeProgram_->setUniformValue("uStrength", 2.4f);
+    shadeProgram_->setUniformValue("uPatternTurn", 2.3999632f * static_cast<float>(photoSample_));
+
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    shadeProgram_->release();
+
+    glBindFramebuffer(GL_FRAMEBUFFER, shadeFramebuffer_);
+
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_2D, rawShade_);
+    glActiveTexture(GL_TEXTURE0);
+
+    shadeSmoothProgram_->bind();
+    shadeSmoothProgram_->setUniformValue("uShadeRaw", 6);
+    shadeSmoothProgram_->setUniformValue("uDepth", 5);
+    shadeSmoothProgram_->setUniformValue("uProject", project);
+
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    shadeSmoothProgram_->release();
+
+    backgroundVao_.release();
+
+    for (const GLenum unit : {GL_TEXTURE5, GL_TEXTURE6})
+    {
+        glActiveTexture(unit);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+
+    glDepthMask(GL_TRUE);
+}
+
+void KnotGLWidget::drawPhotoMirror(const QMatrix4x4 &model, const QMatrix4x4 &view, const QMatrix4x4 &projection)
+{
+    if (!lighting_.reflections)
+        return;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, mirrorFramebuffer_);
+    glViewport(0, 0, photoFrameWidth_ / 2, photoFrameHeight_ / 2);
+
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glDepthMask(GL_TRUE);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // the scene turned over the surface: y becomes 2 h - y
+    QMatrix4x4 flip;
+
+    flip(1, 1) = -1.0f;
+    flip(1, 3) = 2.0f * photoFloorLevel();
+
+    mirrorPass_ = true;
+
+    drawShoe(projection * view * flip * model);
+    drawMesh(model, view * flip, projection);
+
+    mirrorPass_ = false;
+
+    glBindTexture(GL_TEXTURE_2D, mirrorColor_);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, mirrorHeight_);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void KnotGLWidget::developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &projection)
@@ -6512,6 +7412,60 @@ void KnotGLWidget::developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &p
 
     extra->glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     extra->glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+
+    /*
+     * The frames so far, and this one: the first starts them, later ones
+     * count for 1 / n, so that all count the same. The sum then stands in
+     * for the frame.
+     */
+    if (photoSample_ == 0 || !accumulateProgram_->isLinked())
+    {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, resolveFramebuffer_);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, accumulatedFramebuffer_);
+
+        extra->glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
+    else if (photoSample_ < PhotoSamples)
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, accumulatedFramebuffer_);
+        glViewport(0, 0, width, height);
+
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+        glDepthMask(GL_FALSE);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        accumulateProgram_->bind();
+
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, resolvedColor_);
+        glActiveTexture(GL_TEXTURE0);
+
+        accumulateProgram_->setUniformValue("uFrame", 5);
+        accumulateProgram_->setUniformValue("uWeight", 1.0f / static_cast<float>(photoSample_ + 1));
+
+        backgroundVao_.bind();
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        backgroundVao_.release();
+
+        accumulateProgram_->release();
+
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture(GL_TEXTURE0);
+
+        glDisable(GL_BLEND);
+        glDepthMask(GL_TRUE);
+    }
+
+    if (photoSample_ > 0)
+    {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, accumulatedFramebuffer_);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolveFramebuffer_);
+
+        extra->glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
 

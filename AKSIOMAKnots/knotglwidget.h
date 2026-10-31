@@ -441,6 +441,19 @@ private:
     // the camera: depth of field, exposure and film, into the view
     void developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &projection);
 
+    /*
+     * What the colour of the frame reads, drawn before it: the depth of the
+     * frame alone, from it the shade of everything near (what each point
+     * sees of the room past what lies close by), and the rope and the shoe
+     * seen in the surface they lie on.
+     */
+    void drawPhotoDepth(const QMatrix4x4 &model, const QMatrix4x4 &viewProjection);
+    void drawPhotoShade(const QMatrix4x4 &projection);
+    void drawPhotoMirror(const QMatrix4x4 &model, const QMatrix4x4 &view, const QMatrix4x4 &projection);
+
+    // where the camera is (in the mirror pass, its image under the surface)
+    QVector3D photoEye() const;
+
     // the table top (or floor) and its sides, around the knot
     void rebuildSurfaceGeometry();
 
@@ -651,6 +664,40 @@ private:
 
     // the frame: multisampled HDR colour and depth, resolved into textures
     // (the colour with mipmaps, for the blur)
+    // the depth of the frame alone, and the shade worked out from it (raw,
+    // then smoothed)
+    GLuint shadeDepthFramebuffer_ = 0;
+    GLuint shadeDepth_ = 0;
+    GLuint rawShadeFramebuffer_ = 0;
+    GLuint rawShade_ = 0;
+    GLuint shadeFramebuffer_ = 0;
+    GLuint shade_ = 0;
+
+    // The rope and the shoe in the surface (half the frame's size): their
+    // light, and how high above the surface it comes from.
+    GLuint mirrorFramebuffer_ = 0;
+    GLuint mirrorColor_ = 0;
+    GLuint mirrorHeight_ = 0;
+    GLuint mirrorDepthBuffer_ = 0;
+    bool mirrorPass_ = false;
+
+    /*
+     * While nothing changes the frames add up: every one is taken a fraction
+     * of a pixel aside, with the random patterns of the soft shadows turned
+     * further, and all of them together are as a picture of many samples per
+     * pixel. photoSample_: frames added so far (0: this one is the first).
+     * photoVersion_ goes up with every change of what is drawn.
+     */
+    static constexpr int PhotoSamples = 64;
+
+    GLuint accumulatedFramebuffer_ = 0;
+    GLuint accumulated_ = 0;
+    int photoSample_ = 0;
+    quint64 photoVersion_ = 0;
+    quint64 photoLastVersion_ = 0;
+    QMatrix4x4 photoLastPlace_;
+    QMatrix4x4 photoLastProjection_;
+
     GLuint photoFramebuffer_ = 0;
     GLuint photoColorBuffer_ = 0;
     GLuint photoDepthBuffer_ = 0;
@@ -687,7 +734,7 @@ private:
     // the room, and the video memory of the photo pictures
     QVector3D floorAlbedo_ = QVector3D(0.3f, 0.3f, 0.3f);
     // AKSIOMA_PROFILE: milliseconds spent in each stage of the frame
-    static constexpr int ProfileStages = 6;
+    static constexpr int ProfileStages = 8;
     double profileTimes_[ProfileStages] = {};
     int profileFrames_ = 0;
 
@@ -701,6 +748,9 @@ private:
 
     std::unique_ptr<QOpenGLShaderProgram> photoBackgroundProgram_;
     std::unique_ptr<QOpenGLShaderProgram> photoFloorProgram_;
+    std::unique_ptr<QOpenGLShaderProgram> shadeProgram_;
+    std::unique_ptr<QOpenGLShaderProgram> shadeSmoothProgram_;
+    std::unique_ptr<QOpenGLShaderProgram> accumulateProgram_;
     std::unique_ptr<QOpenGLShaderProgram> prefilterProgram_;
 
     // the shadow map size outside Photo mode (it is larger in it)
