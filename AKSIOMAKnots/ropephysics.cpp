@@ -65,9 +65,18 @@ constexpr double TrustTurn = 0.4;
 // a rod all but unstretchable: its compliance in the solved system
 constexpr double StretchCompliance = 1.0e-6;
 
-// no point moves more than this in one step (no tunnelling through the
-// rope: two radii wide)
+// no point moves more than this in one step, counted from the mean motion
+// of the rope (no tunnelling through the rope: two radii wide)
 constexpr double MaxStep = 0.4;
+
+// the rope as a whole moves no more than this in one step: what it lands on
+// stops it only at the end of that step, and MaxFall + MaxStep stays under
+// the two radii a strand would have to cross
+constexpr double MaxFall = 1.5;
+
+// a rope lying still takes no set: below this speed (radii per time unit)
+// the creep fades away (see the end of step())
+constexpr double SetSpeed = 0.1;
 
 // A mouse moves in jumps, once a frame; a hand moves smoothly. The hand
 // follows the mouse this late (seconds), or every jump would shake the rope.
@@ -235,6 +244,56 @@ void solve6(const double *l, double *b)
     }
 }
 
+/*
+ * b = (L L^T)^-1 b for all six columns of b at once: what solve6 does to each
+ * of them, number for number, with the loop over the columns on the inside,
+ * where the processor can do two of them at a time.
+ */
+void solve6Columns(const double *l, double *b)
+{
+    for (int i = 0; i < 6; ++i)
+    {
+        double row[6];
+
+        std::copy(b + 6 * i, b + 6 * i + 6, row);
+
+        for (int k = 0; k < i; ++k)
+        {
+            const double a = l[i * 6 + k];
+            const double *other = b + 6 * k;
+
+            for (int c = 0; c < 6; ++c)
+                row[c] -= a * other[c];
+        }
+
+        const double pivot = l[i * 6 + i];
+
+        for (int c = 0; c < 6; ++c)
+            b[i * 6 + c] = row[c] / pivot;
+    }
+
+    for (int i = 5; i >= 0; --i)
+    {
+        double row[6];
+
+        std::copy(b + 6 * i, b + 6 * i + 6, row);
+
+        for (int k = i + 1; k < 6; ++k)
+        {
+            const double a = l[k * 6 + i];
+            const double *other = b + 6 * k;
+
+            for (int c = 0; c < 6; ++c)
+                row[c] -= a * other[c];
+        }
+
+        const double pivot = l[i * 6 + i];
+
+        for (int c = 0; c < 6; ++c)
+            b[i * 6 + c] = row[c] / pivot;
+    }
+}
+
 // x = M^-1 x for the tridiagonal M (the rows below, on and above the diagonal)
 template<typename T>
 void solveTridiagonal(const double *below, const double *on, const double *above, double *work, T *x, int n)
@@ -307,6 +366,71 @@ void rubAlong(Vec3 *v, int n, bool closed, double rub, const double *free)
 
     for (int i = 0; i < n; ++i)
         v[i] = v[i] - top * (share * z.at(i));
+}
+
+/*
+ * The motion of the rope as a solid body: the velocities drift + turn x
+ * (X(i) - centre) closest to V(i) over all its points (of equal mass). It is
+ * what is left when every part of the rope keeps its place on the others.
+ */
+void rigidMotion(const Vec3 *X, const Vec3 *V, int n, Vec3 &centre, Vec3 &drift, Vec3 &turn)
+{
+    centre = Vec3(0.0, 0.0, 0.0);
+    drift = Vec3(0.0, 0.0, 0.0);
+
+    for (int i = 0; i < n; ++i)
+    {
+        centre += X[i];
+        drift += V[i];
+    }
+
+    centre = centre / static_cast<double>(n);
+    drift = drift / static_cast<double>(n);
+
+    // L = sum r x v, I = sum |r|^2 E - r r^T
+    Vec3 momentum(0.0, 0.0, 0.0);
+
+    double xx = 0.0;
+    double yy = 0.0;
+    double zz = 0.0;
+    double xy = 0.0;
+    double xz = 0.0;
+    double yz = 0.0;
+
+    for (int i = 0; i < n; ++i)
+    {
+        const Vec3 r = X[i] - centre;
+
+        momentum += Vec3::cross(r, V[i] - drift);
+
+        xx += r.y * r.y + r.z * r.z;
+        yy += r.x * r.x + r.z * r.z;
+        zz += r.x * r.x + r.y * r.y;
+        xy -= r.x * r.y;
+        xz -= r.x * r.z;
+        yz -= r.y * r.z;
+    }
+
+    // (a rope dead straight does not turn about itself)
+    const double tiny = 1.0e-9 * (xx + yy + zz) + 1.0e-12;
+
+    xx += tiny;
+    yy += tiny;
+    zz += tiny;
+
+    const double c00 = yy * zz - yz * yz;
+    const double c01 = xz * yz - xy * zz;
+    const double c02 = xy * yz - xz * yy;
+    const double c11 = xx * zz - xz * xz;
+    const double c12 = xy * xz - xx * yz;
+    const double c22 = xx * yy - xy * xy;
+
+    const double det = xx * c00 + xy * c01 + xz * c02;
+
+    turn = Vec3(
+        (c00 * momentum.x + c01 * momentum.y + c02 * momentum.z) / det,
+        (c01 * momentum.x + c11 * momentum.y + c12 * momentum.z) / det,
+        (c02 * momentum.x + c12 * momentum.y + c22 * momentum.z) / det);
 }
 
 // distance along the rope between points i and j (in points)
@@ -759,6 +883,69 @@ void RopeSimulation::takeSet(double share)
     }
 }
 
+void RopeSimulation::cut(int first, int count)
+{
+    const int n = x_.size();
+
+    if (!valid_ || !closed_ || held_ >= 0 || count < 4 || count > n)
+        return;
+
+    // what is left of it, starting at `first`
+    const auto keep = [first, n](auto &values, int size)
+    {
+        const auto all = values;
+
+        values.resize(size);
+
+        for (int k = 0; k < size; ++k)
+            values[k] = all.at((first + k) % n);
+    };
+
+    keep(x_, count);
+    keep(v_, count);
+    keep(w_, count);
+
+    keep(rest_, count - 1);
+    keep(q_, count - 1);
+    keep(spin_, count - 1);
+    keep(shape_, count - 1);
+
+    closed_ = false;
+    segments_ = count - 1;
+
+    p_.resize(count);
+    groundDepth_.resize(count);
+    lambda_.resize(segments_);
+    cellOf_.resize(segments_);
+    order_.resize(segments_);
+
+    qOld_ = q_;
+    windowStart_ = x_;
+    windowSteps_ = 0;
+    quiet_ = 0;
+    rodAge_ = -1;
+
+    pairs_.clear();
+    travelled_ = 0.0;
+}
+
+void RopeSimulation::stayWithin(double left, double right, double back, double front)
+{
+    fenced_ = true;
+
+    fenceLow_ = Vec3(left, 0.0, back);
+    fenceHigh_ = Vec3(right, 0.0, front);
+
+    // (a very tight knot can lie over the edge from the start)
+    for (const Vec3 &p : x_)
+    {
+        fenceLow_.x = std::min(fenceLow_.x, p.x);
+        fenceLow_.z = std::min(fenceLow_.z, p.z);
+        fenceHigh_.x = std::max(fenceHigh_.x, p.x);
+        fenceHigh_.z = std::max(fenceHigh_.z, p.z);
+    }
+}
+
 double RopeSimulation::secondsPerStep() const
 {
     return TimeStep * std::sqrt(radiusMm_ * 0.001 / Gravity);
@@ -946,34 +1133,32 @@ void RopeSimulation::factorRod()
         const double *link = E + 36 * i;
         double *f = F + 36 * i;
 
-        // F(i) = C(i)^-1 E(i), column by column
-        for (int c = 0; c < 6; ++c)
-        {
-            double column[6];
+        // F(i) = C(i)^-1 E(i)
+        std::copy(link, link + 36, f);
 
-            for (int r = 0; r < 6; ++r)
-                column[r] = link[r * 6 + c];
-
-            solve6(C, column);
-
-            for (int r = 0; r < 6; ++r)
-                f[r * 6 + c] = column[r];
-        }
+        solve6Columns(C, f);
 
         std::copy(D + 36 * (i + 1), D + 36 * (i + 2), working);
 
-        for (int r = 0; r < 6; ++r)
+        // (E is mostly zeros: only its other numbers cost anything)
+        double sum[36] = {};
+
+        for (int k = 0; k < 6; ++k)
         {
-            for (int c = 0; c < 6; ++c)
+            for (int r = 0; r < 6; ++r)
             {
-                double sum = 0.0;
+                const double a = link[k * 6 + r];
 
-                for (int k = 0; k < 6; ++k)
-                    sum += link[k * 6 + r] * f[k * 6 + c];
+                if (a == 0.0)
+                    continue;
 
-                working[r * 6 + c] -= sum;
+                for (int c = 0; c < 6; ++c)
+                    sum[r * 6 + c] += a * f[k * 6 + c];
             }
         }
+
+        for (int t = 0; t < 36; ++t)
+            working[t] -= sum[t];
     }
 
     if (!closed_)
@@ -995,26 +1180,69 @@ void RopeSimulation::factorRod()
     const double *toLast = E + 36 * (chain - 1);
     const double *wrap = E + 36 * (segments - 1);
 
-    QVector<double> rhs(6 * chain);
+    std::fill(Z, Z + 36 * chain, 0.0);
 
-    for (int c = 0; c < 6; ++c)
+    // G(0) = wrap^T (the first block against the last), G(end) = E
+    for (int r = 0; r < 6; ++r)
     {
-        rhs.fill(0.0);
+        for (int c = 0; c < 6; ++c)
+        {
+            Z[r * 6 + c] = wrap[c * 6 + r];
+            Z[36 * (chain - 1) + r * 6 + c] += toLast[r * 6 + c];
+        }
+    }
+
+    // as solveChain, for all six columns of Z at once, in one sweep of the rope
+    for (int i = 0; i + 1 < chain; ++i)
+    {
+        const double *f = F + 36 * i;
+        const double *y = Z + 36 * i;
+        double *next = Z + 36 * (i + 1);
+
+        double sum[36] = {};
+
+        for (int k = 0; k < 6; ++k)
+        {
+            for (int r = 0; r < 6; ++r)
+            {
+                const double a = f[k * 6 + r];
+
+                for (int c = 0; c < 6; ++c)
+                    sum[r * 6 + c] += a * y[k * 6 + c];
+            }
+        }
+
+        for (int t = 0; t < 36; ++t)
+            next[t] -= sum[t];
+    }
+
+    for (int i = chain - 1; i >= 0; --i)
+    {
+        double *x = Z + 36 * i;
+
+        solve6Columns(L + 36 * i, x);
+
+        if (i + 1 >= chain)
+            continue;
+
+        const double *f = F + 36 * i;
+        const double *after = Z + 36 * (i + 1);
+
+        double sum[36] = {};
 
         for (int r = 0; r < 6; ++r)
         {
-            // G(0) = wrap^T (the first block against the last), G(end) = E
-            rhs[r] = wrap[c * 6 + r];
-            rhs[6 * (chain - 1) + r] += toLast[r * 6 + c];
+            for (int k = 0; k < 6; ++k)
+            {
+                const double a = f[r * 6 + k];
+
+                for (int c = 0; c < 6; ++c)
+                    sum[r * 6 + c] += a * after[k * 6 + c];
+            }
         }
 
-        solveChain(rhs.data());
-
-        for (int i = 0; i < chain; ++i)
-        {
-            for (int r = 0; r < 6; ++r)
-                Z[36 * i + r * 6 + c] = rhs[6 * i + r];
-        }
+        for (int t = 0; t < 36; ++t)
+            x[t] -= sum[t];
     }
 
     double *S = rodS_.data();
@@ -1056,15 +1284,18 @@ void RopeSimulation::solveChain(double *b) const
         const double *y = b + 6 * i;
         double *next = b + 6 * (i + 1);
 
-        for (int r = 0; r < 6; ++r)
+        double sum[6] = {};
+
+        for (int k = 0; k < 6; ++k)
         {
-            double sum = 0.0;
+            const double a = y[k];
 
-            for (int k = 0; k < 6; ++k)
-                sum += f[k * 6 + r] * y[k];
-
-            next[r] -= sum;
+            for (int r = 0; r < 6; ++r)
+                sum[r] += f[k * 6 + r] * a;
         }
+
+        for (int r = 0; r < 6; ++r)
+            next[r] -= sum[r];
     }
 
     // back: x(i) = C(i)^-1 y(i) - F(i) x(i+1)
@@ -1195,83 +1426,84 @@ void RopeSimulation::solveRod()
     const double wp = 1.0 / h_;
     const double wq = wq_;
 
+    rodMove_.resize(n);
+    rodTurn_.resize(segments);
+
+    Vec3 *Move = rodMove_.data();
+    Vec3 *Turn = rodTurn_.data();
+
+    /*
+     * The system is the rod straightened out to first order about where it
+     * is now. Far from there that is no guide: where a contact has just
+     * pushed a part hard, and anywhere on a long rope in motion, where a
+     * small error at one place turns a long arm of rope. So no point or piece
+     * takes more than first order can be trusted for, and the next pass goes
+     * on from there. The whole correction shrinks together, for all the rope:
+     * only so does it stay the solution of the system. Limited point by point
+     * it is not, it makes the rope worse, and all that moving becomes
+     * velocity at the end of the step: a rope of a thousand points then boils,
+     * never coming to rest, with the limit biting on every fourth point.
+     */
+    double share = 1.0;
+
+    const auto trust = [&share](const Vec3 &step, double most)
+    {
+        const double far = step.lengthSquared();
+
+        if (far > most * most)
+            share = std::min(share, most / std::sqrt(far));
+    };
+
     for (int i = 0; i < segments; ++i)
     {
         const double *row = B + 6 * i;
+        const double *other = B + 6 * ((i - 1 + segments) % segments);
+
+        const bool first = !closed_ && i == 0;
 
         const Vec3 stretch(row[0], row[1], row[2]);
         const Vec3 bend(row[3], row[4], row[5]);
 
-        /*
-         * The system is the rod straightened out to first order about where
-         * it is now. Far from there (where a contact has just pushed a part
-         * hard) that is no guide: no point or piece takes more of the
-         * correction than first order can be trusted for, and the next pass
-         * goes on from there. The rest of the rope is not held back by it.
-         * What counts is what a point really moves, the difference of the
-         * pulls on its two sides: a hanging rope is under a great tension
-         * that all but cancels at every point.
-         */
-        {
-            Vec3 pull = stretch;
+        // What the system asks of point i: what it really moves, the
+        // difference of the pulls on its two sides (a hanging rope is under
+        // a great tension that all but cancels at every point).
+        Vec3 pull = stretch;
 
-            if (closed_ || i > 0)
-            {
-                const double *other = B + 6 * ((i - 1 + segments) % segments);
+        if (!first)
+            pull -= Vec3(other[0], other[1], other[2]);
 
-                pull -= Vec3(other[0], other[1], other[2]);
-            }
+        Move[i] = pull * (-wp * W[i]);
 
-            pull *= -wp * W[i];
+        // and of piece i: -l S(d)^T... on its own turn, l (d x lambda) with
+        // the sign of the stretch term, and the bend terms of its two joints
+        const Vec3 own = Vec3::cross(axisOf(Q[i]), stretch) * (-wq * Rest[i]);
 
-            const double far = pull.length();
+        const Vec3 before = first ? Vec3(0.0, 0.0, 0.0) : Vec3(other[3], other[4], other[5]);
 
-            if (far > TrustMove)
-                pull *= TrustMove / far;
+        Turn[i] = own + (before - bend) * wq;
 
-            P[i] += pull;
-        }
+        trust(Move[i], TrustMove);
+        trust(Turn[i], TrustTurn);
+    }
 
-        // the last point of an open rope has the one piece before it
-        if (!closed_ && i == segments - 1)
-        {
-            Vec3 pull = stretch * (wp * W[n - 1]);
+    // the last point of an open rope has the one piece before it
+    if (!closed_)
+    {
+        const double *row = B + 6 * (segments - 1);
 
-            const double far = pull.length();
+        Move[n - 1] = Vec3(row[0], row[1], row[2]) * (wp * W[n - 1]);
 
-            if (far > TrustMove)
-                pull *= TrustMove / far;
+        trust(Move[n - 1], TrustMove);
+    }
 
-            P[n - 1] += pull;
-        }
+    for (int i = 0; i < n; ++i)
+        P[i] += Move[i] * share;
 
-        Sum[i] += bend;
+    for (int i = 0; i < segments; ++i)
+    {
+        Sum[i] += Vec3(B[6 * i + 3], B[6 * i + 4], B[6 * i + 5]) * share;
 
-        const Vec3 d = axisOf(Q[i]);
-
-        // -l S(d)^T... on the piece's own turn: l (d x lambda) with the sign
-        // of the stretch term, and the bend terms of its two joints
-        const Vec3 own = Vec3::cross(d, stretch) * (-wq * Rest[i]);
-
-        Vec3 before(0.0, 0.0, 0.0);
-
-        const int previous = (i - 1 + segments) % segments;
-
-        if (closed_ || i > 0)
-        {
-            const double *other = B + 6 * previous;
-
-            before = Vec3(other[3], other[4], other[5]);
-        }
-
-        Vec3 turn = own + (before - bend) * wq;
-
-        const double angle = turn.length();
-
-        if (angle > TrustTurn)
-            turn *= TrustTurn / angle;
-
-        turnBy(Q[i], turn);
+        turnBy(Q[i], Turn[i] * share);
     }
 }
 
@@ -1587,6 +1819,19 @@ void RopeSimulation::solveContacts()
         if (Solid[i] == 0.0)
             continue;
 
+        /*
+         * The edge of the table. A rope has momentum and a loop swings past
+         * the hand, so holding the hand back does not keep it on the table.
+         * Nor can the edge be a drop in the ground: the part beyond it would
+         * hang through the table's side, and that changed the knot when tried.
+         * So the rope goes no further, as against a low rail.
+         */
+        if (fenced_)
+        {
+            P[i].x = std::clamp(P[i].x, fenceLow_.x, fenceHigh_.x);
+            P[i].z = std::clamp(P[i].z, fenceLow_.z, fenceHigh_.z);
+        }
+
         double slopeX = 0.0;
         double slopeZ = 0.0;
 
@@ -1640,7 +1885,7 @@ void RopeSimulation::step()
     // the hand carries its point towards it, a safe distance per step;
     // up and down it moves gently, as a hand lifts a rope (about half a
     // second to the full height), so the rope never jumps
-    constexpr double HandStep = 0.2;
+    constexpr double HandStep = 0.35;
     constexpr double HandRise = 0.024;
 
     // no piece turns further than this in a step
@@ -1648,6 +1893,44 @@ void RopeSimulation::step()
 
     if (held_ >= 0)
         handEased_ += (hand_ - handEased_) * handEase_;
+
+    /*
+     * Moving as a whole carries no strand through another, so the limit on a
+     * point's speed counts from the mean motion of the rope, and a rope falls
+     * as fast as gravity takes it. That holds only while it touches nothing:
+     * what lies on the table or is held has stopped, and the rest may then
+     * come down on it no faster than two strands can meet anyway.
+     */
+    Vec3 together(0.0, 0.0, 0.0);
+
+    bool touching = held_ >= 0;
+
+    for (int i = 0; i < n; ++i)
+    {
+        together += V[i];
+
+        if (!touching)
+        {
+            double slopeX = 0.0;
+            double slopeZ = 0.0;
+
+            const double top = ground_ ? ground_(X[i].x, X[i].z, slopeX, slopeZ) : 0.0;
+
+            touching = W[i] == 0.0 || X[i].y <= top + 1.001;
+        }
+    }
+
+    together = together / static_cast<double>(n);
+
+    together.y -= dt;
+
+    {
+        const double limit = (touching ? MaxStep : MaxFall) / dt;
+        const double mean = together.length();
+
+        if (mean > limit)
+            together *= limit / mean;
+    }
 
     for (int i = 0; i < n; ++i)
     {
@@ -1677,10 +1960,14 @@ void RopeSimulation::step()
         // energy out is inside the rope and in its contacts.
         V[i].y -= dt;
 
-        const double speed = V[i].length();
+        Vec3 own = V[i] - together;
+
+        const double speed = own.length();
 
         if (speed * dt > MaxStep)
-            V[i] *= MaxStep / (speed * dt);
+            own *= MaxStep / (speed * dt);
+
+        V[i] = together + own;
 
         P[i] = X[i] + V[i] * dt;
     }
@@ -1743,18 +2030,46 @@ void RopeSimulation::step()
 
     /*
      * The rope's own damping: the fibres rub against each other as it
-     * bends, so motion of one part against the next dies away. The rope as
-     * a whole keeps moving: this cannot slow a fall. On the velocities once
-     * the step is over, so it can only ever take energy out.
+     * bends, so motion of one part against the next dies away. Only that:
+     * a curved rope turning as a solid body has neighbours moving apart in
+     * space but no fibre sliding on another, so the rope's motion as a solid
+     * is taken out first and given back afterwards, whole. The rubbing has
+     * moved a little of the rest into that motion, and that is taken out as
+     * well: what is left is smaller than before and at right angles to the
+     * solid motion. On the velocities once the step is over, so it takes
+     * energy out and, but for a whisper at a point held still, none in.
      */
-    rubAlong(V, n, closed_, fibreRub_, W);
-    rubAlong(Spin, segments, closed_, fibreRub_, nullptr);
+    {
+        Vec3 centre;
+        Vec3 drift;
+        Vec3 turn;
+
+        rigidMotion(X, V, n, centre, drift, turn);
+
+        for (int i = 0; i < n; ++i)
+            V[i] -= drift + Vec3::cross(turn, X[i] - centre);
+
+        rubAlong(V, n, closed_, fibreRub_, W);
+        rubAlong(Spin, segments, closed_, fibreRub_, nullptr);
+
+        Vec3 moved;
+        Vec3 leaked;
+        Vec3 twist;
+
+        rigidMotion(X, V, n, moved, leaked, twist);
+
+        for (int i = 0; i < n; ++i)
+            V[i] += drift + Vec3::cross(turn, X[i] - centre) - leaked - Vec3::cross(twist, X[i] - moved);
+    }
 
     /*
      * Natural fibre takes a set: bent further than its yield, the rope
      * creeps towards the new shape and keeps part of it when let go. The
      * rest shape follows the bending (not the twist), in the frame of the
-     * piece, so it travels with the rope.
+     * piece, so it travels with the rope. Creep is slow: over the seconds
+     * this watches it only shows while the rope is being moved. A rope
+     * lying still has stopped taking it, or it would go on crawling for
+     * seconds as its shape gave way under it.
      */
     if (setRate_ > 0.0)
     {
@@ -1777,7 +2092,8 @@ void RopeSimulation::step()
             if (amount <= yieldAngle_)
                 continue;
 
-            const double creep = setRate_ * dt * (amount - yieldAngle_) / amount;
+            const double moving = std::min(V[(i + 1) % n].length() / SetSpeed, 1.0);
+            const double creep = moving * setRate_ * dt * (amount - yieldAngle_) / amount;
 
             Shape[i].x += bx * creep;
             Shape[i].y += by * creep;
@@ -1849,6 +2165,20 @@ bool RopeInHand::resting() const
     const std::lock_guard<std::mutex> lock(mutex_);
 
     return stopped_ || (rope_.atRest() && rope_.heldPoint() < 0);
+}
+
+void RopeInHand::cut(int first, int count)
+{
+    {
+        const std::lock_guard<std::mutex> lock(mutex_);
+
+        rope_.cut(first, count);
+
+        ++version_;
+        stopped_ = false;
+    }
+
+    wake_.notify_all();
 }
 
 void RopeInHand::hold(int index, const Vec3 &target, bool under)
@@ -1994,6 +2324,15 @@ constexpr double LayLength = 6.4;
 constexpr int BraidYarns = 8;
 constexpr double BraidAngle = 50.0 * Pi / 180.0;
 constexpr double YarnHeight = 0.18;
+
+// a cut end: nothing holds the strands together over the last of the rope
+// (radii), so they open this much there
+constexpr double EndFlareArc = 1.5;
+constexpr double EndFlare = 0.14;
+
+// the face of a cut end, in the texture coordinate w: the shader draws its
+// fibres seen end on
+constexpr float EndGrain = -0.25f;
 
 double wrapAngle(double a)
 {
@@ -2312,11 +2651,15 @@ void addLooseFibres(KnotMath::Mesh &mesh, bool closed, double radius, bool braid
     // fibres per radius of rope, their length and thickness (in radii)
     // (a moving rope: half of them, the same ones)
     const double density = (braided ? 9.0 : 16.0) * (quick ? 0.4 : 1.0);
+
+    // a cut end has a tuft of fibre ends standing out of it, shared by the two
+    const int tufts = closed ? 0 : (quick ? 300 : 900);
     const double shortest = braided ? 0.1 : 0.16;
     const double longest = braided ? 0.5 : 1.3;
     const double thickness = braided ? 0.009 : 0.012;
 
-    const int count = std::clamp(static_cast<int>(density * length / radius), 0, 40000);
+    const int along = std::clamp(static_cast<int>(density * length / radius), 0, 40000);
+    const int count = along + tufts;
 
     constexpr int Pieces = 5;
     constexpr int Sides = 3;
@@ -2373,7 +2716,9 @@ void addLooseFibres(KnotMath::Mesh &mesh, bool closed, double radius, bool braid
             random();
             random();
 
-            const int ring = std::min(static_cast<int>(random() * n), n - 1);
+            const bool tuft = f >= along;
+
+            const int ring = tuft ? ((f - along) % 2 == 0 ? 0 : n - 1) : std::min(static_cast<int>(random() * n), n - 1);
 
             // on top of a strand or yarn, never down in a groove
             int segment = std::min(static_cast<int>(random() * segments), segments - 1);
@@ -2388,17 +2733,17 @@ void addLooseFibres(KnotMath::Mesh &mesh, bool closed, double radius, bool braid
 
             const int root = ring * segments + segment;
 
-            const Vec3 base(positions[3 * root], positions[3 * root + 1], positions[3 * root + 2]);
-            const Vec3 normal = Vec3(normals[3 * root], normals[3 * root + 1], normals[3 * root + 2]).normalized();
+            Vec3 base(positions[3 * root], positions[3 * root + 1], positions[3 * root + 2]);
+            Vec3 normal = Vec3(normals[3 * root], normals[3 * root + 1], normals[3 * root + 2]).normalized();
 
             const int before = closed ? (ring - 1 + n) % n : std::max(ring - 1, 0);
             const int after = closed ? (ring + 1) % n : std::min(ring + 1, n - 1);
 
-            Vec3 along = centreAt(after) - centreAt(before);
+            Vec3 onward = centreAt(after) - centreAt(before);
 
-            along = (along - normal * Vec3::dot(along, normal)).normalized();
+            onward = (onward - normal * Vec3::dot(onward, normal)).normalized();
 
-            const Vec3 side = Vec3::cross(normal, along);
+            Vec3 side = Vec3::cross(normal, onward);
 
             // either way along the rope, turned a little off it, lifting off
             const double turn = (random() - 0.5) * (braided ? 1.6 : 1.0);
@@ -2406,12 +2751,32 @@ void addLooseFibres(KnotMath::Mesh &mesh, bool closed, double radius, bool braid
             const double way = random() < 0.5 ? -1.0 : 1.0;
 
             Vec3 direction =
-                (along * (way * std::cos(turn)) + side * std::sin(turn)) * std::cos(lift) +
+                (onward * (way * std::cos(turn)) + side * std::sin(turn)) * std::cos(lift) +
                 normal * std::sin(lift);
 
             // most fibres short, a few long (the longest fibre ends of hemp)
             const double u = random();
-            const double fibre = (shortest + (longest - shortest) * u * u * u) * radius;
+
+            double fibre = (shortest + (longest - shortest) * u * u * u) * radius;
+
+            // out of the face of a cut end, spreading from its middle: the
+            // nearer the rim, the more
+            if (tuft)
+            {
+                const Vec3 middle = centreAt(ring);
+                const Vec3 out = (ring == 0 ? centreAt(0) - centreAt(1) : centreAt(n - 1) - centreAt(n - 2)).normalized();
+
+                const Vec3 rim = base - middle;
+                const double place = std::sqrt(random());
+
+                base = middle + rim * place;
+                normal = out;
+                side = Vec3::cross(out, rim.normalized());
+
+                direction = (out + rim.normalized() * (0.1 + 0.8 * place * random()) + side * (random() - 0.5)).normalized();
+
+                fibre = (0.35 + 0.65 * random()) * fibre;
+            }
 
             // it curls: turns a little at every piece, about the normal and away
             const double curl = (random() - 0.5) * 0.9;
@@ -2635,6 +3000,17 @@ KnotMath::Mesh buildRopeMesh(
 
             double phase = s * phaseScale + 0.09 * wave(s, 0.37, 0.4) + 0.05 * wave(s, 1.13, 2.2);
 
+            // how far the strands open here (a cut end)
+            double flare = 1.0;
+
+            if (!closed)
+            {
+                const double open = 1.0 - std::min(s, total - s) / (EndFlareArc * radius);
+
+                if (open > 0.0)
+                    flare = 1.0 + EndFlare * open * open;
+            }
+
             // how far the material has turned here
             if (!ringFrames.isEmpty())
             {
@@ -2720,7 +3096,7 @@ KnotMath::Mesh buildRopeMesh(
                     open[index] = float(0.55 + 0.45 * std::sqrt(height));
                 }
 
-                const Vec3 position = centre + radial * (rho * radius);
+                const Vec3 position = centre + radial * (rho * flare * radius);
 
                 positions[3 * index] = float(position.x);
                 positions[3 * index + 1] = float(position.y);
@@ -2775,6 +3151,51 @@ KnotMath::Mesh buildRopeMesh(
             }
         }
     });
+
+    /*
+     * The face of a cut end was made for a round tube, with a tube's texture
+     * coordinates: it is laid over the end of the strands instead, and marked
+     * for the shader.
+     */
+    if (!closed)
+    {
+        for (int cap = 0; cap < 2; ++cap)
+        {
+            const int ring = cap == 0 ? 0 : n - 1;
+            const int middle = ringVertices + cap * (segments + 1);
+
+            const auto vertex = [positions](int v)
+            {
+                return Vec3(positions[3 * v], positions[3 * v + 1], positions[3 * v + 2]);
+            };
+
+            // places on the face, in radii
+            const Vec3 centre = vertex(middle);
+            const Vec3 across = (vertex(ring * segments) - centre).normalized();
+            const Vec3 out(normals[3 * middle], normals[3 * middle + 1], normals[3 * middle + 2]);
+            const Vec3 up = Vec3::cross(out, across);
+
+            for (int j = -1; j < segments; ++j)
+            {
+                const int v = middle + 1 + j;
+                const int rim = ring * segments + std::max(j, 0);
+
+                if (j >= 0)
+                {
+                    positions[3 * v] = positions[3 * rim];
+                    positions[3 * v + 1] = positions[3 * rim + 1];
+                    positions[3 * v + 2] = positions[3 * rim + 2];
+                }
+
+                const Vec3 place = vertex(v) - centre;
+
+                texcoords[4 * v] = float(Vec3::dot(place, across) / radius);
+                texcoords[4 * v + 1] = float(Vec3::dot(place, up) / radius);
+                texcoords[4 * v + 2] = texcoords[4 * rim + 2];
+                texcoords[4 * v + 3] = EndGrain;
+            }
+        }
+    }
 
     /*
      * What the rest of the rope hides from each point: the view factor of

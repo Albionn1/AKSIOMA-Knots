@@ -1375,7 +1375,16 @@ QVector<KnotDiagram> diagramsFromCurve(
     QVector<Vec3> smooth = curve;
 
     if (smooth.size() >= 8 && smooth.size() < 300)
+    {
         smooth = refineCurve(smooth, (300 + smooth.size() - 1) / smooth.size(), true);
+
+        // a spline can carry one strand across another: the corners then stay
+        const AlexanderPolynomial before = computeAlexanderPolynomial(curve);
+        const AlexanderPolynomial after = computeAlexanderPolynomial(smooth);
+
+        if (before.valid && (!after.valid || before.text != after.text))
+            smooth = curve;
+    }
 
     QVector<QVector<Vec3>> projected;
     QVector<QVector<CrossingInfo>> crossings;

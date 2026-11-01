@@ -25,8 +25,9 @@ namespace KnotMath
  * On each side, the arc that was cut out has been replaced by an arc with a
  * single highest point, and both are unknotted arcs of the same half-space
  * with the same ends - so closing each side up gives back K1 and K2. That is
- * the definition of K1 # K2 (with the orientations of the two curves; for
- * the knots up to 8 crossings the orientation does not matter).
+ * the definition of K1 # K2, with the orientations of the two curves. The
+ * orientation matters only for a non-invertible knot, and those start at 8
+ * crossings with 8_17: for them K1 # K2 can mean two different knots.
  */
 struct ConnectedSum
 {

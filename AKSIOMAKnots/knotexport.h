@@ -54,8 +54,12 @@ struct KnotFile
     // The curve as shown (multi-strand structures: the first component).
     QVector<KnotMath::Vec3> points;
 
-    // The shape was relaxed or scrambled: open it from the points.
+    // The shape was relaxed or scrambled: the knot is built, then takes this
+    // shape, point for point.
     bool shapeChanged = false;
+
+    // something to tell whoever opens it
+    QString warning;
 
     // false: the file has no appearance (keep the current one)
     bool hasAppearance = false;
@@ -131,6 +135,9 @@ QString coordinatesText(
 
 struct ReportData
 {
+    // what is known of the knot, as (name, value) rows
+    QVector<QPair<QString, QString>> facts;
+
     QString name;
     KnotMath::Invariants invariants;
     int pointCount = 0;

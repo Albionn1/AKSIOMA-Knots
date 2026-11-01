@@ -1,5 +1,7 @@
 #include "knotbrowser.h"
 
+#include "commandpalette.h"
+#include "controlhelp.h"
 #include "theme.h"
 
 #include "knotglwidget.h"
@@ -72,20 +74,15 @@ private:
 namespace
 {
 
-// "8_19", "8 19", "819", "8₁₉" all become "819"; names are compared this way
-QString searchKey(QString text)
+// "8_19", "8 19", "819", "8₁₉" all become "819", and "tërfil" "terfil" (not
+// everyone has an ë on the keyboard); names are compared this way
+QString searchKey(const QString &text)
 {
-    static const QString subscripts = QStringLiteral("₀₁₂₃₄₅₆₇₈₉");
-
     QString key;
 
-    for (const QChar c : text.toLower())
+    for (const QChar c : Palette::folded(text))
     {
-        const int sub = subscripts.indexOf(c);
-
-        if (sub >= 0)
-            key += QChar('0' + sub);
-        else if (c.isLetterOrNumber())
+        if (c.isLetterOrNumber())
             key += c;
     }
 
@@ -98,7 +95,7 @@ KnotBrowserDialog::KnotBrowserDialog(const QString &current, QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("Knot Browser"));
-    resize(1080, 680);
+    ControlHelp::fitToScreen(this, 1080, 680);
 
     QGuiApplication::setOverrideCursor(Qt::WaitCursor);
     const KnotMath::KnotTable &table = KnotMath::KnotTable::instance();
@@ -265,6 +262,54 @@ KnotBrowserDialog::KnotBrowserDialog(const QString &current, QWidget *parent)
     search_->setFocus();
 }
 
+QVector<QPair<QString, QString>> KnotBrowserDialog::knotFacts(
+    const KnotMath::KnotTableRecord &r)
+{
+    QVector<QPair<QString, QString>> facts;
+
+    facts.push_back({tr("Alternating"), r.alternating ? tr("yes") : tr("no")});
+    facts.push_back({tr("Unknotting number"), r.unknotting.isEmpty() ? tr("unknown") : r.unknotting});
+
+    if (r.genus >= 0)
+        facts.push_back({tr("Genus"), QString::number(r.genus)});
+
+    facts.push_back({tr("Signature"),
+                     QString::number(r.signature).replace(QLatin1Char('-'), QChar(0x2212))});
+    facts.push_back({tr("Determinant"), QString::number(r.determinant)});
+    facts.push_back({tr("Fibered"), r.fibered ? tr("yes") : tr("no")});
+
+    if (!r.symmetry.isEmpty())
+        facts.push_back({tr("Symmetry"), symmetryText(r.symmetry)});
+
+    facts.push_back({tr("Hyperbolic volume"),
+                     r.volume > 0.0 ? QString::number(r.volume, 'f', 6) : tr("not hyperbolic")});
+
+    if (r.braidIndex > 0)
+        facts.push_back({tr("Braid index"), QString::number(r.braidIndex)});
+
+    return facts;
+}
+
+QString KnotBrowserDialog::symmetryText(const QString &symmetry)
+{
+    if (symmetry == QStringLiteral("chiral"))
+        return tr("chiral");
+
+    if (symmetry == QStringLiteral("reversible"))
+        return tr("reversible");
+
+    if (symmetry == QStringLiteral("fully amphicheiral"))
+        return tr("fully amphicheiral");
+
+    if (symmetry == QStringLiteral("positive amphicheiral"))
+        return tr("positive amphicheiral");
+
+    if (symmetry == QStringLiteral("negative amphicheiral"))
+        return tr("negative amphicheiral");
+
+    return symmetry;
+}
+
 QString KnotBrowserDialog::selectedKnot() const
 {
     const KnotMath::KnotTable &table = KnotMath::KnotTable::instance();
@@ -380,25 +425,9 @@ void KnotBrowserDialog::showKnot(int tableIndex)
         html += row(tr("Family"), family);
 
     html += row(tr("Crossing number"), QString::number(r.crossings));
-    html += row(tr("Alternating"), r.alternating ? tr("yes") : tr("no"));
-    html += row(tr("Unknotting number"), r.unknotting.isEmpty() ? tr("unknown") : r.unknotting);
 
-    if (r.genus >= 0)
-        html += row(tr("Genus"), QString::number(r.genus));
-
-    html += row(tr("Signature"),
-                QString::number(r.signature).replace(QLatin1Char('-'), QChar(0x2212)));
-    html += row(tr("Determinant"), QString::number(r.determinant));
-    html += row(tr("Fibered"), r.fibered ? tr("yes") : tr("no"));
-
-    if (!r.symmetry.isEmpty())
-        html += row(tr("Symmetry"), r.symmetry);
-
-    html += row(tr("Hyperbolic volume"),
-                r.volume > 0.0 ? QString::number(r.volume, 'f', 6) : tr("not hyperbolic"));
-
-    if (r.braidIndex > 0)
-        html += row(tr("Braid index"), QString::number(r.braidIndex));
+    for (const QPair<QString, QString> &fact : knotFacts(r))
+        html += row(fact.first, fact.second);
 
     if (!r.braidNotation.isEmpty())
         html += row(tr("Braid word"), r.braidNotation);

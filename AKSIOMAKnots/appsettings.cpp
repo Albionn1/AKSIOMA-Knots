@@ -135,6 +135,38 @@ void setRememberWindow(
     QSettings().setValue(RememberWindowKey, enabled);
 }
 
+bool reduceMotion()
+{
+    return QSettings().value(QStringLiteral("reduceMotion"), false).toBool();
+}
+
+void setReduceMotion(
+    bool enabled)
+{
+    QSettings().setValue(QStringLiteral("reduceMotion"), enabled);
+}
+
+QString logPath()
+{
+    const QString folder =
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+
+    QDir().mkpath(folder);
+
+    return folder + QStringLiteral("/aksioma.log");
+}
+
+bool softwareGraphics()
+{
+    return QSettings().value(QStringLiteral("softwareGraphics"), false).toBool();
+}
+
+void setSoftwareGraphics(
+    bool enabled)
+{
+    QSettings().setValue(QStringLiteral("softwareGraphics"), enabled);
+}
+
 QString lastFolder()
 {
     return QSettings()
@@ -291,7 +323,17 @@ void setLighting(
 
 void restoreDefaults()
 {
+    // settings go back; what is simply remembered stays
+    const QStringList recent = recentFiles();
+    const bool seen = tourSeen();
+
     QSettings().clear();
+
+    if (!recent.isEmpty())
+        QSettings().setValue(QStringLiteral("recentFiles"), recent);
+
+    if (seen)
+        setTourSeen();
 }
 
 void installLanguage(

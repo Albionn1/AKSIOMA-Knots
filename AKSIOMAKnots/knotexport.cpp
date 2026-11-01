@@ -113,8 +113,18 @@ bool readTextKnot(const QString &content, const QString &baseName, KnotFile &fil
 
     QStringList lines;
 
+    int components = 0;
+
     for (const QString &line : content.split(QRegularExpression(QStringLiteral("[\\r\\n]+"))))
     {
+        // An exported link has several curves. Run together they would be one
+        // curve that nobody drew, so the first is the one that is opened.
+        if (line.trimmed().startsWith(QStringLiteral("# component")) && ++components > 1)
+        {
+            file.warning = exportTr("This file holds several curves: only the first was opened.");
+            break;
+        }
+
         if (numberStart.match(line).hasMatch())
             lines.push_back(line.trimmed());
     }
@@ -286,9 +296,15 @@ bool readKnotFile(const QString &path, KnotFile &file, QString &error)
         file.preset == KnotMath::Preset::KnotTable &&
         KnotMath::KnotTable::instance().indexOf(file.tableKnot) < 0;
 
-    // a type (or table knot) this version does not know, or a changed
-    // shape: the points
-    if (!knownType || unknownTableKnot || file.shapeChanged)
+    // a changed shape needs its points (the knot itself keeps its name)
+    if (file.shapeChanged && file.points.size() < 3)
+    {
+        error = exportTr("The file contains no curve.");
+        return false;
+    }
+
+    // a type (or table knot) this version does not know: the points
+    if (!knownType || unknownTableKnot)
     {
         if (file.points.size() < 3)
         {
@@ -633,9 +649,15 @@ QString reportText(const ReportData &data)
     if (inv.knownCrossingNumber >= 0)
         text += row(exportTr("Crossing number"), QString::number(inv.knownCrossingNumber));
 
+    for (const QPair<QString, QString> &fact : data.facts)
+        text += row(fact.first, fact.second);
+
     text += QLatin1Char('\n');
 
     text += row(exportTr("Writhe of the 3D curve"), QString::number(inv.writhe, 'f', 5));
+
+    if (inv.crossingNumber >= 0)
+        text += row(exportTr("Writhe of the diagram"), QString::number(inv.signedCrossingSum));
 
     if (inv.crossingNumber >= 0)
         text += row(exportTr("Crossings in the XY projection"), QString::number(inv.crossingNumber));

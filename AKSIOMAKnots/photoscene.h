@@ -2,6 +2,7 @@
 #define PHOTOSCENE_H
 
 #include <QColor>
+#include <QImage>
 #include <QMatrix4x4>
 #include <QString>
 #include <QVector3D>
@@ -165,6 +166,18 @@ struct Environment
 
 // Reads a Radiance .hdr picture (RGBE, run-length encoded or flat) and
 // finds its sun. About half a second for 4096 x 2048.
+/*
+ * Reading a scene's pictures takes a noticeable moment, and on an old laptop
+ * several seconds. preloadScene() does it on any thread and keeps them; the
+ * window then takes them without waiting (preloadedEnvironment,
+ * preloadedPicture read the file if nothing was kept), and forgetPreloaded()
+ * gives the memory back once they are on the graphics card.
+ */
+void preloadScene(const SceneInfo &info);
+void forgetPreloaded();
+
+QImage preloadedPicture(const QString &path);
+
 Environment loadEnvironment(
     const QString &path);
 

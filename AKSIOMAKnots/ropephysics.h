@@ -162,6 +162,15 @@ public:
     void takeSet(double share);
     bool closed() const { return closed_; }
 
+    // Cut a closed rope: it keeps `count` points from `first` on (round the
+    // end, if need be) and goes on as it was, with two ends: the same bends,
+    // the same fibres, the same motion. Not while it is held.
+    void cut(int first, int count);
+
+    // The rope stays inside this rectangle of the table (x and z, in radii),
+    // or inside what it covers already, if that is more.
+    void stayWithin(double left, double right, double back, double front);
+
     void step();
 
     // no point faster than the rest speed for a while
@@ -264,6 +273,15 @@ private:
     int handArc_ = 6;
     KnotMath::Vec3 hand_;
 
+    // what one pass of the rod asks of every point and piece
+    QVector<KnotMath::Vec3> rodMove_;
+    QVector<KnotMath::Vec3> rodTurn_;
+
+    // how far the rope may go across the table
+    bool fenced_ = false;
+    KnotMath::Vec3 fenceLow_;
+    KnotMath::Vec3 fenceHigh_;
+
     // where the hand really is: it follows the mouse smoothly
     KnotMath::Vec3 handEased_;
     double handEase_ = 1.0;
@@ -293,6 +311,9 @@ public:
 
     bool closed() const;
     bool resting() const;
+
+    // (see RopeSimulation::cut)
+    void cut(int first, int count);
 
     void hold(int index, const KnotMath::Vec3 &target, bool under);
     void moveHand(const KnotMath::Vec3 &target);

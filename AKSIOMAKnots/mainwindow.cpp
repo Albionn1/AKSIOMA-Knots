@@ -22,6 +22,7 @@
 #include <QAbstractSpinBox>
 #include <QButtonGroup>
 #include <QDesktopServices>
+#include <QDateTime>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -53,6 +54,12 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSignalBlocker>
+#include <QElapsedTimer>
+#include <QClipboard>
+#include <QLockFile>
+#include <QPainter>
+#include <QProcess>
+#include <QSysInfo>
 #include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
@@ -90,22 +97,123 @@ const char *const ExampleCurve =
     "y=(2+cos(2*t))*sin(3*t);\n"
     "z=sin(4*t);";
 
-// where the knot being worked on is kept, against a crash
-QString autosavePath()
+QString autosaveFolder()
 {
     const QString folder =
         QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
 
     QDir().mkpath(folder);
 
-    return folder + QStringLiteral("/autosave.aknot");
+    return folder;
+}
+
+// Where the knot being worked on is kept, against a crash. Every running copy
+// of the app has a file of its own, and holds a lock beside it while it runs:
+// double-clicking a second knot starts a second copy, and that copy must not
+// take the first one's autosave for what a crash left behind.
+QString autosavePath()
+{
+    return autosaveFolder() +
+           QStringLiteral("/autosave-%1.aknot").arg(QCoreApplication::applicationPid());
+}
+
+QString lockPathOf(const QString &autosave)
+{
+    return autosave.left(autosave.size() - 5) + QStringLiteral("lock");
+}
+
+// (only a process that has ended lets go: a lock is never stale by its age)
+QLockFile &autosaveLock()
+{
+    static QLockFile lock(lockPathOf(autosavePath()));
+
+    lock.setStaleLockTime(0);
+
+    return lock;
 }
 
 // what a crash left behind, out of the way of the next autosave until the
 // user has decided about it
 QString recoveredPath()
 {
-    return QFileInfo(autosavePath()).absolutePath() + QStringLiteral("/recovered.aknot");
+    return autosaveFolder() + QStringLiteral("/recovered.aknot");
+}
+
+// the copy that offers the recovered knot holds this until it is answered
+QLockFile &recoveredLock()
+{
+    static QLockFile lock(lockPathOf(recoveredPath()));
+
+    lock.setStaleLockTime(0);
+
+    return lock;
+}
+
+// The workers running now: they use things that do not outlive the program,
+// so the last window waits for them.
+QList<QPointer<QThread>> &runningWorkers()
+{
+    static QList<QPointer<QThread>> workers;
+
+    return workers;
+}
+
+void noteWorker(QThread *worker)
+{
+    QList<QPointer<QThread>> &workers = runningWorkers();
+
+    workers.removeAll(QPointer<QThread>());
+    workers.push_back(worker);
+}
+
+// A knot that was let go stays here for a week, in case that was a mistake.
+const int DiscardedDays = 7;
+
+QString discardedFolder()
+{
+    const QString folder = autosaveFolder() + QStringLiteral("/discarded");
+
+    QDir().mkpath(folder);
+
+    return folder;
+}
+
+// out of the way, but not gone
+void setAside(const QString &path)
+{
+    const QString name =
+        QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss-zzz"));
+
+    QFile::rename(path, discardedFolder() + QLatin1Char('/') + name + QStringLiteral(".aknot"));
+}
+
+void clearOldDiscarded()
+{
+    const QDateTime limit = QDateTime::currentDateTime().addDays(-DiscardedDays);
+
+    const QFileInfoList files =
+        QDir(discardedFolder()).entryInfoList({QStringLiteral("*.aknot")}, QDir::Files);
+
+    for (const QFileInfo &file : files)
+    {
+        if (file.lastModified() < limit)
+            QFile::remove(file.absoluteFilePath());
+    }
+}
+
+bool sameCurve(
+    const QVector<KnotMath::Vec3> &a,
+    const QVector<KnotMath::Vec3> &b)
+{
+    return a.size() == b.size() &&
+           std::equal(
+               a.cbegin(),
+               a.cend(),
+               b.cbegin(),
+               [](const KnotMath::Vec3 &p, const KnotMath::Vec3 &q)
+               {
+                   return p.x == q.x && p.y == q.y && p.z == q.z;
+               });
 }
 
 // A hint that makes way: all of its text or, in too little room, nothing.
@@ -128,6 +236,39 @@ protected:
     }
 };
 
+// A line that takes the room there is, and ends in dots when it needs more.
+class ElidingLabel final
+    : public QLabel
+{
+public:
+    using QLabel::QLabel;
+
+    QSize minimumSizeHint() const override
+    {
+        return QSize(0, QLabel::minimumSizeHint().height());
+    }
+
+    QSize sizeHint() const override
+    {
+        return QSize(0, QLabel::sizeHint().height());
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+
+        style()->drawItemText(
+            &painter,
+            contentsRect(),
+            Qt::AlignVCenter | Qt::AlignLeft,
+            palette(),
+            isEnabled(),
+            fontMetrics().elidedText(text(), Qt::ElideRight, contentsRect().width()),
+            foregroundRole());
+    }
+};
+
 } // namespace
 
 MainWindow::MainWindow(
@@ -143,11 +284,6 @@ MainWindow::MainWindow(
 
     setWindowTitle(
         QGuiApplication::applicationDisplayName());
-
-    setMinimumSize(
-        QSize(
-            1000,
-            650));
 
     QWidget *central = new QWidget(this);
 
@@ -166,7 +302,9 @@ MainWindow::MainWindow(
     topBar->setAttribute(Qt::WA_StyledBackground, true);
     topBar->setFixedHeight(60);
 
-    QHBoxLayout *topLayout = new QHBoxLayout(topBar);
+    topLayout_ = new QHBoxLayout(topBar);
+
+    QHBoxLayout *topLayout = topLayout_;
 
     topLayout->setContentsMargins(24, 0, 20, 0);
     topLayout->setSpacing(14);
@@ -175,9 +313,9 @@ MainWindow::MainWindow(
 
     brandLabel->setObjectName(QStringLiteral("Brand"));
 
-    QLabel *brandSub = new QLabel(tr("KNOTS"), topBar);
+    brandSub_ = new QLabel(tr("KNOTS"), topBar);
 
-    brandSub->setObjectName(QStringLiteral("BrandSub"));
+    brandSub_->setObjectName(QStringLiteral("BrandSub"));
 
     QFrame *brandDivider = new QFrame(topBar);
 
@@ -196,16 +334,23 @@ MainWindow::MainWindow(
     fileButton->setCursor(Qt::PointingHandCursor);
     fileButton->setToolTip(tr("Open and save knots, export pictures and data"));
 
+    QPushButton *helpButton = new QPushButton(tr("Help"), topBar);
+
+    helpButton->setObjectName(QStringLiteral("TopBarButton"));
+    helpButton->setCursor(Qt::PointingHandCursor);
+    helpButton->setToolTip(tr("The manual, keyboard shortcuts and the tour"));
+
     {
         QMenu *fileMenu = new QMenu(fileButton);
 
         fileMenu_ = fileMenu;
 
-        auto addFileAction = [this, fileMenu](const QString &text,
-                                              const QKeySequence &shortcut,
-                                              void (MainWindow::*slot)())
+        auto addFileAction = [this](QMenu *menu,
+                                    const QString &text,
+                                    const QKeySequence &shortcut,
+                                    void (MainWindow::*slot)())
         {
-            QAction *action = fileMenu->addAction(text);
+            QAction *action = menu->addAction(text);
 
             action->setShortcut(shortcut);
 
@@ -217,38 +362,58 @@ MainWindow::MainWindow(
             return action;
         };
 
-        undoAction_ = addFileAction(tr("Undo"), QKeySequence::Undo, &MainWindow::undo);
-        redoAction_ = addFileAction(tr("Redo"), QKeySequence::Redo, &MainWindow::redo);
+        undoAction_ = addFileAction(fileMenu, tr("Undo"), QKeySequence::Undo, &MainWindow::undo);
+        redoAction_ = addFileAction(fileMenu, tr("Redo"), QKeySequence::Redo, &MainWindow::redo);
 
         fileMenu->addSeparator();
 
-        addFileAction(tr("Find anything..."), QKeySequence(Qt::CTRL | Qt::Key_K), &MainWindow::openCommandPalette);
-
-        fileMenu->addSeparator();
-
-        addFileAction(tr("Open knot..."), QKeySequence::Open, &MainWindow::openKnotFile);
+        addFileAction(fileMenu, tr("Open knot..."), QKeySequence::Open, &MainWindow::openKnotFile);
 
         recentMenu_ = fileMenu->addMenu(tr("Open recent"));
 
         connect(recentMenu_, &QMenu::aboutToShow, this, &MainWindow::fillRecentMenu);
 
-        addFileAction(tr("Save knot..."), QKeySequence::Save, &MainWindow::saveKnotFile);
+        addFileAction(fileMenu, tr("Save knot"), QKeySequence::Save, &MainWindow::saveKnotFile);
+        addFileAction(fileMenu, tr("Save as..."), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S), &MainWindow::saveKnotFileAs);
 
         fileMenu->addSeparator();
 
-        addFileAction(tr("Export 3D picture..."),
+        addFileAction(fileMenu,
+                      tr("Export 3D picture..."),
                       QKeySequence(Qt::CTRL | Qt::Key_E),
                       &MainWindow::exportViewImage);
-        addFileAction(tr("Export knot diagram..."),
+        addFileAction(fileMenu,
+                      tr("Export knot diagram..."),
                       QKeySequence(Qt::CTRL | Qt::Key_D),
                       &MainWindow::exportDiagram);
-        addFileAction(tr("Export coordinates..."), QKeySequence(), &MainWindow::exportCoordinates);
-        addFileAction(tr("Export analysis report..."), QKeySequence(), &MainWindow::exportReport);
+        addFileAction(fileMenu, tr("Export coordinates..."), QKeySequence(), &MainWindow::exportCoordinates);
+        addFileAction(fileMenu, tr("Export analysis report..."), QKeySequence(), &MainWindow::exportReport);
 
-        fileMenu->addSeparator();
+        QMenu *helpMenu = new QMenu(helpButton);
 
-        addFileAction(tr("Keyboard shortcuts"), QKeySequence(Qt::Key_F1), &MainWindow::showShortcuts);
-        addFileAction(tr("Show the tour"), QKeySequence(), &MainWindow::startTour);
+        addFileAction(helpMenu, tr("Find anything..."), QKeySequence(Qt::CTRL | Qt::Key_K), &MainWindow::openCommandPalette);
+
+        helpMenu->addSeparator();
+
+        addFileAction(helpMenu, tr("User manual"), QKeySequence(), &MainWindow::openManual);
+        addFileAction(helpMenu, tr("Keyboard shortcuts"), QKeySequence(Qt::Key_F1), &MainWindow::showShortcuts);
+        addFileAction(helpMenu, tr("Show the tour"), QKeySequence(), &MainWindow::startTour);
+
+        helpMenu->addSeparator();
+
+        addFileAction(helpMenu, tr("Copy diagnostic information"), QKeySequence(), &MainWindow::copyDiagnostics);
+
+        helpMenu->addSeparator();
+
+        addFileAction(helpMenu, tr("About"), QKeySequence(), &MainWindow::showAbout);
+
+        connect(helpButton,
+                &QPushButton::clicked,
+                helpMenu,
+                [helpButton, helpMenu]()
+                {
+                    helpMenu->popup(helpButton->mapToGlobal(QPoint(0, helpButton->height())));
+                });
 
         // Opened by hand, not with setMenu(): a button with a menu keeps
         // room for a menu arrow and pushed its text out on the left.
@@ -290,17 +455,11 @@ MainWindow::MainWindow(
     practiceButton->setToolTip(
         tr("Exercises on the knot diagram: tricolouring, crossing signs"));
 
-    QPushButton *aboutButton = new QPushButton(tr("About"), topBar);
-
-    aboutButton->setObjectName(QStringLiteral("TopBarButton"));
-    aboutButton->setCursor(Qt::PointingHandCursor);
-
     connect(settingsButton, &QPushButton::clicked, this, &MainWindow::showSettings);
-    connect(aboutButton, &QPushButton::clicked, this, &MainWindow::showAbout);
     connect(practiceButton, &QPushButton::clicked, this, &MainWindow::openPractice);
 
     topLayout->addWidget(brandLabel);
-    topLayout->addWidget(brandSub);
+    topLayout->addWidget(brandSub_);
     topLayout->addSpacing(6);
     topLayout->addWidget(brandDivider);
     topLayout->addSpacing(6);
@@ -314,7 +473,7 @@ MainWindow::MainWindow(
     topLayout->addSpacing(4);
     topLayout->addWidget(settingsButton);
     topLayout->addSpacing(4);
-    topLayout->addWidget(aboutButton);
+    topLayout->addWidget(helpButton);
 
     rootLayout->addWidget(topBar);
 
@@ -378,6 +537,9 @@ MainWindow::MainWindow(
         noticeAction_ = new QPushButton(noticeBar_);
         noticeAction_->setCursor(Qt::PointingHandCursor);
 
+        noticeOtherAction_ = new QPushButton(noticeBar_);
+        noticeOtherAction_->setCursor(Qt::PointingHandCursor);
+
         noticeClose_ = new QPushButton(QStringLiteral("\u2715"), noticeBar_);
 
         noticeClose_->setObjectName(QStringLiteral("NoticeClose"));
@@ -388,6 +550,7 @@ MainWindow::MainWindow(
         noticeLayout->addWidget(noticeText_, 1);
         noticeLayout->addWidget(noticeProgress_);
         noticeLayout->addWidget(noticeAction_);
+        noticeLayout->addWidget(noticeOtherAction_);
         noticeLayout->addWidget(noticeClose_);
     }
 
@@ -397,19 +560,21 @@ MainWindow::MainWindow(
 
     connect(noticeTimer_, &QTimer::timeout, this, &MainWindow::hideNotice);
 
-    connect(noticeClose_, &QPushButton::clicked, this, [this]()
-    {
-        const std::function<void()> dismissed = noticeDismissed_;
-
-        hideNotice();
-
-        if (dismissed)
-            dismissed();
-    });
+    connect(noticeClose_, &QPushButton::clicked, this, &MainWindow::hideNotice);
 
     connect(noticeAction_, &QPushButton::clicked, this, [this]()
     {
         const std::function<void()> action = noticeDo_;
+
+        hideNotice();
+
+        if (action)
+            action();
+    });
+
+    connect(noticeOtherAction_, &QPushButton::clicked, this, [this]()
+    {
+        const std::function<void()> action = noticeOther_;
 
         hideNotice();
 
@@ -502,13 +667,26 @@ MainWindow::MainWindow(
         static_cast<int>(Photo::Scene::Sneaker));
 
     photoSceneCombo_->setToolTip(tr("Where the knot is photographed."));
+    photoSceneCombo_->setAccessibleName(tr("Where the knot is photographed."));
     photoSceneCombo_->setVisible(false);
 
     connect(
         photoButton_,
         &QPushButton::toggled,
         this,
-        [this]() { applyPhotoMode(); });
+        [this](bool on)
+        {
+            // Foto always opens on the rope on the garden table
+            if (on)
+            {
+                const QSignalBlocker blocker(photoSceneCombo_);
+
+                photoSceneCombo_->setCurrentIndex(
+                    photoSceneCombo_->findData(static_cast<int>(Photo::Scene::LoungeTable)));
+            }
+
+            applyPhotoMode();
+        });
 
     connect(
         photoSceneCombo_,
@@ -529,6 +707,16 @@ MainWindow::MainWindow(
     analysisButton_->setToolTip(tr("Show or hide the analysis panel."));
 
     connect(analysisButton_, &QPushButton::toggled, rightPanel, &QWidget::setVisible);
+
+    connect(
+        analysisButton_,
+        &QPushButton::toggled,
+        this,
+        [this](bool on)
+        {
+            if (on)
+                keepPanelsOnScreen(rightTabs_);
+        });
 
     viewBarLayout->addWidget(analysisButton_);
 
@@ -553,7 +741,7 @@ MainWindow::MainWindow(
     settingsDialog_ = new QDialog(this);
 
     settingsDialog_->setWindowTitle(tr("Settings"));
-    settingsDialog_->resize(420, 640);
+    ControlHelp::fitToScreen(settingsDialog_, 420, 640);
 
     QVBoxLayout *settingsLayout = new QVBoxLayout(settingsDialog_);
 
@@ -601,17 +789,29 @@ MainWindow::MainWindow(
             QKeySequence(Qt::Key_Escape),
             this);
 
-    leaveFullScreenShortcut_->setEnabled(
-        false);
-
+    // Esc lets go of what is going on, one thing at a time
     connect(
         leaveFullScreenShortcut_,
         &QShortcut::activated,
         this,
         [this]()
         {
-            if (isFullScreen())
+            if (grabEnabled())
+            {
+                grabButton_->setChecked(false);
+            }
+            else if (relaxRunning_)
+            {
+                pauseRelaxation();
+            }
+            else if (unknotActive_ && unknotTimer_->isActive())
+            {
+                unknotPlayPause();
+            }
+            else if (isFullScreen())
+            {
                 toggleFullScreen();
+            }
         });
 
     /*
@@ -770,13 +970,13 @@ MainWindow::MainWindow(
         materialCombo_,
         QOverload<int>::of(&QComboBox::currentIndexChanged),
         this,
-        [this](int material)
+        [this](int)
         {
             // every material starts with a fitting shine
-            static const int defaultShine[] = {70, 40, 65, 10};
+            static const int defaultShine[] = {70, 40, 65, 0};
 
             metallicSlider_->setValue(
-                defaultShine[std::clamp(material, 0, 3)]);
+                defaultShine[std::clamp(materialCombo_->currentData().toInt(), 0, 3)]);
 
             applySurface();
             noteChange();
@@ -1069,6 +1269,17 @@ MainWindow::MainWindow(
     // for Space, the arrows and ? wherever the keyboard is
     qApp->installEventFilter(this);
 
+    // a keyboard user sees where the keyboard is; a click draws nothing
+    connect(
+        qApp,
+        &QApplication::focusChanged,
+        this,
+        [this](QWidget *before, QWidget *now)
+        {
+            markKeyboardFocus(before, false);
+            markKeyboardFocus(now, tabFocused_);
+        });
+
     // the keyboard starts on the view, not on the first button
     glWidget_->setFocus();
 
@@ -1160,6 +1371,7 @@ void addSliderRow(
 
     slider->setRange(minimum, maximum);
     slider->setValue(value);
+    slider->setAccessibleName(caption);
 
     ControlHelp::resetOnDoubleClick(slider, value);
 
@@ -1201,16 +1413,17 @@ QWidget *MainWindow::createKnotBar(
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(10);
 
-    QLabel *caption = new QLabel(tr("KNOT"), bar);
+    knotCaption_ = new QLabel(tr("KNOT"), bar);
 
-    caption->setObjectName(QStringLiteral("Caption"));
+    knotCaption_->setObjectName(QStringLiteral("Caption"));
 
-    layout->addWidget(caption);
+    layout->addWidget(knotCaption_);
 
     presetCombo_ = new QComboBox(bar);
 
     presetCombo_->setMinimumHeight(36);
-    presetCombo_->setMinimumWidth(230);
+    presetCombo_->setMinimumWidth(180);
+    presetCombo_->setAccessibleName(tr("KNOT"));
     presetCombo_->setMaximumWidth(320);
     presetCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
@@ -1246,7 +1459,7 @@ QWidget *MainWindow::createKnotBar(
     for (QSpinBox *spin : {torusPSpin_, torusQSpin_})
     {
         spin->setMinimumHeight(36);
-        spin->setFixedWidth(68);
+        spin->setFixedWidth(58);
     }
 
     torusLayout->addWidget(makeFieldLabel(tr("p"), torusRow_));
@@ -1277,7 +1490,12 @@ QWidget *MainWindow::createKnotBar(
     layout->addWidget(browseKnotsButton_);
     layout->addWidget(drawKnotButton);
 
-    layout->addStretch(1);
+    // which knot this is, and from which file
+    knotTitleLabel_ = new ElidingLabel(bar);
+
+    knotTitleLabel_->setObjectName(QStringLiteral("Subtitle"));
+
+    layout->addWidget(knotTitleLabel_, 1);
 
     return bar;
 }
@@ -1367,6 +1585,9 @@ void MainWindow::railClicked(
     leftPages_->setVisible(!fold);
 
     updateRailActivity();
+
+    if (!fold)
+        keepPanelsOnScreen(leftPages_);
 }
 
 void MainWindow::updateRailActivity()
@@ -1466,20 +1687,74 @@ QWidget *MainWindow::createLeftPanel()
 
     QLabel *syntaxLabel =
         new QLabel(
-            tr("Formulas x=..., y=..., z=... in t, or one 'x, y, z' point per line."),
+            tr("Formulas x=..., y=..., z=... in t, or one 'x, y, z' point per line.") +
+                QLatin1Char(' ') +
+                tr("t runs from 0 to 2π, and the two ends are joined."),
             customBox_);
 
     syntaxLabel->setObjectName(QStringLiteral("Subtitle"));
     syntaxLabel->setWordWrap(true);
+    syntaxLabel->setToolTip(
+        tr("Functions: sin, cos, tan, sec, csc, cot, asin, acos, atan, atan2, sinh, "
+           "cosh, tanh, exp, log (natural), log10, sqrt, abs, sign, floor, ceil, "
+           "min, max, pow, mod. Constants: pi, e. Numbers use a decimal point."));
 
     customLayout->addWidget(syntaxLabel);
+
+    // something that works, to change
+    QPushButton *examplesButton = new QPushButton(tr("Examples"), customBox_);
+
+    examplesButton->setObjectName(QStringLiteral("DisclosureButton"));
+    examplesButton->setCursor(Qt::PointingHandCursor);
+
+    QMenu *examplesMenu = new QMenu(examplesButton);
+
+    auto addExample = [this, examplesMenu](const QString &name, const char *curve)
+    {
+        connect(
+            examplesMenu->addAction(name),
+            &QAction::triggered,
+            this,
+            [this, curve]()
+            {
+                customInputEdit_->setPlainText(QString::fromLatin1(curve));
+
+                generateMesh();
+            });
+    };
+
+    addExample(tr("Trefoil Knot"), "x=sin(t)+2*sin(2*t);\ny=cos(t)-2*cos(2*t);\nz=-sin(3*t);");
+    addExample(tr("Figure-Eight Knot"), ExampleCurve);
+    addExample(tr("Lissajous knot"), "x=cos(3*t+0.7);\ny=cos(2*t+0.2);\nz=cos(7*t);");
+
+    connect(
+        examplesButton,
+        &QPushButton::clicked,
+        examplesMenu,
+        [examplesButton, examplesMenu]()
+        {
+            examplesMenu->popup(examplesButton->mapToGlobal(QPoint(0, examplesButton->height())));
+        });
+
+    customLayout->addWidget(examplesButton, 0, Qt::AlignLeft);
 
     generateButton_ = new QPushButton(tr("APPLY"), customBox_);
 
     generateButton_->setObjectName(QStringLiteral("GenerateButton"));
     generateButton_->setMinimumHeight(38);
+    generateButton_->setToolTip(tr("Make the curve  (Ctrl+Enter)"));
 
     customLayout->addWidget(generateButton_);
+
+    for (const int key : {Qt::Key_Return, Qt::Key_Enter})
+    {
+        QShortcut *applyShortcut =
+            new QShortcut(QKeySequence(Qt::CTRL | key), customInputEdit_);
+
+        applyShortcut->setContext(Qt::WidgetShortcut);
+
+        connect(applyShortcut, &QShortcut::activated, generateButton_, &QPushButton::click);
+    }
 
     layout->addWidget(customBox_);
 
@@ -1494,10 +1769,14 @@ QWidget *MainWindow::createLeftPanel()
     materialCombo_ = new QComboBox(panel);
 
     materialCombo_->setMinimumHeight(36);
-    materialCombo_->addItem(tr("Glossy"));
-    materialCombo_->addItem(tr("Satin"));
-    materialCombo_->addItem(tr("Metal"));
-    materialCombo_->addItem(tr("Rope"));
+    materialCombo_->setAccessibleName(tr("Material"));
+
+    // the number is what the shader and the saved files know it by; the
+    // first in the list is the one a new knot starts with
+    materialCombo_->addItem(tr("Rope"), 3);
+    materialCombo_->addItem(tr("Glossy"), 0);
+    materialCombo_->addItem(tr("Satin"), 1);
+    materialCombo_->addItem(tr("Metal"), 2);
 
     layout->addWidget(materialCombo_);
 
@@ -1510,6 +1789,7 @@ QWidget *MainWindow::createLeftPanel()
     colorModeCombo_ = new QComboBox(panel);
 
     colorModeCombo_->setMinimumHeight(36);
+    colorModeCombo_->setAccessibleName(tr("Color mode"));
     colorModeCombo_->addItem(tr("Single Color"));
     colorModeCombo_->addItem(tr("Crossing Colors"));
     colorModeCombo_->addItem(tr("Strand Colors"));
@@ -1522,6 +1802,7 @@ QWidget *MainWindow::createLeftPanel()
     colorButton_->setFixedSize(36, 36);
     colorButton_->setCursor(Qt::PointingHandCursor);
     colorButton_->setToolTip(tr("Tube color"));
+    colorButton_->setAccessibleName(tr("Tube color"));
 
     colorRow->addWidget(colorModeCombo_, 1);
     colorRow->addWidget(colorButton_);
@@ -1561,9 +1842,13 @@ QWidget *MainWindow::createLeftPanel()
                  meshDensitySlider_, meshDensityValueLabel_,
                  48, 320, 160, QStringLiteral("160"), 1.0);
 
+    meshDensitySlider_->setToolTip(
+        tr("Points along the curve. A knot that needs more points to stay the "
+           "same knot gets them, whatever this says."));
+
     addSliderRow(moreLayout, moreOptions, tr("Material shine"),
                  metallicSlider_, metallicValueLabel_,
-                 0, 100, 70, QStringLiteral("0.70"), 0.01);
+                 0, 100, 0, QStringLiteral("0.00"), 0.01);
 
     auto showMoreOptions = [moreOptionsButton, moreOptions](bool shown)
     {
@@ -1872,7 +2157,8 @@ QWidget *MainWindow::createLeftPanel()
         new QLabel(
             tr("Every knot is the edge of a surface with two sides, a "
                "Seifert surface. Seifert's algorithm builds one from the "
-               "knot diagram in four steps."),
+               "knot diagram in four steps, and a fifth lets it relax like "
+               "a soap film."),
             panel);
 
     surfaceIntro->setObjectName(QStringLiteral("Subtitle"));
@@ -1889,14 +2175,55 @@ QWidget *MainWindow::createLeftPanel()
 
     layout->addWidget(seifertButton_);
 
+    QPushButton *seifertGuideButton = new QPushButton(tr("How to read this"), panel);
+
+    seifertGuideButton->setMinimumHeight(36);
+    seifertGuideButton->setToolTip(tr("What the wire, the sheet and its colours mean."));
+
+    connect(seifertGuideButton, &QPushButton::clicked, this, &MainWindow::showSeifertGuide);
+
+    layout->addWidget(seifertGuideButton);
+
+    // Photo mode: what the real surface is made of
+    seifertMaterialRow_ = new QWidget(panel);
+
+    {
+        QVBoxLayout *rowLayout = new QVBoxLayout(seifertMaterialRow_);
+
+        rowLayout->setContentsMargins(0, 0, 0, 0);
+        rowLayout->setSpacing(6);
+
+        rowLayout->addWidget(makeFieldLabel(tr("Made of"), seifertMaterialRow_));
+
+        seifertMaterialCombo_ = new QComboBox(seifertMaterialRow_);
+
+        seifertMaterialCombo_->setMinimumHeight(36);
+        seifertMaterialCombo_->addItem(tr("Two-coloured cloth"));
+        seifertMaterialCombo_->addItem(tr("Soap film"));
+        seifertMaterialCombo_->setToolTip(
+            tr("Cloth shows the two sides of the surface. A soap film is the "
+               "shape nature gives it, but has only one look."));
+
+        rowLayout->addWidget(seifertMaterialCombo_);
+    }
+
+    seifertMaterialRow_->hide();
+
+    connect(seifertMaterialCombo_,
+            &QComboBox::currentIndexChanged,
+            this,
+            [this]() { applySeifertMaterial(); });
+
+    layout->addWidget(seifertMaterialRow_);
+
     seifertStepSlider_ = new QSlider(Qt::Horizontal, panel);
 
-    seifertStepSlider_->setRange(0, 3);
+    seifertStepSlider_->setRange(0, 4);
     seifertStepSlider_->setPageStep(1);
     seifertStepSlider_->setTickPosition(QSlider::TicksBelow);
     seifertStepSlider_->setTickInterval(1);
     seifertStepSlider_->setEnabled(false);
-    seifertStepSlider_->setToolTip(tr("Go back and forth through the four steps."));
+    seifertStepSlider_->setToolTip(tr("Go back and forth through the steps."));
 
     layout->addWidget(seifertStepSlider_);
 
@@ -1947,12 +2274,19 @@ QWidget *MainWindow::createLeftPanel()
             this,
             [this]()
             {
-                if (seifertStep_ < 3)
+                if (seifertStep_ < 4)
                     setSeifertStep(seifertStep_ + 1);
 
-                if (seifertStep_ >= 3)
+                if (seifertStep_ >= 4)
                     seifertTimer_->stop();
             });
+
+    seifertFilmTimer_ = new QTimer(this);
+
+    seifertFilmTimer_->setInterval(16);
+    seifertFilmTimer_->setTimerType(Qt::PreciseTimer);
+
+    connect(seifertFilmTimer_, &QTimer::timeout, this, &MainWindow::seifertFilmTick);
 
     // dragging the slider stops the automatic steps
     connect(seifertStepSlider_,
@@ -1994,10 +2328,20 @@ QWidget *MainWindow::createRightPanel()
      * ANALYSIS
      */
 
-    QWidget *analysis = new QWidget(tabs);
+    // (it scrolls: a long polynomial on a small screen needs more than there is)
+    QScrollArea *analysisScroll = new QScrollArea(tabs);
+
+    analysisScroll->setObjectName(QStringLiteral("PanelScroll"));
+    analysisScroll->setWidgetResizable(true);
+    analysisScroll->setFrameShape(QFrame::NoFrame);
+    analysisScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    QWidget *analysis = new QWidget(analysisScroll);
 
     analysis->setObjectName(QStringLiteral("Panel"));
     analysis->setAttribute(Qt::WA_StyledBackground, true);
+
+    analysisScroll->setWidget(analysis);
 
     QVBoxLayout *layout = new QVBoxLayout(analysis);
 
@@ -2011,6 +2355,7 @@ QWidget *MainWindow::createRightPanel()
     classificationValueLabel_ = new QLabel(QStringLiteral("\u2014"), analysis);
 
     classificationValueLabel_->setObjectName(QStringLiteral("Headline"));
+    classificationValueLabel_->setAccessibleName(tr("CLASSIFICATION"));
     classificationValueLabel_->setWordWrap(true);
 
     layout->addWidget(classCaption);
@@ -2062,7 +2407,7 @@ QWidget *MainWindow::createRightPanel()
         tiles->addWidget(tile, 1);
     };
 
-    makeTile(tr("WRITHE"), writheValueLabel_, nullptr);
+    makeTile(tr("WRITHE"), writheValueLabel_, &writheNoteLabel_);
     makeTile(tr("CROSSINGS"), crossingValueLabel_, &crossingNoteLabel_);
 
     layout->addLayout(tiles);
@@ -2085,7 +2430,9 @@ QWidget *MainWindow::createRightPanel()
     alexanderValueLabel_ = new QLabel(QStringLiteral("\u2014"), polynomialTile);
 
     alexanderValueLabel_->setObjectName(QStringLiteral("Polynomial"));
+    alexanderValueLabel_->setAccessibleName(tr("ALEXANDER POLYNOMIAL"));
     alexanderValueLabel_->setWordWrap(true);
+    alexanderValueLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
     QLabel *jonesCaption = new QLabel(tr("JONES POLYNOMIAL"), polynomialTile);
 
@@ -2094,7 +2441,9 @@ QWidget *MainWindow::createRightPanel()
     jonesValueLabel_ = new QLabel(QStringLiteral("\u2014"), polynomialTile);
 
     jonesValueLabel_->setObjectName(QStringLiteral("Polynomial"));
+    jonesValueLabel_->setAccessibleName(tr("JONES POLYNOMIAL"));
     jonesValueLabel_->setWordWrap(true);
+    jonesValueLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
     methodologyValueLabel_ = new QLabel(QStringLiteral("\u2014"), polynomialTile);
 
@@ -2110,9 +2459,36 @@ QWidget *MainWindow::createRightPanel()
 
     layout->addWidget(polynomialTile);
 
+    // what is known of this knot, beyond its polynomials
+    factsTile_ = new QFrame(analysis);
+
+    factsTile_->setObjectName(QStringLiteral("Tile"));
+
+    QVBoxLayout *factsLayout = new QVBoxLayout(factsTile_);
+
+    factsLayout->setContentsMargins(16, 14, 16, 16);
+    factsLayout->setSpacing(8);
+
+    QLabel *factsCaption = new QLabel(tr("PROPERTIES"), factsTile_);
+
+    factsCaption->setObjectName(QStringLiteral("Caption"));
+
+    factsLabel_ = new QLabel(factsTile_);
+
+    factsLabel_->setObjectName(QStringLiteral("Field"));
+    factsLabel_->setWordWrap(true);
+    factsLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+
+    factsLayout->addWidget(factsCaption);
+    factsLayout->addWidget(factsLabel_);
+
+    factsTile_->hide();
+
+    layout->addWidget(factsTile_);
+
     layout->addStretch(1);
 
-    tabs->addTab(analysis, tr("ANALYSIS"));
+    tabs->addTab(analysisScroll, tr("ANALYSIS"));
 
     /*
      * LEARN
@@ -2234,6 +2610,20 @@ QWidget *MainWindow::createSettingsPanel()
     layout->addWidget(startFullScreenCheck_);
     layout->addWidget(rememberWindowCheck_);
 
+    reduceMotionCheck_ = new QCheckBox(tr("Reduce motion"), panel);
+
+    reduceMotionCheck_->setToolTip(
+        tr("Stops the drifting background and the turning knot."));
+
+    softwareGraphicsCheck_ = new QCheckBox(tr("Simple graphics mode"), panel);
+
+    softwareGraphicsCheck_->setToolTip(
+        tr("For a computer whose 3D view stays black: slower, without Photo "
+           "mode. It starts with the next start of AKSIOMA."));
+
+    layout->addWidget(reduceMotionCheck_);
+    layout->addWidget(softwareGraphicsCheck_);
+
     layout->addSpacing(12);
 
     QPushButton *restoreButton = new QPushButton(tr("Restore defaults"), panel);
@@ -2316,6 +2706,26 @@ QWidget *MainWindow::createSettingsPanel()
         [](bool enabled)
         {
             AppSettings::setRememberWindow(enabled);
+        });
+
+    connect(
+        reduceMotionCheck_,
+        &QCheckBox::toggled,
+        this,
+        [](bool enabled)
+        {
+            AppSettings::setReduceMotion(enabled);
+
+            KnotGLWidget::setReduceMotion(enabled);
+        });
+
+    connect(
+        softwareGraphicsCheck_,
+        &QCheckBox::toggled,
+        this,
+        [](bool enabled)
+        {
+            AppSettings::setSoftwareGraphics(enabled);
         });
 
     connect(
@@ -2926,6 +3336,20 @@ void MainWindow::updateSettingsControls()
         rememberWindowCheck_->setChecked(AppSettings::rememberWindow());
     }
 
+    {
+        const QSignalBlocker blocker(reduceMotionCheck_);
+
+        reduceMotionCheck_->setChecked(AppSettings::reduceMotion());
+    }
+
+    KnotGLWidget::setReduceMotion(AppSettings::reduceMotion());
+
+    {
+        const QSignalBlocker blocker(softwareGraphicsCheck_);
+
+        softwareGraphicsCheck_->setChecked(AppSettings::softwareGraphics());
+    }
+
     fullScreenButton_->setText(
         isFullScreen()
             ? tr("Leave full screen  (F11)")
@@ -2978,11 +3402,9 @@ void MainWindow::fitPanelsToText()
     // The 3D view keeps room for its playback bar, and the window for the
     // view next to both panels (never more than the screen has: in less
     // room the panels are folded away).
-    const int viewWidth = 460 * scale / 100;
+    const int viewWidth = 340 * scale / 100;
 
     glWidget_->parentWidget()->setMinimumWidth(viewWidth);
-
-    int windowWidth = viewWidth + 100;
 
     for (const Panel &panel : panels)
     {
@@ -3001,14 +3423,7 @@ void MainWindow::fitPanelsToText()
         panel.widget->setMaximumWidth(std::max(panel.maximum * scale / 100, minimum));
 
         initial.push_back(std::max(panel.initial * scale / 100, minimum));
-
-        windowWidth += minimum;
     }
-
-    setMinimumWidth(
-        std::min(
-            windowWidth,
-            screen()->availableGeometry().width()));
 
     // the first sizes again only when the text size changed, so that a
     // dragged divider stays where it is when only the theme changes
@@ -3030,6 +3445,83 @@ void MainWindow::fitPanelsToText()
         QVector<int>{ initial[0], total - initial[0] - initial[1], initial[1] });
 }
 
+void MainWindow::foldPanelsForRoom(
+    const QSize &room)
+{
+    // a choice the user made once stays
+    if (AppSettings::workspaceValue(QStringLiteral("analysisPanel"), -1) >= 0)
+        return;
+
+    // the knot needs the room more than the numbers do
+    if (room.width() < 1280 * Theme::textScale() / 100)
+        analysisButton_->setChecked(false);
+
+    if (room.width() < 1100 * Theme::textScale() / 100)
+    {
+        leftPages_->hide();
+
+        updateRailActivity();
+    }
+}
+
+void MainWindow::keepPanelsOnScreen(
+    QWidget *opened)
+{
+    const int room = screen()->availableGeometry().width();
+
+    if (centralWidget()->minimumSizeHint().width() <= room)
+        return;
+
+    if (opened == leftPages_)
+    {
+        analysisButton_->setChecked(false);
+    }
+    else
+    {
+        leftPages_->hide();
+
+        updateRailActivity();
+    }
+}
+
+void MainWindow::fitTopBar()
+{
+    // in a small window the name of the app is less use than the buttons
+    const int room =
+        std::min(width(), screen()->availableGeometry().width());
+
+    const bool roomy =
+        room >= 1360 * Theme::textScale() / 100;
+
+    brandSub_->setVisible(roomy);
+    knotCaption_->setVisible(roomy);
+
+    topLayout_->setContentsMargins(roomy ? 24 : 12, 0, roomy ? 20 : 10, 0);
+    topLayout_->setSpacing(roomy ? 14 : 8);
+}
+
+void MainWindow::resizeEvent(
+    QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+
+    fitTopBar();
+}
+
+void MainWindow::markKeyboardFocus(
+    QWidget *widget,
+    bool on)
+{
+    if (widget == nullptr || widget->property("keyboardFocus").toBool() == on)
+        return;
+
+    widget->setProperty("keyboardFocus", on);
+
+    widget->style()->unpolish(widget);
+    widget->style()->polish(widget);
+    widget->update();
+}
+
 void MainWindow::toggleFullScreen()
 {
     // keeps the maximized flag, so leaving goes back to the same state
@@ -3042,9 +3534,6 @@ void MainWindow::changeEvent(
 {
     if (event->type() == QEvent::WindowStateChange)
     {
-        if (leaveFullScreenShortcut_ != nullptr)
-            leaveFullScreenShortcut_->setEnabled(isFullScreen());
-
         updateSettingsControls();
     }
 
@@ -3056,8 +3545,59 @@ void MainWindow::showInitially()
 {
     QTimer::singleShot(600, this, &MainWindow::offerAutosave);
 
+    // A graphics driver too old for the 3D view leaves it black: it says so
+    // (once the view has had its chance to start).
+    QTimer::singleShot(
+        1500,
+        this,
+        [this]()
+        {
+            // (a minimized window has not started its view yet)
+            if (isVisible() && !isMinimized() && !glWidget_->graphicsReady())
+            {
+                // (already in software, there is nothing more to offer)
+                if (AppSettings::softwareGraphics())
+                {
+                    showNotice(
+                        tr("The 3D view could not start: it needs OpenGL 3.3. Updating "
+                           "the graphics driver usually solves this."),
+                        Notice::Error);
+
+                    return;
+                }
+
+                showNotice(
+                    tr("The 3D view could not start: it needs OpenGL 3.3. Updating "
+                       "the graphics driver usually solves this."),
+                    Notice::Error,
+                    tr("Start in simple graphics mode"),
+                    [this]()
+                    {
+                        AppSettings::setSoftwareGraphics(true);
+
+                        QProcess::startDetached(QCoreApplication::applicationFilePath(), {});
+
+                        close();
+                    });
+            }
+        });
+
+    // software OpenGL draws the plain view well enough, but not a photograph
+    if (AppSettings::softwareGraphics())
+    {
+        ControlHelp::explainDisabled(
+            photoButton_,
+            photoButton_->toolTip(),
+            tr("Photo mode needs a graphics card. Simple graphics mode is on in "
+               "Settings."));
+
+        photoButton_->setEnabled(false);
+    }
+
     if (!AppSettings::tourSeen())
         QTimer::singleShot(1200, this, &MainWindow::startTour);
+
+    foldPanelsForRoom(screen()->availableGeometry().size());
 
     const QByteArray geometry =
         AppSettings::rememberWindow()
@@ -3067,9 +3607,15 @@ void MainWindow::showInitially()
     if (geometry.isEmpty() ||
         !restoreGeometry(geometry))
     {
-        resize(
-            1800,
-            1000);
+        const QSize wanted(1800, 1000);
+
+        const QSize room = screen()->availableGeometry().size();
+
+        resize(wanted.boundedTo(room));
+
+        // a laptop screen has less room than that: all of it
+        if (size() != wanted)
+            setWindowState(windowState() | Qt::WindowMaximized);
     }
 
     // full screen only when asked for, even if the window was closed so,
@@ -3129,7 +3675,7 @@ void MainWindow::closeEvent(
 
             box.exec();
 
-            if (box.clickedButton() == cancel || (box.clickedButton() == save && !saveKnot()))
+            if (box.clickedButton() == cancel || (box.clickedButton() == save && !saveKnot(false)))
             {
                 event->ignore();
                 return;
@@ -3138,8 +3684,20 @@ void MainWindow::closeEvent(
             Q_UNUSED(discard);
         }
 
+        // none of them can be stopped halfway, and none takes long
+        if (layingProgress_)
+            layingProgress_->cancel = true;
+
+        for (const QPointer<QThread> &worker : std::as_const(runningWorkers()))
+        {
+            if (worker != nullptr)
+                worker->wait(5000);
+        }
+
         // closed properly: nothing to bring back next time
         QFile::remove(autosavePath());
+
+        autosaveLock().unlock();
 
         saveWorkspace();
     }
@@ -3171,7 +3729,11 @@ bool MainWindow::eventFilter(
      * first control of a new window also gets it "by tab".)
      */
     if (event->type() == QEvent::MouseButtonPress)
+    {
         tabFocused_ = false;
+
+        markKeyboardFocus(QApplication::focusWidget(), false);
+    }
 
     if (event->type() == QEvent::KeyPress)
     {
@@ -3212,7 +3774,10 @@ bool MainWindow::eventFilter(
                     return true;
                 }
 
-                if (key->key() == Qt::Key_Left || key->key() == Qt::Key_Right)
+                // (with nothing to step through they stay with the control:
+                // a slider just clicked goes on moving by them)
+                if ((key->key() == Qt::Key_Left || key->key() == Qt::Key_Right) &&
+                    (unknotActive_ || seifertActive_))
                 {
                     stepBy(key->key() == Qt::Key_Right ? 1 : -1);
                     return true;
@@ -3224,33 +3789,47 @@ bool MainWindow::eventFilter(
     return QMainWindow::eventFilter(object, event);
 }
 
-void MainWindow::dragEnterEvent(
-    QDragEnterEvent *event)
+namespace
 {
-    for (const QUrl &url : event->mimeData()->urls())
+
+// the first knot file among what is dragged (empty if there is none)
+QString knotFileIn(
+    const QMimeData *data)
+{
+    for (const QUrl &url : data->urls())
     {
         const QString suffix = QFileInfo(url.toLocalFile()).suffix().toLower();
 
         if (url.isLocalFile() &&
             (suffix == QStringLiteral("aknot") || suffix == QStringLiteral("txt") || suffix == QStringLiteral("csv")))
         {
-            event->acceptProposedAction();
-            return;
+            return url.toLocalFile();
         }
     }
+
+    return QString();
+}
+
+} // namespace
+
+void MainWindow::dragEnterEvent(
+    QDragEnterEvent *event)
+{
+    if (!knotFileIn(event->mimeData()).isEmpty())
+        event->acceptProposedAction();
 }
 
 void MainWindow::dropEvent(
     QDropEvent *event)
 {
-    const QList<QUrl> urls = event->mimeData()->urls();
+    const QString path = knotFileIn(event->mimeData());
 
-    if (urls.isEmpty())
+    if (path.isEmpty())
         return;
 
     event->acceptProposedAction();
 
-    openKnotFilePath(urls.first().toLocalFile());
+    openKnotFilePath(path);
 }
 
 void MainWindow::playPause()
@@ -3532,14 +4111,20 @@ void MainWindow::openCommandPalette()
                          }});
     }
 
+    const auto *scenes = qobject_cast<QStandardItemModel *>(photoSceneCombo_->model());
+
     for (int i = 0; i < photoSceneCombo_->count(); ++i)
     {
+        // (the sneaker, for a knot too large for it)
+        if (scenes != nullptr && !scenes->item(i)->isEnabled())
+            continue;
+
         items.push_back({photoSceneCombo_->itemText(i), tr("Photo"), [this, i]()
                          {
-                             photoSceneCombo_->setCurrentIndex(i);
-
                              if (!photoButton_->isChecked())
                                  photoButton_->setChecked(true);
+
+                             photoSceneCombo_->setCurrentIndex(i);
                          }});
     }
 
@@ -3733,15 +4318,6 @@ void MainWindow::restoreWorkspace()
 
     rightTabs_->setCurrentIndex(AppSettings::workspaceValue(QStringLiteral("rightTab"), 0));
 
-    {
-        const QSignalBlocker blocker(photoSceneCombo_);
-
-        const int scene = AppSettings::workspaceValue(QStringLiteral("photoScene"), 0);
-
-        if (scene >= 0 && scene < photoSceneCombo_->count())
-            photoSceneCombo_->setCurrentIndex(scene);
-    }
-
     updateRailActivity();
 }
 
@@ -3751,7 +4327,6 @@ void MainWindow::saveWorkspace()
     AppSettings::setWorkspaceValue(QStringLiteral("toolPanel"), leftPages_->isHidden() ? 0 : 1);
     AppSettings::setWorkspaceValue(QStringLiteral("analysisPanel"), analysisButton_->isChecked() ? 1 : 0);
     AppSettings::setWorkspaceValue(QStringLiteral("rightTab"), rightTabs_->currentIndex());
-    AppSettings::setWorkspaceValue(QStringLiteral("photoScene"), photoSceneCombo_->currentIndex());
 }
 
 void MainWindow::noteChange()
@@ -3791,7 +4366,7 @@ KnotState MainWindow::currentState() const
 
     state.thickness = thicknessSlider_->value();
     state.samples = meshDensitySlider_->value();
-    state.material = materialCombo_->currentIndex();
+    state.material = materialCombo_->currentData().toInt();
     state.shine = metallicSlider_->value();
     state.colorMode = colorModeCombo_->currentIndex();
     state.color = meshColor_;
@@ -3807,7 +4382,7 @@ void MainWindow::restoreState(
     // a new material also sets its own shine, so it goes first
     thicknessSlider_->setValue(state.thickness);
     meshDensitySlider_->setValue(state.samples);
-    materialCombo_->setCurrentIndex(state.material);
+    materialCombo_->setCurrentIndex(materialCombo_->findData(state.material));
     metallicSlider_->setValue(state.shine);
     colorModeCombo_->setCurrentIndex(state.colorMode);
 
@@ -3972,7 +4547,7 @@ KnotExport::KnotFile MainWindow::currentKnotFile() const
     file.hasAppearance = true;
     file.thickness = thicknessSlider_->value();
     file.samples = meshDensitySlider_->value();
-    file.material = materialCombo_->currentIndex();
+    file.material = materialCombo_->currentData().toInt();
     file.shine = metallicSlider_->value();
     file.colorMode = colorModeCombo_->currentIndex();
     file.color = meshColor_;
@@ -3988,6 +4563,10 @@ void MainWindow::writeAutosave()
         return;
     }
 
+    // a lock first: from now on this file is in use
+    if (!autosaveLock().isLocked())
+        autosaveLock().tryLock(0);
+
     QString error;
 
     // (written whole or not at all; a failure here must not get in the way)
@@ -3996,15 +4575,66 @@ void MainWindow::writeAutosave()
 
 void MainWindow::offerAutosave()
 {
-    // the newest, if a crash came after an unanswered offer
-    if (QFile::exists(autosavePath()))
+    // another copy is asking about it already
+    if (!recoveredLock().isLocked() && !recoveredLock().tryLock(0))
+        return;
+
+    clearOldDiscarded();
+
+    /*
+     * What the copies before this one left behind, oldest first: the file of
+     * a copy that still runs is held by its lock. An older unanswered knot
+     * makes way for a newer one, but is not lost.
+     */
+    const QFileInfoList left =
+        QDir(autosaveFolder())
+            .entryInfoList(
+                {QStringLiteral("autosave*.aknot")},
+                QDir::Files,
+                QDir::Time | QDir::Reversed);
+
+    const QString own = QFileInfo(autosavePath()).fileName();
+
+    for (const QFileInfo &file : left)
     {
-        QFile::remove(recoveredPath());
-        QFile::rename(autosavePath(), recoveredPath());
+        if (file.fileName() == own)
+            continue;
+
+        QLockFile lock(lockPathOf(file.absoluteFilePath()));
+
+        lock.setStaleLockTime(0);
+
+        if (!lock.tryLock(0))
+            continue;
+
+        if (QFile::exists(recoveredPath()))
+            setAside(recoveredPath());
+
+        QFile::rename(file.absoluteFilePath(), recoveredPath());
+    }
+
+    // the locks of copies that ended with nothing to keep
+    const QFileInfoList locks =
+        QDir(autosaveFolder())
+            .entryInfoList({QStringLiteral("autosave-*.lock")}, QDir::Files);
+
+    for (const QFileInfo &file : locks)
+    {
+        if (file.absoluteFilePath() == lockPathOf(autosavePath()))
+            continue;
+
+        QLockFile lock(file.absoluteFilePath());
+
+        lock.setStaleLockTime(0);
+        lock.tryLock(0);
     }
 
     if (!QFile::exists(recoveredPath()))
+    {
+        recoveredLock().unlock();
+
         return;
+    }
 
     showNotice(
         tr("The last knot was not saved when AKSIOMA closed."),
@@ -4012,30 +4642,70 @@ void MainWindow::offerAutosave()
         tr("Restore"),
         [this]()
         {
-            loadKnotFile(recoveredPath(), false);
+            // (a file that cannot be opened is not thrown away)
+            if (loadKnotFile(recoveredPath(), false))
+            {
+                QFile::remove(recoveredPath());
 
-            QFile::remove(recoveredPath());
+                recoveredLock().unlock();
+            }
+        },
+        tr("Discard"),
+        [this]()
+        {
+            discardRecovered();
         });
 
-    // it waits to be answered, and closing it lets the knot go
+    // It waits to be answered. Closing the notice answers nothing: the knot
+    // stays, and the next start asks again.
     noticeTimer_->stop();
+}
 
-    noticeDismissed_ = []()
+void MainWindow::discardRecovered()
+{
+    QMessageBox box(this);
+
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(tr("AKSIOMA: Knots"));
+    box.setText(tr("Discard the knot that was not saved?"));
+    box.setInformativeText(
+        tr("It is kept for %1 days in this folder, then deleted:\n%2")
+            .arg(DiscardedDays)
+            .arg(QDir::toNativeSeparators(discardedFolder())));
+
+    QPushButton *discard = box.addButton(tr("Discard"), QMessageBox::DestructiveRole);
+    QPushButton *keep = box.addButton(tr("Cancel"), QMessageBox::RejectRole);
+
+    box.setDefaultButton(keep);
+    box.setEscapeButton(keep);
+
+    box.exec();
+
+    if (box.clickedButton() != discard)
     {
-        QFile::remove(recoveredPath());
-    };
+        offerAutosave();
+
+        return;
+    }
+
+    setAside(recoveredPath());
+
+    recoveredLock().unlock();
 }
 
 void MainWindow::showNotice(
     const QString &text,
     Notice kind,
     const QString &actionText,
-    const std::function<void()> &action)
+    const std::function<void()> &action,
+    const QString &otherText,
+    const std::function<void()> &other)
 {
     noticeTimer_->stop();
 
     noticeDo_ = action;
-    noticeDismissed_ = nullptr;
+    noticeOther_ = other;
+    curveErrorShown_ = false;
 
     noticeText_->setText(text);
 
@@ -4048,6 +4718,9 @@ void MainWindow::showNotice(
 
     noticeAction_->setText(actionText);
     noticeAction_->setVisible(!actionText.isEmpty());
+
+    noticeOtherAction_->setText(otherText);
+    noticeOtherAction_->setVisible(!otherText.isEmpty());
 
     noticeBar_->show();
     noticeBar_->raise();
@@ -4064,7 +4737,8 @@ void MainWindow::hideNotice()
     noticeBar_->hide();
 
     noticeDo_ = nullptr;
-    noticeDismissed_ = nullptr;
+    noticeOther_ = nullptr;
+    curveErrorShown_ = false;
 }
 
 void MainWindow::placeNotice()
@@ -4134,6 +4808,12 @@ void MainWindow::rebuildWindow()
     const bool fullScreen =
         isFullScreen();
 
+    const bool photo =
+        photoButton_->isChecked();
+
+    const int scene =
+        photoSceneCombo_->currentIndex();
+
     MainWindow *replacement = new MainWindow();
 
     replacement->setAttribute(
@@ -4149,6 +4829,19 @@ void MainWindow::rebuildWindow()
 
     if (fullScreen)
         replacement->showFullScreenLater();
+
+    // once the new view is there to take the room
+    if (photo)
+    {
+        QTimer::singleShot(
+            0,
+            replacement,
+            [replacement, scene]()
+            {
+                replacement->photoButton_->setChecked(true);
+                replacement->photoSceneCombo_->setCurrentIndex(scene);
+            });
+    }
 
     if (settingsOpen)
     {
@@ -4174,6 +4867,9 @@ void MainWindow::takeOverFrom(
     previous.stopUnknotting(
         false);
 
+    // a curve on the move is kept where it is
+    previous.pauseRelaxation();
+
     restoring_ = true;
 
     restoreGeometry(
@@ -4196,8 +4892,19 @@ void MainWindow::takeOverFrom(
     analysisButton_->setChecked(
         previous.analysisButton_->isChecked());
 
-    // the knot
+    // the knot, with what is known of it when it was joined
     tableKnotName_ = previous.tableKnotName_;
+    joined_ = previous.joined_;
+    joinTableName_ = previous.joinTableName_;
+
+    joinSecondCombo_->setCurrentIndex(previous.joinSecondCombo_->currentIndex());
+    joinMirrorCheck_->setChecked(previous.joinMirrorCheck_->isChecked());
+
+    {
+        const QSignalBlocker blocker(photoSceneCombo_);
+
+        photoSceneCombo_->setCurrentIndex(previous.photoSceneCombo_->currentIndex());
+    }
 
     customInputEdit_->setPlainText(previous.customInputEdit_->toPlainText());
     torusPSpin_->setValue(previous.torusPSpin_->value());
@@ -4239,6 +4946,10 @@ void MainWindow::takeOverFrom(
 
     if (previous.relaxChanged_)
         applyShape(previous.currentState().shape);
+
+    savedPath_ = previous.savedPath_;
+
+    updateKnotTitle();
 
     updateLearnSection();
 
@@ -4292,10 +5003,16 @@ QString MainWindow::buildEducationalHtml() const
         }
     }
 
-    const QString currentPreset =
+    QString currentPreset =
         presetCombo_ != nullptr
             ? presetCombo_->currentText()
             : tr("Current knot");
+
+    // the knot itself, not the entry of the list that leads to it
+    if (hasData_ && currentData_.tableIndex >= 0)
+        currentPreset = currentData_.name;
+    else if (presetCombo_ != nullptr && isJoinedKnot())
+        currentPreset = tr("Connected sum %1").arg(joined_.name);
 
     // Only the texts are translated; the markup is added here.
     auto heading = [](const QString &text, const QString &margin)
@@ -4477,6 +5194,37 @@ void MainWindow::showAbout()
     dialog.exec();
 }
 
+void MainWindow::showCustomCurve(
+    const QString &text)
+{
+    customInputEdit_->setPlainText(text);
+
+    const int customIndex =
+        presetCombo_->findData(
+            static_cast<int>(
+                KnotMath::Preset::CustomCoordinates));
+
+    if (customIndex >= 0)
+    {
+        const QSignalBlocker blocker(presetCombo_);
+
+        presetCombo_->setCurrentIndex(
+            customIndex);
+
+        lastPresetIndex_ =
+            customIndex;
+    }
+
+    updateCustomInputVisibility();
+
+    generateMesh();
+
+    // a drawn or joined knot is a new knot, not the last file's
+    savedPath_.clear();
+
+    updateKnotTitle();
+}
+
 void MainWindow::applyDefaultCustomText(
     int /*presetIndex*/)
 {
@@ -4578,6 +5326,10 @@ void MainWindow::generateMesh()
         currentData_ =
             data;
 
+        // the curve that could not be made has been put right
+        if (curveErrorShown_)
+            hideNotice();
+
         seifertDirty_ =
             true;
 
@@ -4642,11 +5394,43 @@ void MainWindow::generateMesh()
                 .arg(torusQSpin_->value())
                 .arg(customInputEdit_->toPlainText());
 
-        if (knot != framedKnot_)
+        const bool newKnot =
+            knot != framedKnot_;
+
+        // another knot is another file (changing a formula is not)
+        const QString document =
+            knot.section(QLatin1Char('|'), 0, 3);
+
+        if (document != savedDocument_)
+        {
+            savedDocument_ = document;
+            savedPath_.clear();
+
+            updateKnotTitle();
+        }
+
+        if (newKnot)
         {
             framedKnot_ = knot;
 
             glWidget_->fitNewKnot(seifertActive_ ? 45.0f : 75.0f);
+        }
+
+        // the curve was drawn, but what it is has to be said
+        if (currentInvariants_.notAKnot)
+        {
+            showNotice(
+                notAKnotText(),
+                Notice::Error);
+
+            // (a curve that is a knot takes the notice away again)
+            curveErrorShown_ = true;
+        }
+        else if (newKnot && !currentData_.warning.isEmpty())
+        {
+            showNotice(
+                currentData_.warning,
+                Notice::Info);
         }
 
         updateLearnSection();
@@ -4677,7 +5461,7 @@ void MainWindow::applySurface()
 
     const int material =
         materialCombo_ != nullptr
-            ? materialCombo_->currentIndex()
+            ? materialCombo_->currentData().toInt()
             : 0;
 
     const float shine =
@@ -4723,10 +5507,14 @@ void MainWindow::rebuildMesh()
 
     // Tubes are thinned (never thickened) where strands come so close
     // that tubes of the requested thickness would run into each other.
+    // (A curve through itself has no such thickness: it would shrink to a
+    // hairline, and it is shown so that it can be seen and put right.)
     const double radius =
-        KnotMath::safeTubeRadius(
-            currentData_,
-            requestedRadius);
+        currentInvariants_.notAKnot
+            ? requestedRadius
+            : KnotMath::safeTubeRadius(
+                  currentData_,
+                  requestedRadius);
 
     if (thicknessValueLabel_ != nullptr)
     {
@@ -4752,7 +5540,7 @@ void MainWindow::rebuildMesh()
                 requestedText);
 
             thicknessValueLabel_->setToolTip(
-                QString());
+                SliderValue::usualToolTip());
         }
     }
 
@@ -4922,6 +5710,14 @@ void MainWindow::updateInvariantPanel(
                 invariants.writhe,
                 'f',
                 5));
+
+        // the whole number of the textbooks, next to the 3D measure
+        writheNoteLabel_->setVisible(invariants.crossingNumber >= 0);
+        writheNoteLabel_->setToolTip(tr("The sum of the crossing signs in this view."));
+        writheNoteLabel_->setText(
+            tr("in this diagram: %1")
+                .arg(QString::number(invariants.signedCrossingSum)
+                         .replace(QLatin1Char('-'), QChar(0x2212))));
     }
 
     if (crossingValueLabel_ != nullptr)
@@ -4945,7 +5741,7 @@ void MainWindow::updateInvariantPanel(
                     invariants.crossingNumber)
             {
                 crossingNoteLabel_->setText(
-                    tr("in this view; at least %1")
+                    tr("in this view. Crossing number: %1")
                         .arg(invariants.knownCrossingNumber));
 
                 crossingNoteLabel_->show();
@@ -4955,8 +5751,18 @@ void MainWindow::updateInvariantPanel(
 
     if (classificationValueLabel_ != nullptr)
     {
+        // a long verdict: the verdict large, its reasons in small
+        const qsizetype bracket =
+            invariants.classification.size() > 40
+                ? invariants.classification.indexOf(QStringLiteral(" ("))
+                : -1;
+
         classificationValueLabel_->setText(
-            invariants.classification);
+            bracket > 0
+                ? QStringLiteral("%1<br><span style='font-size:9pt; font-weight:400;'>%2</span>")
+                      .arg(invariants.classification.left(bracket).toHtmlEscaped(),
+                           invariants.classification.mid(bracket + 1).toHtmlEscaped())
+                : invariants.classification);
     }
 
     if (alexanderValueLabel_ != nullptr)
@@ -4977,7 +5783,158 @@ void MainWindow::updateInvariantPanel(
             invariants.methodology);
     }
 
+    if (factsLabel_ != nullptr)
+    {
+        const QVector<QPair<QString, QString>> facts =
+            currentFacts();
+
+        QString html = QStringLiteral("<table cellspacing='3'>");
+
+        for (const QPair<QString, QString> &fact : facts)
+        {
+            html += QStringLiteral("<tr><td style='color:#8A8780; padding-right:14px;'>%1</td>"
+                                   "<td>%2</td></tr>")
+                        .arg(fact.first, fact.second.toHtmlEscaped());
+        }
+
+        html += QStringLiteral("</table>");
+
+        factsLabel_->setText(Theme::html(html));
+
+        factsTile_->setVisible(!facts.isEmpty());
+    }
+
+    updateKnotTitle();
+
     updateSneakerChoice();
+}
+
+QVector<QPair<QString, QString>> MainWindow::currentFacts() const
+{
+    QVector<QPair<QString, QString>> facts;
+
+    const KnotMath::KnotTable &table = KnotMath::KnotTable::instance();
+
+    // the built-in knots are table knots as well
+    int index = currentData_.tableIndex;
+
+    switch (currentPreset())
+    {
+    case KnotMath::Preset::Trefoil:
+        index = table.indexOf(QStringLiteral("3_1"));
+        break;
+
+    case KnotMath::Preset::FigureEight:
+        index = table.indexOf(QStringLiteral("4_1"));
+        break;
+
+    case KnotMath::Preset::Cinquefoil:
+        index = table.indexOf(QStringLiteral("5_1"));
+        break;
+
+    case KnotMath::Preset::Stevedore:
+        index = table.indexOf(QStringLiteral("6_1"));
+        break;
+
+    default:
+        break;
+    }
+
+    if (index >= 0 && index < table.size())
+        facts = KnotBrowserDialog::knotFacts(table.at(index));
+
+    long long determinant =
+        index >= 0 && index < table.size()
+            ? table.at(index).determinant
+            : currentInvariants_.determinant;
+
+    if (!(index >= 0 && index < table.size()) && determinant >= 0)
+        facts.push_back({tr("Determinant"), QString::number(determinant)});
+
+    // a knot has a 3-colouring exactly when 3 divides its determinant
+    if (determinant >= 0)
+        facts.push_back({tr("Tricolourable"), determinant % 3 == 0 ? tr("yes") : tr("no")});
+
+    return facts;
+}
+
+void MainWindow::updateKnotTitle()
+{
+    if (knotTitleLabel_ == nullptr)
+        return;
+
+    QString title;
+
+    const KnotMath::Preset preset = currentPreset();
+
+    // (the other choices are named in the list itself)
+    if (preset == KnotMath::Preset::KnotTable ||
+        preset == KnotMath::Preset::CustomCoordinates)
+    {
+        title = currentInvariants_.classification;
+    }
+
+    if (!savedPath_.isEmpty())
+    {
+        if (!title.isEmpty())
+            title += QStringLiteral("  \u00B7  ");
+
+        title += QFileInfo(savedPath_).fileName();
+    }
+
+    knotTitleLabel_->setText(title);
+    knotTitleLabel_->setToolTip(title);
+    knotTitleLabel_->update();
+
+    // the 3D view says what it shows
+    glWidget_->setAccessibleName(tr("3D view of the knot"));
+    glWidget_->setAccessibleDescription(currentInvariants_.classification);
+}
+
+void MainWindow::copyDiagnostics()
+{
+    const QStringList lines =
+    {
+        QStringLiteral("AKSIOMA Knots %1").arg(QCoreApplication::applicationVersion()),
+        QStringLiteral("Qt %1").arg(QString::fromLatin1(qVersion())),
+        QSysInfo::prettyProductName(),
+        QStringLiteral("Screen %1 x %2 at %3%")
+            .arg(screen()->size().width())
+            .arg(screen()->size().height())
+            .arg(qRound(screen()->devicePixelRatio() * 100.0)),
+        glWidget_->graphicsInfo(),
+        QStringLiteral("Simple graphics mode: %1").arg(AppSettings::softwareGraphics() ? 1 : 0),
+        QStringLiteral("Log: %1").arg(QDir::toNativeSeparators(AppSettings::logPath()))
+    };
+
+    QGuiApplication::clipboard()->setText(lines.join(QLatin1Char('\n')));
+
+    showNotice(tr("The diagnostic information was copied."), Notice::Info);
+}
+
+void MainWindow::openManual()
+{
+    const QString folder =
+        QCoreApplication::applicationDirPath() + QStringLiteral("/Manual/");
+
+    const QString own =
+        AppSettings::language().startsWith(QStringLiteral("sq"))
+            ? QStringLiteral("AKSIOMA_Knots_Manual_SQ.pdf")
+            : QStringLiteral("AKSIOMA_Knots_Manual_EN.pdf");
+
+    for (const QString &name : {own, QStringLiteral("AKSIOMA_Knots_Manual_EN_SQ.pdf")})
+    {
+        if (QFile::exists(folder + name))
+        {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(folder + name));
+
+            return;
+        }
+    }
+
+    showNotice(
+        tr("The manual was not found. Installing AKSIOMA again brings it back."),
+        Notice::Error);
 }
 
 bool MainWindow::knotFitsSneaker() const
@@ -5079,8 +6036,11 @@ void MainWindow::resetCamera()
 
 bool MainWindow::showRestingRope(double radius)
 {
+    // (a rope cannot lie where a curve passes through itself: the plain tube
+    // stays, and the notice says why)
     if (glWidget_ == nullptr || !glWidget_->photoMode() || !hasData_ ||
         currentData_.multiStrand || currentData_.points.size() < 4 ||
+        currentInvariants_.notAKnot ||
         pulling_ || relaxRunning_ ||
         seifertActive_ || unknotActive_ || joinActive_)
     {
@@ -5106,13 +6066,11 @@ bool MainWindow::showRestingRope(double radius)
     /*
      * The rope just joined has fallen onto the table by itself: it stays
      * where it came to lie, on the same table (it does not fall again).
-     * (Choosing Custom Curve redraws the knot before the joined one is in:
-     * only the joined knot itself takes this rope.)
+     * (Only the joined knot itself takes this rope.)
      */
     const bool landed =
         joinLanded_.valid && !sneaker &&
-        currentPreset() == KnotMath::Preset::CustomCoordinates &&
-        customInputEdit_->toPlainText() == joined_.text;
+        isJoinedKnot();
 
     if (landed)
     {
@@ -5124,39 +6082,23 @@ bool MainWindow::showRestingRope(double radius)
 
         joinLanded_ = Photo::RestingRope();
 
-        // what was still being laid down is for nothing now
-        ++restingJob_;
-
-        restingLaying_ = false;
-        restingJobFrom_.clear();
-
-        if (layingProgress_)
-            layingProgress_->cancel = true;
-
-        layingTimer_->stop();
-
-        if (noticeProgress_->isVisible())
-            hideNotice();
+        cancelLaying();
 
         glWidget_->setCaption(QString(), QString());
     }
 
-    const bool known =
-        restingRope_.valid &&
+    const bool tried =
         restingScene_ == static_cast<int>(scene) &&
         std::abs(restingRadius_ - radius) < 1.0e-9 &&
-        restingFrom_.size() == currentData_.points.size() &&
-        std::equal(
-            restingFrom_.cbegin(),
-            restingFrom_.cend(),
-            currentData_.points.cbegin(),
-            [](const KnotMath::Vec3 &a, const KnotMath::Vec3 &b)
-            {
-                return a.x == b.x && a.y == b.y && a.z == b.z;
-            });
+        sameCurve(restingFrom_, currentData_.points);
 
-    if (!known)
+    if (!restingRope_.valid || !tried)
     {
+        // it could not be laid down as this knot, and it would not go
+        // better a second time: the tube stays
+        if (tried)
+            return false;
+
         /*
          * The rope takes a second or two to fall and come to rest (more
          * for a long one, a knot of a dozen crossings): worked out on a
@@ -5167,24 +6109,13 @@ bool MainWindow::showRestingRope(double radius)
             restingLaying_ &&
             restingJobScene_ == static_cast<int>(scene) &&
             std::abs(restingJobRadius_ - radius) < 1.0e-9 &&
-            restingJobFrom_.size() == currentData_.points.size() &&
-            std::equal(
-                restingJobFrom_.cbegin(),
-                restingJobFrom_.cend(),
-                currentData_.points.cbegin(),
-                [](const KnotMath::Vec3 &a, const KnotMath::Vec3 &b)
-                {
-                    return a.x == b.x && a.y == b.y && a.z == b.z;
-                });
+            sameCurve(restingJobFrom_, currentData_.points);
 
         if (!asked)
             layRestingRope(radius);
 
         return false;
     }
-
-    if (!restingRope_.valid)
-        return false;
 
     const KnotMath::Mesh mesh =
         Photo::buildRopeMesh(
@@ -5374,6 +6305,19 @@ void MainWindow::layRestingRope(double radius)
             restingRadius_ = radius;
             restingScene_ = static_cast<int>(scene);
 
+            if (!result->rope.valid)
+            {
+                showNotice(
+                    tr("This knot could not be laid down as a rope without "
+                       "changing it, so it stays a smooth tube."),
+                    Notice::Info);
+            }
+
+            // What is moving now goes on undisturbed; when it ends, the
+            // knot is drawn again and the rope is there.
+            if (unknotActive_ || joinActive_ || relaxRunning_ || pulling_ || seifertActive_)
+                return;
+
             glWidget_->setCaption(QString(), QString());
 
             // the rope lying still, drawn where the knot was
@@ -5394,7 +6338,25 @@ void MainWindow::layRestingRope(double radius)
             }
         });
 
+    noteWorker(worker);
+
     worker->start();
+}
+
+void MainWindow::cancelLaying()
+{
+    ++restingJob_;
+
+    restingLaying_ = false;
+    restingJobFrom_.clear();
+
+    if (layingProgress_)
+        layingProgress_->cancel = true;
+
+    layingTimer_->stop();
+
+    if (noticeProgress_->isVisible())
+        hideNotice();
 }
 
 void MainWindow::applyPhotoMode()
@@ -5402,9 +6364,32 @@ void MainWindow::applyPhotoMode()
     if (glWidget_ == nullptr || photoButton_ == nullptr || photoSceneCombo_ == nullptr)
         return;
 
+    // Photo mode shows a real rope, and no rope lies like this
+    if (photoButton_->isChecked() && currentInvariants_.notAKnot)
+    {
+        const QSignalBlocker blocker(photoButton_);
+
+        photoButton_->setChecked(false);
+
+        showNotice(notAKnotText(), Notice::Error);
+
+        curveErrorShown_ = true;
+
+        return;
+    }
+
     const bool on = photoButton_->isChecked();
 
     photoSceneCombo_->setVisible(on);
+
+    seifertMaterialRow_->setVisible(on);
+
+    // (what plays on the table does not go on without one)
+    stopJoin(false);
+
+    // a rope nobody is waiting for any more
+    if (!on)
+        cancelLaying();
 
     // Grab goes over to the new scene (or out of Photo mode): let go, and
     // take hold again below
@@ -5423,12 +6408,38 @@ void MainWindow::applyPhotoMode()
     const auto scene =
         static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
 
-    // the room is read and prepared on the graphics card (a moment)
+    // The files of the place are read beside the window, which goes on
+    // answering (on an old laptop this takes seconds); then they go to the
+    // graphics card, a moment that has to be on this thread.
+    if (on)
+    {
+        showNotice(tr("Preparing the place"), Notice::Busy);
+
+        noticeProgress_->setRange(0, 0);
+
+        std::future<void> reading =
+            std::async(
+                std::launch::async,
+                Photo::preloadScene,
+                Photo::sceneInfo(scene));
+
+        while (reading.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+
+        noticeProgress_->setRange(0, 100);
+
+        hideNotice();
+    }
+
     QApplication::setOverrideCursor(Qt::WaitCursor);
 
     const bool ok = glWidget_->setPhotoMode(on, scene);
 
     QApplication::restoreOverrideCursor();
+
+    // (if the view has not started, it loads them itself later)
+    if (glWidget_->graphicsReady())
+        Photo::forgetPreloaded();
 
     // the knot falls onto the table (or stands up again)
     rebuildMesh();
@@ -5455,6 +6466,12 @@ void MainWindow::applyPhotoMode()
     resetCamera();
 }
 
+QString MainWindow::notAKnotText() const
+{
+    return tr("This curve passes through itself, so it is not a knot. Give the "
+              "strands different heights where they meet.");
+}
+
 void MainWindow::showError(
     const QString &message)
 {
@@ -5462,6 +6479,8 @@ void MainWindow::showError(
         tr("The curve could not be made: %1 Check the formula, or press "
            "Undo to go back.").arg(message),
         Notice::Error);
+
+    curveErrorShown_ = true;
 }
 
 
@@ -5534,6 +6553,13 @@ void MainWindow::startUnknotting()
         return;
     }
 
+    if (currentInvariants_.notAKnot)
+    {
+        unknotStatusLabel_->setText(notAKnotText());
+
+        return;
+    }
+
     const double requestedRadius =
         static_cast<double>(
             thicknessSlider_->value()) /
@@ -5584,6 +6610,8 @@ void MainWindow::startUnknotting()
                 *result,
                 requestedRadius);
         });
+
+    noteWorker(worker);
 
     worker->start();
 }
@@ -6104,12 +7132,21 @@ void MainWindow::unknotScrubbed(
         static_cast<double>(value) /
         1000.0;
 
-    // Photo mode: the moment in the air
+    returnUnknotToTheAir();
+
+    renderUnknotFrame();
+}
+
+void MainWindow::returnUnknotToTheAir()
+{
+    // the camera followed the loop down to the table: back to its shot of
+    // this moment (renderUnknotFrame flies there)
+    if (!unknotLanded_.isEmpty())
+        unknotWideShot_ = unknotT_ < unknotWideFrom_;
+
     unknotLift_ = 1.0;
     unknotDrop_.reset();
     unknotLanded_.clear();
-
-    renderUnknotFrame();
 }
 
 void MainWindow::renderUnknotFrame()
@@ -6716,6 +7753,8 @@ void MainWindow::showUnknotMoment(
             0.0,
             1.0);
 
+    returnUnknotToTheAir();
+
     setUnknotControlsEnabled(
         false);
 
@@ -6745,22 +7784,9 @@ void MainWindow::drawKnotDialog()
     // The drawn knot is handed to the normal "Custom Curve" path as a list
     // of coordinates, so every analysis and the unknotting animation work
     // on it, and the text can be edited or saved.
-    const int customIndex =
-        presetCombo_->findData(
-            static_cast<int>(
-                KnotMath::Preset::CustomCoordinates));
-
-    if (customIndex >= 0)
-    {
-        presetCombo_->setCurrentIndex(
-            customIndex);
-    }
-
-    customInputEdit_->setPlainText(
+    showCustomCurve(
         KnotMath::diagramToCoordinateText(
             curve));
-
-    generateMesh();
 }
 
 /*
@@ -6866,7 +7892,7 @@ void MainWindow::openKnotFilePath(
     loadKnotFile(path, true);
 }
 
-void MainWindow::loadKnotFile(
+bool MainWindow::loadKnotFile(
     const QString &path,
     bool remembered)
 {
@@ -6880,7 +7906,7 @@ void MainWindow::loadKnotFile(
                "text file of coordinates.").arg(error),
             Notice::Error);
 
-        return;
+        return false;
     }
 
     const int presetIndex =
@@ -6889,7 +7915,14 @@ void MainWindow::loadKnotFile(
                 file.preset));
 
     if (presetIndex < 0)
-        return;
+    {
+        showNotice(
+            tr("The knot could not be opened: %1 Choose an .aknot file or a "
+               "text file of coordinates.").arg(tr("Its type is not known here.")),
+            Notice::Error);
+
+        return false;
+    }
 
     // appearance first; a new material also sets its own shine
     if (file.hasAppearance)
@@ -6900,8 +7933,8 @@ void MainWindow::loadKnotFile(
         if (file.samples > 0)
             meshDensitySlider_->setValue(file.samples);
 
-        if (file.material >= 0 && file.material < materialCombo_->count())
-            materialCombo_->setCurrentIndex(file.material);
+        if (materialCombo_->findData(file.material) >= 0)
+            materialCombo_->setCurrentIndex(materialCombo_->findData(file.material));
 
         metallicSlider_->setValue(file.shine);
 
@@ -6943,9 +7976,17 @@ void MainWindow::loadKnotFile(
 
     generateMesh();
 
+    // a relaxed or pulled knot stays the knot it was, in the shape it was
+    // saved in, point for point
+    if (file.shapeChanged && file.points.size() >= 3)
+        applyShape(file.points);
+
     updateLearnSection();
 
     resetCamera();
+
+    if (!file.warning.isEmpty())
+        showNotice(file.warning, Notice::Info);
 
     // this is what the file holds (or, restored, what is yet to be saved)
     historyTimer_->stop();
@@ -6959,17 +8000,33 @@ void MainWindow::loadKnotFile(
         AppSettings::addRecentFile(path);
     }
 
+    // (Save writes .aknot files: a coordinate list stays as it is)
+    savedPath_ =
+        remembered && QFileInfo(path).suffix().compare(QStringLiteral("aknot"), Qt::CaseInsensitive) == 0
+            ? path
+            : QString();
+
+    updateKnotTitle();
+
     updateUndoControls();
 
     writeAutosave();
+
+    return true;
 }
 
 void MainWindow::saveKnotFile()
 {
-    saveKnot();
+    saveKnot(false);
 }
 
-bool MainWindow::saveKnot()
+void MainWindow::saveKnotFileAs()
+{
+    saveKnot(true);
+}
+
+bool MainWindow::saveKnot(
+    bool askForName)
 {
     if (!hasData_)
         return false;
@@ -6977,12 +8034,18 @@ bool MainWindow::saveKnot()
     // a moving curve is kept where it is
     pauseRelaxation();
 
-    const QString path =
-        askSavePath(
-            this,
-            tr("Save knot"),
-            currentData_.name,
-            {tr("AKSIOMA knot file (*.aknot)")});
+    QString path =
+        savedPath_;
+
+    if (askForName || path.isEmpty())
+    {
+        path =
+            askSavePath(
+                this,
+                tr("Save knot"),
+                currentData_.name,
+                {tr("AKSIOMA knot file (*.aknot)")});
+    }
 
     if (path.isEmpty())
         return false;
@@ -7005,6 +8068,10 @@ bool MainWindow::saveKnot()
 
     AppSettings::addRecentFile(path);
 
+    savedPath_ = path;
+
+    updateKnotTitle();
+
     updateUndoControls();
 
     writeAutosave();
@@ -7018,6 +8085,29 @@ void MainWindow::exportViewImage()
 {
     if (glWidget_ == nullptr || !hasData_)
         return;
+
+    /*
+     * A photograph gathers its picture over many frames: right after a move
+     * it is still rough. (A rope that goes on moving never finishes, so the
+     * wait has an end.)
+     */
+    if (!glWidget_->photoPictureFinished())
+    {
+        showNotice(tr("Finishing the picture"), Notice::Busy);
+
+        noticeProgress_->setRange(0, 0);
+
+        QElapsedTimer waited;
+
+        waited.start();
+
+        while (!glWidget_->photoPictureFinished() && waited.elapsed() < 6000)
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+
+        noticeProgress_->setRange(0, 100);
+
+        hideNotice();
+    }
 
     // taken now, before the dialog covers the view
     const QImage image =
@@ -7033,12 +8123,13 @@ void MainWindow::exportViewImage()
     if (path.isEmpty())
         return;
 
-    // JPEG has no transparency
     const bool jpeg =
         QFileInfo(path).suffix().startsWith(QStringLiteral("jp"), Qt::CaseInsensitive);
 
+    // the picture is opaque: whatever the alpha channel of the window held
+    // must not let a slide's background through
     const QImage output =
-        jpeg ? image.convertToFormat(QImage::Format_RGB32) : image;
+        image.convertToFormat(QImage::Format_RGB32);
 
     if (!output.save(path, nullptr, jpeg ? 92 : -1))
     {
@@ -7156,6 +8247,7 @@ void MainWindow::exportReport()
     report.invariants = currentInvariants_;
     report.pointCount = currentData_.points.size();
     report.shapeChanged = relaxChanged_;
+    report.facts = currentFacts();
 
     if (!currentData_.multiStrand && currentData_.closed)
     {
@@ -7173,8 +8265,13 @@ void MainWindow::exportReport()
                 KnotMath::diagramArcs(diagram);
 
             report.diagramCrossings = diagram.crossings.size();
-            report.determinant = KnotMath::diagramDeterminant(arcs);
-            report.tricolourable = KnotMath::coloringDimension(arcs) >= 2;
+
+            // (what the table knows is in the facts)
+            if (report.facts.isEmpty())
+            {
+                report.determinant = KnotMath::diagramDeterminant(arcs);
+                report.tricolourable = KnotMath::coloringDimension(arcs) >= 2;
+            }
         }
     }
 
@@ -7244,14 +8341,30 @@ void MainWindow::toggleSeifert()
         return;
     }
 
+    if (currentInvariants_.notAKnot)
+    {
+        seifertInfoLabel_->setText(notAKnotText());
+
+        return;
+    }
+
     // the surface of the curve as it is now
     pauseRelaxation();
 
     if (unknotActive_ || unknotPreparing_)
         stopUnknotting(false);
 
+    // (a moving rope would draw itself over the surface)
+    stopPhotoRope();
+
+    // the model lies on the table by its own shape, not as the rope lay
+    glWidget_->clearRestingPose();
+
     seifertActive_ = true;
     seifertDirty_ = true;
+    seifertNoFilm_ = false;
+
+    seifertStepSlider_->setMaximum(4);
 
     seifertButton_->setText(tr("BACK TO THE KNOT"));
     Icons::set(seifertButton_, QStringLiteral("stop"));
@@ -7281,6 +8394,14 @@ void MainWindow::stopSeifert()
     Icons::set(seifertButton_, QStringLiteral("play"));
     seifertStepSlider_->setEnabled(false);
 
+    // a sheet still on its way is for nothing now
+    ++seifertSheetJob_;
+
+    seifertFilmTimer_->stop();
+    seifertFilm_ = 0.0;
+
+    applySeifertMaterial();
+
     // the matrix stays, without its links and loops
     seifertLoop_ = -1;
     seifertLifted_ = -1;
@@ -7295,7 +8416,14 @@ void MainWindow::stopSeifert()
 void MainWindow::setSeifertStep(
     int step)
 {
-    seifertStep_ = std::clamp(step, 0, 3);
+    seifertStep_ = std::clamp(step, 0, 4);
+
+    // the film forms, or goes back into disks and bands
+    if ((seifertStep_ >= 4) != (seifertFilm_ > 0.5) && seifertActive_ && seifert_.sheet.valid)
+    {
+        seifertFilmClock_.restart();
+        seifertFilmTimer_->start();
+    }
 
     // the loops of the matrix are shown on the finished surface only
     if (seifertStep_ < 3 && seifertLoop_ >= 0)
@@ -7316,7 +8444,7 @@ void MainWindow::setSeifertStep(
     switch (seifertStep_)
     {
     case 0:
-        seifertStepTitle_->setText(tr("1 / 4   THE KNOT DIAGRAM"));
+        seifertStepTitle_->setText(tr("1 / 5   THE KNOT DIAGRAM"));
         seifertStepText_->setText(
             tr("The knot is laid flat: its diagram, from the direction with the "
                "fewest crossings. The knot has a direction, and every crossing is "
@@ -7324,7 +8452,7 @@ void MainWindow::setSeifertStep(
         break;
 
     case 1:
-        seifertStepTitle_->setText(tr("2 / 4   SEIFERT CIRCLES"));
+        seifertStepTitle_->setText(tr("2 / 5   SEIFERT CIRCLES"));
         seifertStepText_->setText(
             tr("Walk along the knot and, at every crossing, turn onto the other "
                "strand instead of crossing it. The diagram falls apart into loops "
@@ -7333,20 +8461,30 @@ void MainWindow::setSeifertStep(
         break;
 
     case 2:
-        seifertStepTitle_->setText(tr("3 / 4   DISKS"));
+        seifertStepTitle_->setText(tr("3 / 5   DISKS"));
         seifertStepText_->setText(
             tr("Every circle is filled with a disk. The two sides get different "
                "colours: amber is the side from which the circle runs "
                "anticlockwise, blue the other side."));
         break;
 
-    default:
-        seifertStepTitle_->setText(tr("4 / 4   TWISTED BANDS"));
+    case 3:
+        seifertStepTitle_->setText(tr("4 / 5   TWISTED BANDS"));
         seifertStepText_->setText(
             tr("At every crossing the two disks are joined by a band with a half "
                "twist, turned like the crossing. The edge of the surface is the "
                "knot again. Amber always meets amber: the surface has two sides "
                "(it is orientable)."));
+        break;
+
+    default:
+        seifertStepTitle_->setText(tr("5 / 5   PULLED TIGHT"));
+        seifertStepText_->setText(
+            tr("Bend the knot in wire and stretch cloth over it, or dip it in "
+               "soapy water: the sheet pulls itself as tight as it can, so its "
+               "mean curvature comes close to zero. No part of the surface "
+               "passes through another on the way, so it is the same surface: "
+               "the same edge, the same genus, the same Seifert matrix."));
         break;
     }
 
@@ -7377,12 +8515,17 @@ void MainWindow::renderSeifert()
             return;
         }
 
-        seifert_ = KnotMath::buildSeifertSurface(currentData_.points, true);
+        seifert_ = KnotMath::buildSeifertSurface(seifertCurve(), true);
 
         seifertLoop_ = -1;
         seifertLifted_ = -1;
+        seifertFilm_ = 0.0;
+
+        seifertFilmTimer_->stop();
 
         updateSeifertInfo();
+
+        buildSeifertSheetLater();
     }
 
     if (!seifert_.valid)
@@ -7403,15 +8546,21 @@ void MainWindow::renderSeifert()
     highlight.loopColor = SeifertLoopColor;
     highlight.liftedColor = SeifertLiftedColor;
 
+    // Photo mode: not painted card but a real thing on a real wire
+    const bool photo = glWidget_->photoMode();
+
+    applySeifertMaterial();
+
     const KnotMath::Mesh mesh =
         KnotMath::seifertMesh(
             seifert_,
-            seifertStep_,
+            std::min(seifertStep_, 3),
             radius,
-            meshColor_,
+            photo ? QColor(214, 170, 96) : meshColor_,
             SeifertFront,
             SeifertBack,
-            highlight);
+            highlight,
+            seifertFilm_ * seifertFilm_ * (3.0 - 2.0 * seifertFilm_));
 
     if (!mesh.isValid())
         return;
@@ -7422,6 +8571,308 @@ void MainWindow::renderSeifert()
     glWidget_->setMeshColor(meshColor_);
 
     applySurface();
+}
+
+void MainWindow::applySeifertMaterial()
+{
+    const bool photo = glWidget_->photoMode() && seifertActive_;
+    const bool soap = photo && seifertMaterialCombo_->currentIndex() == 1;
+
+    seifertMaterialRow_->setVisible(glWidget_->photoMode());
+
+    glWidget_->setClothSheet(photo && !soap);
+    glWidget_->setSoapFilm(soap);
+
+    // nothing to say about a wire on its own
+    if (!photo || seifertStep_ < 2)
+    {
+        glWidget_->setCaption(QString(), QString());
+        return;
+    }
+
+    if (soap)
+    {
+        glWidget_->setCaption(
+            tr("A soap film on a wire"),
+            tr("The wire is the knot, the film is the surface. Its colours are "
+               "only light: they show how thick the film is, not anything "
+               "about the knot."));
+    }
+    else
+    {
+        glWidget_->setCaption(
+            tr("Cloth stretched on a wire"),
+            tr("The wire is the knot, the cloth is the surface. Amber is one "
+               "side and blue the other, and amber never turns into blue. On "
+               "some knots, like the trefoil, the blue side faces the table."));
+    }
+}
+
+void MainWindow::showSeifertGuide()
+{
+    QDialog dialog(this);
+
+    dialog.setWindowTitle(tr("How to read a Seifert surface"));
+
+    ControlHelp::fitToScreen(&dialog, 640, 760);
+
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+
+    layout->setContentsMargins(20, 20, 20, 20);
+    layout->setSpacing(12);
+
+    QTextBrowser *text = new QTextBrowser(&dialog);
+
+    text->setFrameShape(QFrame::NoFrame);
+    text->setOpenLinks(false);
+
+    auto part = [](const QString &title, const QString &body)
+    {
+        return QStringLiteral(
+                   "<p style='margin-bottom:2px;'><b style='color:#D99B42;'>%1</b></p>"
+                   "<p style='margin-top:0;'>%2</p>")
+            .arg(title, body);
+    };
+
+    QString html = QStringLiteral("<body style='color:#BAB9B4;line-height:1.35;'>");
+
+    html += part(
+        tr("What this is"),
+        tr("A knot is a closed loop. A Seifert surface is a sheet whose whole "
+           "edge is that loop, as a drum skin has its rim for an edge. Every "
+           "knot has one, however tangled it is, and the sheet tells us things "
+           "about the knot that the loop alone hides."));
+
+    html += part(
+        tr("The wire"),
+        tr("The wire is the knot itself. It is the same knot as in the 3D "
+           "view, bent into a shape where the surface can be seen well."));
+
+    html += part(
+        tr("The cloth and its two colours"),
+        tr("The cloth is the surface. A surface like this has two sides, and "
+           "one is dyed amber, the other blue. Follow the cloth across a "
+           "twisted band with your eye: amber always stays amber. A Möbius "
+           "strip has only one side, so amber would run into blue on it: no "
+           "Seifert surface can be like that."));
+
+    html += part(
+        tr("The disks and the bands"),
+        tr("Steps 2 to 4 show how it is made: the knot is cut at every crossing "
+           "into circles, each circle is filled with a disk, and a band with a "
+           "half twist joins two disks at every crossing. The twist of a band "
+           "is the crossing."));
+
+    html += part(
+        tr("Why it is curved"),
+        tr("Step 5 lets the surface pull itself tight, the way stretched cloth "
+           "or a soap film does. Nothing is cut and nothing passes through "
+           "anything: it is the same surface, only easier to see."));
+
+    html += part(
+        tr("The holes: genus"),
+        tr("The genus is the largest number of closed loops you can cut along "
+           "the surface, side by side without touching, and still have it in "
+           "one piece: its number of \"handles\". The genus of a knot is the "
+           "smallest one any of its surfaces has. Only the unknot has genus 0: "
+           "a knot is undone exactly when a plain disk can span it."));
+
+    html += part(
+        tr("The numbers beside it"),
+        tr("The Seifert matrix records how loops on the surface wind around "
+           "each other. Click one of its entries to see its two loops on the "
+           "surface: green on it, pink just off it. From these numbers come "
+           "the signature, the determinant and the Alexander polynomial."));
+
+    html += part(
+        tr("The soap film"),
+        tr("Choose Soap film to see the same surface as a real one: dip a wire "
+           "knot in soapy water and a film like this hangs on it. Its rainbow "
+           "colours mean nothing about the knot. They are light, reflected "
+           "from the film's two faces a few hundred nanometres apart, so they "
+           "only show how thick the film is. Soap cannot show the two sides, "
+           "which is why the cloth comes first."));
+
+    html += QStringLiteral("</body>");
+
+    text->setHtml(Theme::html(html));
+
+    layout->addWidget(text, 1);
+
+    QPushButton *close = new QPushButton(tr("Close"), &dialog);
+
+    close->setMinimumHeight(36);
+
+    connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    layout->addWidget(close, 0, Qt::AlignRight);
+
+    dialog.exec();
+}
+
+QVector<KnotMath::Vec3> MainWindow::seifertCurve() const
+{
+    using namespace KnotMath;
+
+    const QVector<Vec3> &shown = currentData_.points;
+
+    // a curve that was moved is the user's own
+    if (relaxChanged_)
+        return shown;
+
+    /*
+     * A surface can only be as simple as its diagram, and the curves of the
+     * list have no simple diagram. T(3,2) seen from any side has at least 4
+     * crossings, T(5,2) 8; but T(p,q) = T(q,p), and T(2,3) and T(2,5) have
+     * the 3 and 5 of the textbook pictures. The other knots have a simple
+     * curve in the table, as they are or as their mirror image.
+     */
+    QVector<QVector<Vec3>> simpler;
+
+    auto addTorus = [&simpler](int p, int q)
+    {
+        if (p > q && q >= 2)
+            simpler.push_back(buildPreset(Preset::CustomTorus, 320, q, p, QString()).points);
+    };
+
+    auto addTable = [&simpler](const QString &name)
+    {
+        const KnotTable &table = KnotTable::instance();
+        const int index = table.indexOf(name);
+
+        if (index < 0)
+            return;
+
+        QVector<Vec3> curve = table.curve(index);
+
+        simpler.push_back(curve);
+
+        for (Vec3 &p : curve)
+            p.z = -p.z;
+
+        simpler.push_back(curve);
+    };
+
+    switch (currentPreset())
+    {
+    case Preset::Trefoil:
+        addTorus(3, 2);
+        break;
+
+    case Preset::Cinquefoil:
+        addTorus(5, 2);
+        break;
+
+    case Preset::CustomTorus:
+        addTorus(torusPSpin_->value(), torusQSpin_->value());
+        break;
+
+    case Preset::FigureEight:
+        addTable(QStringLiteral("4_1"));
+        break;
+
+    case Preset::Stevedore:
+        addTable(QStringLiteral("6_1"));
+        break;
+
+    default:
+        break;
+    }
+
+    // the very same knot, handedness and all, or not at all
+    const JonesPolynomial jones = computeJonesPolynomial(shown);
+
+    if (jones.valid)
+    {
+        for (const QVector<Vec3> &curve : simpler)
+        {
+            const JonesPolynomial other = computeJonesPolynomial(curve);
+
+            if (other.valid && other == jones)
+                return curve;
+        }
+    }
+
+    return shown;
+}
+
+void MainWindow::buildSeifertSheetLater()
+{
+    const quint64 job = ++seifertSheetJob_;
+
+    const KnotMath::SeifertSurface surface = seifert_;
+
+    auto sheet = std::make_shared<KnotMath::SeifertSheet>();
+
+    QThread *worker = QThread::create(
+        [surface, sheet]()
+        {
+            *sheet = KnotMath::buildSeifertSheet(surface);
+        });
+
+    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+
+    connect(
+        worker,
+        &QThread::finished,
+        this,
+        [this, job, sheet]()
+        {
+            if (job != seifertSheetJob_ || !seifertActive_)
+                return;
+
+            seifert_.sheet = *sheet;
+
+            // A few very tight diagrams give no mesh that holds the knot for
+            // sure: they stay disks and bands, and the steps end there.
+            if (!seifert_.sheet.valid)
+            {
+                seifertNoFilm_ = true;
+
+                if (seifertStep_ >= 4)
+                    setSeifertStep(3);
+
+                seifertStepSlider_->setMaximum(3);
+
+                updateSeifertInfo();
+
+                return;
+            }
+
+            // (the steps may have gone on without it)
+            if (seifertStep_ >= 3)
+                renderSeifert();
+
+            if (seifertStep_ >= 4 && seifert_.sheet.valid)
+            {
+                seifertFilmClock_.restart();
+                seifertFilmTimer_->start();
+            }
+        });
+
+    noteWorker(worker);
+
+    worker->start();
+}
+
+void MainWindow::seifertFilmTick()
+{
+    constexpr double Seconds = 2.2;
+
+    const double step = static_cast<double>(seifertFilmClock_.restart()) / 1000.0 / Seconds;
+
+    const bool forming = seifertStep_ >= 4;
+
+    seifertFilm_ = std::clamp(seifertFilm_ + (forming ? step : -step), 0.0, 1.0);
+
+    if (seifertFilm_ <= 0.0 || seifertFilm_ >= 1.0)
+        seifertFilmTimer_->stop();
+
+    renderSeifert();
+
+    // the finished film seen from above, where its shape shows
+    if (seifertFilm_ >= 1.0)
+        glWidget_->flyToMesh(28.0f, 58.0f);
 }
 
 void MainWindow::updateSeifertInfo()
@@ -7477,8 +8928,9 @@ void MainWindow::updateSeifertInfo()
         }
         else if (knotGenus >= 0)
         {
-            html += tr("The genus of this knot is %1 (KnotInfo): another diagram gives "
-                       "a simpler surface.")
+            html += tr("The genus of this knot is %1 (KnotInfo), so a simpler surface "
+                       "exists. Another diagram may give it, though Seifert's algorithm "
+                       "does not always reach it.")
                         .arg(knotGenus);
         }
         else if (lowerBound == s.genus)
@@ -7610,6 +9062,13 @@ void MainWindow::updateSeifertInfo()
         html += QStringLiteral("<br><br>") + s.matrixError.toHtmlEscaped();
     }
 
+    if (seifertNoFilm_)
+    {
+        html += QStringLiteral("<br><br>") +
+                tr("The soap film step is not available for this diagram: its strands "
+                   "lie too tight for a mesh that holds the knot for sure.");
+    }
+
     // the colours of the links and loops follow the theme
     seifertInfoLabel_->setText(Theme::html(html));
 }
@@ -7645,10 +9104,10 @@ void MainWindow::showSeifertLoops(
     seifertLoop_ = i;
     seifertLifted_ = j;
 
-    // on the finished surface
+    // on the finished surface (or the film)
     seifertTimer_->stop();
 
-    setSeifertStep(3);
+    setSeifertStep(std::max(seifertStep_, 3));
 
     updateSeifertInfo();
 }
@@ -7691,6 +9150,13 @@ bool MainWindow::prepareRelaxation()
         return false;
     }
 
+    if (currentInvariants_.notAKnot)
+    {
+        relaxStatusLabel_->setText(notAKnotText());
+
+        return false;
+    }
+
     // back to the curve itself (the animation frame is not the curve)
     if (unknotActive_ || unknotPreparing_)
         stopUnknotting(true);
@@ -7717,6 +9183,9 @@ bool MainWindow::prepareRelaxation()
 
 void MainWindow::runRelaxation()
 {
+    // the rope in the hand is laid down again from the curve that moved
+    stopPhotoRope();
+
     relaxRunning_ =
         true;
 
@@ -8145,6 +9614,8 @@ void MainWindow::requestRelaxAnalysis()
                 requestRelaxAnalysis();
         });
 
+    noteWorker(worker);
+
     worker->start();
 }
 
@@ -8487,21 +9958,6 @@ constexpr double HandHeight = 6.5;
 // after this long is taken as it lies
 constexpr double LongestFall = 8.0;
 
-bool sameCurve(
-    const QVector<KnotMath::Vec3> &a,
-    const QVector<KnotMath::Vec3> &b)
-{
-    return a.size() == b.size() &&
-           std::equal(
-               a.cbegin(),
-               a.cend(),
-               b.cbegin(),
-               [](const KnotMath::Vec3 &p, const KnotMath::Vec3 &q)
-               {
-                   return p.x == q.x && p.y == q.y && p.z == q.z;
-               });
-}
-
 } // namespace
 
 bool MainWindow::startPhotoRope()
@@ -8546,6 +10002,20 @@ bool MainWindow::startPhotoRope()
     const Photo::RopeMaterial material = Photo::sceneInfo(scene).rope;
 
     Photo::RopeSimulation rope(points, {}, currentData_.closed, material);
+
+    // the rope stays on the table, a little inside its edges
+    const QRectF table = glWidget_->photoTableArea();
+
+    if (!table.isNull())
+    {
+        constexpr double Inside = 1.5;
+
+        rope.stayWithin(
+            table.left() / radius + Inside,
+            table.right() / radius - Inside,
+            table.top() / radius + Inside,
+            table.bottom() / radius - Inside);
+    }
 
     // the same rope: its strands where they lay, the bends it lay in
     {
@@ -8604,7 +10074,11 @@ void MainWindow::stopPhotoRope()
     ++photoRopeSession_;
     photoRopeAnalysisWanted_ = false;
 
+    // nothing left of it for undo to lay down afresh
+    photoRopeTouched_ = false;
+
     updatePhotoRopeButtons();
+    updateUndoControls();
 }
 
 bool MainWindow::showKeptPhotoRope(double radius)
@@ -8997,16 +10471,9 @@ void MainWindow::cutPhotoRope()
         }
     }
 
-    // a gap of a radius and a half between the two ends
-    QVector<KnotMath::Vec3> open;
-
-    open.reserve(n - 3);
-
-    for (int k = 0; k < n - 3; ++k)
-        open.push_back(points.at((cut + 2 + k) % n));
-
-    photoRope_ = std::make_unique<Photo::RopeInHand>(
-        Photo::RopeSimulation(open, {}, false, photoRopeMaterial_));
+    // a gap of a radius and a half between the two ends; the rope is the same
+    // rope, and forgets nothing of how it lay
+    photoRope_->cut(cut + 2, n - 3);
 
     ++photoRopeSession_;
 
@@ -9055,15 +10522,7 @@ void MainWindow::tiePhotoRopeEnds()
 
     // the knot tied in the rope becomes a knot of its own, as one drawn
     // by hand does
-    const int customIndex =
-        presetCombo_->findData(static_cast<int>(KnotMath::Preset::CustomCoordinates));
-
-    if (customIndex >= 0)
-        presetCombo_->setCurrentIndex(customIndex);
-
-    customInputEdit_->setPlainText(KnotMath::diagramToCoordinateText(curve));
-
-    generateMesh();
+    showCustomCurve(KnotMath::diagramToCoordinateText(curve));
 
     relaxStatusLabel_->setText(
         pullExplanation(
@@ -9140,6 +10599,8 @@ void MainWindow::requestPhotoRopeAnalysis()
             if (photoRopeAnalysisWanted_)
                 requestPhotoRopeAnalysis();
         });
+
+    noteWorker(worker);
 
     worker->start();
 }
@@ -9600,14 +11061,17 @@ void curveBounds(
 
 } // namespace
 
+bool MainWindow::isJoinedKnot() const
+{
+    return !joined_.text.isEmpty() &&
+           currentPreset() == KnotMath::Preset::CustomCoordinates &&
+           customInputEdit_->toPlainText() == joined_.text;
+}
+
 QString MainWindow::currentKnotSymbol() const
 {
-    if (!joined_.text.isEmpty() &&
-        currentPreset() == KnotMath::Preset::CustomCoordinates &&
-        customInputEdit_->toPlainText() == joined_.text)
-    {
+    if (isJoinedKnot())
         return joined_.name;
-    }
 
     switch (currentPreset())
     {
@@ -9666,6 +11130,16 @@ void MainWindow::startJoin()
 
         return;
     }
+
+    if (currentInvariants_.notAKnot)
+    {
+        joinStatusLabel_->setText(notAKnotText());
+
+        return;
+    }
+
+    // the curve as it is shown now is the first knot
+    pauseRelaxation();
 
     /*
      * The second knot
@@ -9749,15 +11223,32 @@ void MainWindow::startJoin()
     if (second.size() < 4)
         return;
 
+    // A knot that cannot be turned into its own reverse has a direction, and
+    // the sum depends on it (from 8_17 on).
+    const auto hasDirection = [](int index)
+    {
+        const KnotMath::KnotTable &table = KnotMath::KnotTable::instance();
+
+        if (index < 0 || index >= table.size())
+            return false;
+
+        const QString &symmetry = table.at(index).symmetry;
+
+        return symmetry != QStringLiteral("reversible") &&
+               symmetry != QStringLiteral("fully amphicheiral");
+    };
+
+    joinHasDirection_ =
+        hasDirection(currentData_.tableIndex) ||
+        (choice == QStringLiteral("table") &&
+         hasDirection(KnotMath::KnotTable::instance().indexOf(joinTableName_)));
+
     const bool mirror =
         joinMirrorCheck_->isChecked();
 
     // mirror image: K*
     if (mirror)
         secondSymbol += QStringLiteral("*");
-
-    // the curve as it is shown now is the first knot
-    stopRelaxation();
 
     if (unknotActive_ || unknotPreparing_)
         stopUnknotting(false);
@@ -9978,10 +11469,14 @@ bool MainWindow::startPhotoJoin()
 {
     using KnotMath::Vec3;
 
-    if (!glWidget_->photoMode() || !restingRope_.valid || !sameCurve(restingFrom_, currentData_.points))
-        return false;
-
     const auto scene = static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
+
+    // (a rope of another scene may still lie here while this one is laid)
+    if (!glWidget_->photoMode() || !restingRope_.valid || restingScene_ != static_cast<int>(scene) ||
+        !sameCurve(restingFrom_, currentData_.points))
+    {
+        return false;
+    }
 
     // (a lace stays in its shoe)
     if (Photo::sceneInfo(scene).sneaker)
@@ -10498,6 +11993,8 @@ void MainWindow::landJoinedRope()
             finishJoin();
         });
 
+    noteWorker(worker);
+
     worker->start();
 }
 
@@ -10792,17 +12289,7 @@ void MainWindow::finishJoin()
     joined_ = pendingJoined_;
     joined_.text = KnotMath::diagramToCoordinateText(curve);
 
-    const int customIndex =
-        presetCombo_->findData(
-            static_cast<int>(
-                KnotMath::Preset::CustomCoordinates));
-
-    if (customIndex >= 0)
-        presetCombo_->setCurrentIndex(customIndex);
-
-    customInputEdit_->setPlainText(joined_.text);
-
-    generateMesh();
+    showCustomCurve(joined_.text);
 
     joinLanded_ = Photo::RestingRope();
 
@@ -10824,18 +12311,20 @@ void MainWindow::finishJoin()
                    "polynomial, but different Jones polynomials.");
     }
 
+    if (joinHasDirection_)
+    {
+        text += QStringLiteral("<br><br>") +
+                tr("This knot has a direction: the sum uses the direction shown.");
+    }
+
     joinStatusLabel_->setText(text);
 }
 
 void MainWindow::applyConnectedSumInvariants(
     KnotMath::Invariants &invariants) const
 {
-    if (joined_.text.isEmpty() ||
-        currentPreset() != KnotMath::Preset::CustomCoordinates ||
-        customInputEdit_->toPlainText() != joined_.text)
-    {
+    if (!isJoinedKnot())
         return;
-    }
 
     invariants.classification =
         tr("Connected sum %1").arg(joined_.name);
@@ -10844,6 +12333,14 @@ void MainWindow::applyConnectedSumInvariants(
         invariants.classification += QStringLiteral(", ") + joined_.remark;
 
     QStringList notes;
+
+    /*
+     * The polynomials of a sum are the products of those of its parts. A
+     * diagram too large to compute takes the product. But a curve that was
+     * computed and came out different is not what its name says: that cannot
+     * happen unless something is wrong, and it is not covered up.
+     */
+    bool confirmed = true;
 
     if (joined_.alexanderValid)
     {
@@ -10856,6 +12353,15 @@ void MainWindow::applyConnectedSumInvariants(
         }
         else
         {
+            if (invariants.alexanderValid)
+            {
+                confirmed = false;
+
+                qWarning("Connected sum: the curve has Alexander polynomial %s, the product is %s",
+                         qUtf8Printable(invariants.alexanderPolynomial),
+                         qUtf8Printable(product));
+            }
+
             invariants.alexanderPolynomial = product;
 
             notes << tr("Alexander polynomial: the product of those of the "
@@ -10871,6 +12377,19 @@ void MainWindow::applyConnectedSumInvariants(
         {
             notes << tr("So is its Jones polynomial.");
         }
+        else if (invariants.jonesValid)
+        {
+            confirmed = false;
+
+            qWarning("Connected sum: the curve has Jones polynomial %s, the product is %s",
+                     qUtf8Printable(invariants.jonesPolynomial),
+                     qUtf8Printable(product));
+
+            invariants.jonesPolynomial = product;
+
+            notes << tr("Jones polynomial: the product of those of the two "
+                        "knots.");
+        }
         else
         {
             invariants.jonesPolynomial = product;
@@ -10879,6 +12398,12 @@ void MainWindow::applyConnectedSumInvariants(
                         "knots (this diagram is too large to compute it "
                         "directly).");
         }
+    }
+
+    if (!confirmed)
+    {
+        notes << tr("The curve on screen could not be confirmed: computed "
+                    "directly, its polynomials differ from these products.");
     }
 
     invariants.methodology = notes.join(QLatin1Char(' '));

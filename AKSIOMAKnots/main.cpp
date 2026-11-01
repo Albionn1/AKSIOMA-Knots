@@ -2,6 +2,8 @@
 #include "mainwindow.h"
 
 #include <QApplication>
+#include <QDateTime>
+#include <QFile>
 #include <QIcon>
 #include <QSurfaceFormat>
 #include <QTimer>
@@ -9,6 +11,32 @@
 #ifdef Q_OS_WIN
 #include <QtGui/private/qguiapplication_p.h>
 #endif
+
+namespace
+{
+
+// Warnings go to a small file: there is no console in the installed program.
+void logMessage(
+    QtMsgType type,
+    const QMessageLogContext &,
+    const QString &message)
+{
+    if (type == QtDebugMsg || type == QtInfoMsg)
+        return;
+
+    QFile file(AppSettings::logPath());
+
+    if (!file.open(QIODevice::Append | QIODevice::Text))
+        return;
+
+    file.write(
+        QDateTime::currentDateTime()
+            .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss  "))
+            .toUtf8() +
+        message.toUtf8() + '\n');
+}
+
+} // namespace
 
 int main(
     int argc,
@@ -26,6 +54,14 @@ int main(
     surfaceFormat.setVersion(3, 3);
     surfaceFormat.setProfile(QSurfaceFormat::CoreProfile);
     QSurfaceFormat::setDefaultFormat(surfaceFormat);
+
+    // (the names first: the settings are found by them. The choice of OpenGL
+    // has to be made before the QApplication exists.)
+    QCoreApplication::setOrganizationName(QStringLiteral("AKSIOMA"));
+    QCoreApplication::setApplicationName(QStringLiteral("AKSIOMA Knots"));
+
+    if (AppSettings::softwareGraphics())
+        QCoreApplication::setAttribute(Qt::AA_UseSoftwareOpenGL);
 
     QApplication app(
         argc,
@@ -45,9 +81,10 @@ int main(
         QStringLiteral(
             "AKSIOMA: Knots"));
 
+    // from project() in CMakeLists.txt
     app.setApplicationVersion(
         QStringLiteral(
-            "1.0.0"));
+            AKSIOMA_VERSION));
 
     app.setOrganizationName(
         QStringLiteral(
@@ -85,6 +122,12 @@ int main(
      */
 
     AppSettings::applyAll();
+
+    // a log that grew too long starts again
+    if (QFile(AppSettings::logPath()).size() > 1024 * 1024)
+        QFile::remove(AppSettings::logPath());
+
+    qInstallMessageHandler(logMessage);
 
     // .aknot files: the program's icon, and a double click opens them here
     AppSettings::registerFileType();

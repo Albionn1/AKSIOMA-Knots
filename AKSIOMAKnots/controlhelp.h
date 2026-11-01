@@ -6,6 +6,7 @@
 
 class QLineEdit;
 class QSlider;
+class QWidget;
 
 namespace ControlHelp
 {
@@ -23,6 +24,13 @@ void explainDisabled(
 void resetOnDoubleClick(
     QSlider *slider,
     int value);
+
+// A dialog at the size it was made for, or at what the screen has: a laptop
+// at 150 % scaling has room for about 1280 x 680.
+void fitToScreen(
+    QWidget *dialog,
+    int width,
+    int height);
 
 /*
  * Parses what was typed for a slider of `unit` per step: a comma counts as a
@@ -53,6 +61,9 @@ public:
         QSlider *slider,
         double unit,
         QWidget *parent);
+
+    // what the number says when nothing else is to be said about it
+    static QString usualToolTip();
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;

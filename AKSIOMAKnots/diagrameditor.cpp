@@ -1,5 +1,6 @@
 #include "diagrameditor.h"
 
+#include "controlhelp.h"
 #include "theme.h"
 
 #include <QApplication>
@@ -1134,7 +1135,7 @@ DiagramEditorDialog::DiagramEditorDialog(QWidget *parent, double tubeRadius)
                 updateStatus();
             });
 
-    resize(760, 720);
+    ControlHelp::fitToScreen(this, 760, 720);
 
     setReviewing(false);
 }
@@ -1167,6 +1168,18 @@ void DiagramEditorDialog::setReviewing(bool reviewing)
                  "R1, R2 and R3 are Reidemeister moves: click one to watch it."));
 
     updateStatus();
+}
+
+void DiagramEditorDialog::reject()
+{
+    // Esc or the close button on the check: back to the drawing, not gone
+    if (reviewing_)
+    {
+        setReviewing(false);
+        return;
+    }
+
+    QDialog::reject();
 }
 
 void DiagramEditorDialog::useKnot()

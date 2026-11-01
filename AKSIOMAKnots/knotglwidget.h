@@ -108,6 +108,14 @@ public:
     // tinted (its vertex colours: the strands of a crossing change)
     void setRopeTinted(bool tinted);
 
+    // Photo mode: the sheet of the mesh is a soap film (see the film pass of
+    // the mesh shader) and the tube the wire it hangs on
+    void setSoapFilm(bool on);
+
+    // Photo mode: the sheet of the mesh is cloth, dyed a colour on each side,
+    // stretched on the tube as its wire
+    void setClothSheet(bool on);
+
     // Photo mode: the camera's f-number (8: the room fairly sharp; 2.8:
     // only what is in focus sharp, the room behind blurred away)
     void setPhotoAperture(float fNumber);
@@ -172,6 +180,9 @@ public:
     // positions given to and from the view (crossings, flashes, bounds,
     // the rope) stay in the knot's own coordinates. Call resetCamera
     // afterwards to frame it. False if the room could not be loaded.
+    // the view has started and can draw (false: no OpenGL 3.3 here)
+    bool graphicsReady() const;
+
     bool setPhotoMode(bool enabled, Photo::Scene scene);
 
     bool photoMode() const;
@@ -180,6 +191,10 @@ public:
     // by Photo::buildRopeMesh, and the turn that took the knot onto the
     // table (the table top is y = 0 after it). The knot keeps this pose
     // (also for the animations that follow) until clearRestingPose.
+    // the table top in Photo mode, x across and y along z in the rope's own
+    // table coordinates; empty where the scene has no table
+    QRectF photoTableArea() const;
+
     // `sameTable`: the same rope moved (picked up with the mouse): the
     // table, the room and their light stay where they are.
     void setRestingRope(KnotMath::Mesh mesh, const QMatrix4x4 &pose, bool sameTable = false);
@@ -188,6 +203,15 @@ public:
     void clearRestingPose();
 
     void setAutoRotation(bool enabled);
+
+    // no drifting particles and no turning, in every view
+    static void setReduceMotion(bool reduced);
+
+    // the graphics card and its OpenGL, for a report of a problem
+    QString graphicsInfo() const;
+
+    // Photo mode has gathered all the samples of this picture
+    bool photoPictureFinished() const;
 
     // Grab and pull the rope. While it is on, a left press on the tube
     // around `curve` (drawn with tubes of `radius`) grabs the rope:
@@ -228,6 +252,11 @@ public:
     void flyToSphere(
         const QVector3D &centre,
         float radius,
+        float yaw,
+        float pitch);
+
+    // a camera flight to (yaw, pitch) degrees that shows the whole mesh
+    void flyToMesh(
         float yaw,
         float pitch);
 
@@ -525,6 +554,20 @@ private:
     GLuint shadowTexture_ = 0;
     GLuint shadowFramebuffer_ = 0;
     bool shadowsReady_ = false;
+
+    QString graphicsInfo_;
+
+    // what is in the shadow map, so that it is drawn only when that changes
+    bool shadowDirty_ = true;
+    bool shadowDrawnShoe_ = false;
+    QMatrix4x4 shadowDrawnLight_;
+
+    // compiled the first time Photo mode opens
+    bool photoShadersReady_ = false;
+
+    float particleWait_ = 0.0f;
+
+    static inline bool reduceMotion_ = false;
     int shadowMapSize_ = Lighting::shadowMapSize(1);
 
     Lighting::Options lighting_;
@@ -576,6 +619,16 @@ private:
     QString captionBody_;
     QElapsedTimer captionClock_;
     bool ropeTinted_ = false;
+
+    bool soapFilm_ = false;
+    bool clothSheet_ = false;
+
+    // the film is drawn on its own, over everything solid
+    bool soapFilmShown() const;
+
+    // the indices of what is solid, the sheet's come after them
+    int solidIndexCount() const;
+    int solidIndices_ = 0;
 
     float photoFNumber_ = 8.0f;
     float photoFNumberTarget_ = 8.0f;

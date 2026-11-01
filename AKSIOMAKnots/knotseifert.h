@@ -48,6 +48,70 @@ namespace KnotMath
  *
  * det(V - V^T) = +-1 for every knot; this is checked.
  */
+struct SeifertSurface;
+
+/*
+ * The surface as one mesh (knotfilm.cpp): disks and bands share their
+ * vertices, and every triangle runs round the positive side. The same
+ * vertices in three shapes: as built, with the wire and the seams smoothed,
+ * and relaxed into the film of least area on that wire.
+ */
+struct SeifertSheet
+{
+    bool valid = false;
+
+    QVector<Vec3> model;
+    QVector<Vec3> fair;
+    QVector<Vec3> film;
+
+    QVector<int> triangles;
+
+    // the vertices along the knot, in the knot's direction
+    QVector<int> boundary;
+
+    double areaBefore = 0.0;
+    double areaAfter = 0.0;
+
+    // A place on the mesh: its triangle and the weights of two of its
+    // corners. The loops of the Seifert matrix, so that they stay on the
+    // surface whatever shape it is in.
+    struct Place
+    {
+        int triangle = 0;
+        double b = 0.0;
+        double c = 0.0;
+    };
+
+    QVector<QVector<Place>> loopPlaces;
+};
+
+// (takes up to a second for a large knot: a job for a worker thread)
+SeifertSheet buildSeifertSheet(const SeifertSurface &surface);
+
+// the triangles of a mesh that pass through another one (`cell`: the size
+// of the grid they are looked up in, a few triangles wide)
+QVector<int> seifertSheetCrossings(
+    const QVector<Vec3> &positions,
+    const QVector<int> &triangles,
+    double cell);
+
+// area-weighted normals on the positive side
+QVector<Vec3> seifertSheetNormals(
+    const QVector<Vec3> &positions,
+    const QVector<int> &triangles);
+
+// Loop `index` of the Seifert matrix on the sheet in the shape `positions`
+// (with its `normals`), lifted off the positive side by `lift`.
+QVector<Vec3> seifertSheetLoop(
+    const SeifertSheet &sheet,
+    const QVector<Vec3> &positions,
+    const QVector<Vec3> &normals,
+    int index,
+    double lift);
+
+// triangles of a simple polygon (see knotseifert.cpp), turning its way
+QVector<int> triangulatePolygon(const QVector<Vec3> &polygon);
+
 struct SeifertSurface
 {
     bool valid = false;
@@ -115,6 +179,8 @@ struct SeifertSurface
     QVector<QVector<Vec3>> loops;
     QVector<QVector<Vec3>> loopNormals;
     QVector<QVector<Vec3>> pushedLoops;
+
+    SeifertSheet sheet;
 };
 
 // Two loops of the Seifert matrix shown on the finished surface (step 3):
@@ -160,7 +226,8 @@ SeifertSurface buildSeifertSurface(
  * diagram in the x-z plane, the levels of the circles going up (+y).
  *
  * At step 3, `highlight` adds two loops of the Seifert matrix as thin
- * tubes over the surface.
+ * tubes over the surface, and `film` takes it from disks and bands (0) to
+ * the film of least area (1).
  */
 Mesh seifertMesh(
     const SeifertSurface &surface,
@@ -169,7 +236,8 @@ Mesh seifertMesh(
     const QColor &knotColor,
     const QColor &front,
     const QColor &back,
-    const SeifertHighlight &highlight = SeifertHighlight());
+    const SeifertHighlight &highlight = SeifertHighlight(),
+    double film = 0.0);
 
 // Loop `index` of the Seifert matrix lifted off the positive side as it is
 // shown (farther than pushedLoops, so that it can be seen; in the model's

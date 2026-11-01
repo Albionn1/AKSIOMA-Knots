@@ -134,9 +134,12 @@ int main(int argc, char **argv)
             const AlexanderPolynomial a = computeAlexanderPolynomial(rope.points);
             const JonesPolynomial j = computeJonesPolynomial(rope.points);
 
+            // (the Jones polynomial is computed up to 18 crossings: a big knot
+            // lying on the table can show more, and is then left out, as in
+            // hand_test and sneaker_test; it has not changed for that)
             const bool same =
                 a.valid && alexander.valid && a.text == alexander.text &&
-                (!jones.valid || (j.valid && j.text == jones.text));
+                (!jones.valid || !j.valid || j.text == jones.text);
 
             // heights above the table, in radii
             double lowest = 1.0e30;

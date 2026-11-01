@@ -3,10 +3,12 @@
 #include "knotpractice.h"
 
 #include <QCoreApplication>
+#include <QtNumeric>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 
 namespace KnotMath
 {
@@ -230,9 +232,63 @@ QVector<int> triangulate(const QVector<Vec3> &polygon)
     return triangles;
 }
 
+} // namespace
+
+QVector<int> triangulatePolygon(const QVector<Vec3> &polygon)
+{
+    return triangulate(polygon);
+}
+
+namespace
+{
+
 /*
  * Exact integer and polynomial determinants (fraction-free elimination).
  */
+// Set when a number no longer fits 64 bits: the result is then not known, and
+// is reported as such rather than shown wrong.
+thread_local bool tooLarge = false;
+
+long long productOf(long long a, long long b)
+{
+    long long result = 0;
+
+    if (qMulOverflow(a, b, &result))
+        tooLarge = true;
+
+    return result;
+}
+
+long long sumOf(long long a, long long b)
+{
+    long long result = 0;
+
+    if (qAddOverflow(a, b, &result))
+        tooLarge = true;
+
+    return result;
+}
+
+// (ad - bc) / e, known to be exact: the two products may not fit where their
+// difference, divided, does
+long long bareissStep(long long a, long long d, long long b, long long c, long long e)
+{
+#ifdef __SIZEOF_INT128__
+    const __int128 value =
+        (static_cast<__int128>(a) * d - static_cast<__int128>(b) * c) / e;
+
+    if (value > std::numeric_limits<long long>::max() ||
+        value < std::numeric_limits<long long>::min())
+    {
+        tooLarge = true;
+    }
+
+    return static_cast<long long>(value);
+#else
+    return sumOf(productOf(a, d), -productOf(b, c)) / e;
+#endif
+}
+
 long long integerDeterminant(QVector<QVector<long long>> m)
 {
     const int n = m.size();
@@ -268,7 +324,7 @@ long long integerDeterminant(QVector<QVector<long long>> m)
         for (int r = k + 1; r < n; ++r)
         {
             for (int c = k + 1; c < n; ++c)
-                m[r][c] = (m[r][c] * m[k][k] - m[r][k] * m[k][c]) / previous;
+                m[r][c] = bareissStep(m[r][c], m[k][k], m[r][k], m[k][c], previous);
 
             m[r][k] = 0;
         }
@@ -298,7 +354,7 @@ Poly multiply(const Poly &a, const Poly &b)
     for (int i = 0; i < a.size(); ++i)
     {
         for (int j = 0; j < b.size(); ++j)
-            r[i + j] += a[i] * b[j];
+            r[i + j] = sumOf(r[i + j], productOf(a[i], b[j]));
     }
 
     trim(r);
@@ -341,7 +397,7 @@ Poly divideExact(Poly a, const Poly &b)
         q[shift] = factor;
 
         for (int i = 0; i < b.size(); ++i)
-            a[i + shift] -= factor * b[i];
+            a[i + shift] = sumOf(a[i + shift], -productOf(factor, b[i]));
 
         trim(a);
     }
@@ -489,11 +545,10 @@ void addTwoSided(
     const QVector<Vec3> &normals,
     const QVector<int> &triangles,
     const QColor &front,
-    const QColor &back)
+    const QColor &back,
+    const QVector<Vec3> &flat,
+    double extent)
 {
-    // rope material: the middle of a strand (no dark grooves)
-    const float ropeX = static_cast<float>(std::cos(Pi / 3.0));
-    const float ropeY = static_cast<float>(std::sin(Pi / 3.0));
 
     for (int side = 0; side < 2; ++side)
     {
@@ -510,7 +565,10 @@ void addTwoSided(
             mesh.normals << static_cast<float>(n.x) << static_cast<float>(n.y) << static_cast<float>(n.z);
             mesh.colors << static_cast<float>(color.redF()) << static_cast<float>(color.greenF())
                         << static_cast<float>(color.blueF());
-            mesh.texcoords << ropeX << ropeY << 1.0f << 0.0f;
+            // where it lies on the flat model: the threads of the cloth
+            // stay on the surface whatever shape it takes
+            mesh.texcoords << static_cast<float>(flat[i].x / extent)
+                           << static_cast<float>(flat[i].y / extent) << 1.0f << 0.0f;
             mesh.sheet << 1.0f;
 
             // no centre line of its own: keeps the tubes' centre lines
@@ -1284,7 +1342,9 @@ SeifertSurface buildSeifertSurface(const KnotDiagram &diagram, double extent, bo
         }
     }
 
-    if (std::llabs(integerDeterminant(antisymmetric)) != 1)
+    tooLarge = false;
+
+    if (std::llabs(integerDeterminant(antisymmetric)) != 1 && !tooLarge)
     {
         surface.matrixError = seifertTr("The Seifert matrix failed its check (det(V - V^T) = 1).");
         return surface;
@@ -1310,6 +1370,13 @@ SeifertSurface buildSeifertSurface(const KnotDiagram &diagram, double extent, bo
     }
 
     Poly delta = polynomialDeterminant(polynomial);
+
+    if (tooLarge)
+    {
+        surface.seifertMatrix.clear();
+        surface.matrixError = seifertTr("The numbers of this Seifert matrix are too large to work out exactly.");
+        return surface;
+    }
 
     int low = 0;
 
@@ -1370,7 +1437,7 @@ QVector<Vec3> seifertLiftedLoop(const SeifertSurface &surface, int index)
 
 double seifertTubeRadius(const SeifertSurface &surface, double requestedRadius)
 {
-    return std::min(requestedRadius, 0.022 * surface.extent);
+    return std::min(requestedRadius, 0.018 * surface.extent);
 }
 
 Mesh seifertMesh(
@@ -1380,7 +1447,8 @@ Mesh seifertMesh(
     const QColor &knotColor,
     const QColor &front,
     const QColor &back,
-    const SeifertHighlight &highlight)
+    const SeifertHighlight &highlight,
+    double film)
 {
     Mesh mesh;
 
@@ -1409,7 +1477,30 @@ Mesh seifertMesh(
     // the surface, joined to the tubes at the end
     Mesh surfaceMesh;
 
-    if (step >= 2)
+    const bool wholeSheet = step >= 3 && surface.sheet.valid;
+
+    QVector<Vec3> sheetPoints;
+
+    if (wholeSheet)
+    {
+        const SeifertSheet &sheet = surface.sheet;
+
+        sheetPoints = sheet.fair;
+
+        for (int i = 0; i < sheetPoints.size(); ++i)
+            sheetPoints[i] += (sheet.film[i] - sheet.fair[i]) * film;
+
+        addTwoSided(surfaceMesh,
+                    sheetPoints,
+                    seifertSheetNormals(sheetPoints, sheet.triangles),
+                    sheet.triangles,
+                    front,
+                    back,
+                    sheet.model,
+                    surface.extent);
+    }
+
+    if (step >= 2 && !wholeSheet)
     {
         // disks
         for (int i = 0; i < surface.circles; ++i)
@@ -1420,11 +1511,12 @@ Mesh seifertMesh(
 
             const Vec3 normal(0.0, 0.0, surface.circleCounterClockwise[i] ? 1.0 : -1.0);
 
-            addTwoSided(surfaceMesh, polygon, QVector<Vec3>(polygon.size(), normal), triangles, front, back);
+            addTwoSided(surfaceMesh, polygon, QVector<Vec3>(polygon.size(), normal), triangles, front, back,
+                        polygon, surface.extent);
         }
     }
 
-    if (step >= 3)
+    if (step >= 3 && !wholeSheet)
     {
         // bands
         constexpr int nu = 20;
@@ -1460,9 +1552,12 @@ Mesh seifertMesh(
                 }
             }
 
-            addTwoSided(surfaceMesh, positions, normals, triangles, front, back);
+            addTwoSided(surfaceMesh, positions, normals, triangles, front, back, positions, surface.extent);
         }
+    }
 
+    if (step >= 3)
+    {
         // Two loops of the Seifert matrix: thin enough that the lifted
         // one, just off the surface, does not touch the other.
         const int count = surface.loops.size();
@@ -1473,7 +1568,21 @@ Mesh seifertMesh(
 
         // On the disks the loops run close to the knot: a thinner knot
         // leaves them in sight.
-        mesh.append(tube(surface.boundary,
+        QVector<Vec3> wire = surface.boundary;
+
+        if (wholeSheet)
+        {
+            wire.clear();
+
+            for (const int v : surface.sheet.boundary)
+                wire.push_back(sheetPoints[v]);
+
+            // evenly along the curve (the points of the mesh crowd at the
+            // corners of the bands, where a spline would overshoot)
+            wire = refineCurve(resampleClosedCurve(wire, wire.size(), true), 2, true);
+        }
+
+        mesh.append(tube(wire,
                          showLoops ? std::min(tubeRadius, 0.45 * LoopInset * surface.extent) : tubeRadius,
                          knotColor));
 
@@ -1499,10 +1608,20 @@ Mesh seifertMesh(
                 return result;
             };
 
-            mesh.append(tube(cleaned(surface.loops[highlight.loop]), loopRadius, highlight.loopColor));
-            mesh.append(tube(cleaned(seifertLiftedLoop(surface, highlight.lifted)),
-                             loopRadius,
-                             highlight.liftedColor));
+            QVector<Vec3> onSheet = surface.loops[highlight.loop];
+            QVector<Vec3> lifted = seifertLiftedLoop(surface, highlight.lifted);
+
+            if (wholeSheet)
+            {
+                const QVector<Vec3> normals = seifertSheetNormals(sheetPoints, surface.sheet.triangles);
+
+                onSheet = seifertSheetLoop(surface.sheet, sheetPoints, normals, highlight.loop, 0.0);
+                lifted = seifertSheetLoop(surface.sheet, sheetPoints, normals, highlight.lifted,
+                                          SeifertLoopLift * surface.extent);
+            }
+
+            mesh.append(tube(cleaned(onSheet), loopRadius, highlight.loopColor));
+            mesh.append(tube(cleaned(lifted), loopRadius, highlight.liftedColor));
         }
     }
 

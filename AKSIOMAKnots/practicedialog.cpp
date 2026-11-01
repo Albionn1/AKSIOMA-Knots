@@ -1,5 +1,6 @@
 #include "practicedialog.h"
 
+#include "controlhelp.h"
 #include "diagrameditor.h"
 #include "knotexport.h"
 #include "knottable.h"
@@ -30,8 +31,10 @@ QColor kMuted() { return Theme::colors().muted; }
 QColor kQuiet() { return Theme::colors().quiet; }
 QColor kAccent() { return Theme::colors().accent; }
 
-const QColor kRight(48, 164, 108);
-const QColor kWrong(229, 72, 77);
+// (blue and vermilion stay apart for colour-blind eyes, and a tick or a cross
+// says it as well)
+const QColor kRight(0, 158, 115);
+const QColor kWrong(213, 94, 0);
 
 constexpr double kLineWidth = 5.0;
 constexpr double kGapPixels = 11.0;
@@ -167,11 +170,11 @@ QColor PracticeCanvas::tricolor(int color)
     switch (color)
     {
     case 0:
-        return QColor(229, 72, 77);
+        return QColor(213, 94, 0);
     case 1:
-        return QColor(48, 164, 108);
+        return QColor(0, 158, 115);
     case 2:
-        return QColor(62, 142, 247);
+        return QColor(86, 180, 233);
     default:
         return kLine();
     }
@@ -557,6 +560,33 @@ void PracticeCanvas::paintEvent(QPaintEvent *)
             painter.drawEllipse(toWidget(p.x, p.y), 18.0, 18.0);
         }
 
+        // the colour of an arc as a letter too: not everyone sees all three
+        QFont letterFont = painter.font();
+
+        letterFont.setBold(true);
+
+        painter.setFont(letterFont);
+
+        for (int arc = 0; arc < arcs_.arcCount; ++arc)
+        {
+            const int value = colors_.value(arc, -1);
+
+            if (value < 0)
+                continue;
+
+            const QPointF middle = arcPath(arc).pointAtPercent(0.5);
+
+            painter.setPen(QPen(tricolor(value), 1.5));
+            painter.setBrush(kBackground());
+            painter.drawEllipse(middle, 10.0, 10.0);
+
+            painter.setPen(kLine());
+            painter.drawText(
+                QRectF(middle.x() - 10.0, middle.y() - 10.0, 20.0, 20.0),
+                Qt::AlignCenter,
+                QString(QChar('A' + value)));
+        }
+
         return;
     }
 
@@ -630,6 +660,18 @@ void PracticeCanvas::paintEvent(QPaintEvent *)
             Qt::AlignCenter,
             answer == 0 ? QStringLiteral("?")
                         : (answer > 0 ? QStringLiteral("+") : QStringLiteral("−")));
+
+        // right or wrong, not only in a colour
+        if (signsChecked_ && answer != 0)
+        {
+            const QPointF mark = badge + out * 22.0;
+
+            painter.setPen(ring);
+            painter.drawText(
+                QRectF(mark.x() - 12.0, mark.y() - 12.0, 24.0, 24.0),
+                Qt::AlignCenter,
+                QString(QChar(answer == arcs_.sign.value(k) ? 0x2713 : 0x2717)));
+        }
     }
 
     drawSignLegend(painter);
@@ -823,7 +865,7 @@ PracticeDialog::PracticeDialog(
                     signsChanged();
             });
 
-    resize(820, 780);
+    ControlHelp::fitToScreen(this, 820, 780);
 
     brushChosen(0);
     exerciseChanged();
@@ -1290,6 +1332,9 @@ void PracticeDialog::coloringSolution()
 
 void PracticeDialog::coloringClear()
 {
+    if (!canvas_->diagram().isValid())
+        return;
+
     canvas_->setHighlightArc(-1);
     canvas_->setColors(QVector<int>(canvas_->arcs().arcCount, -1));
 

@@ -51,13 +51,20 @@ Formati i skedarit `.aknot` (PDF): [Shqip](Manual/AKSIOMA_aknot_File_Format_SQ.p
   zbritës, hap pas hapi, me diagramin e nyjës pranë.
 - **Relakso dhe ngatërro** kurbën me një simulim fizik ku fijet nuk kalojnë
   kurrë njëra nëpër tjetrën.
+- **Bashkimi i nyjeve**: shuma e lidhur K₁ # K₂ e animuar, me polinomet e
+  saj; dy nyje trefletëshe japin nyjën "granny" ose nyjën katrore.
 - **Sipërfaqet e Seifertit**, të ndërtuara hap pas hapi, me matricën e
   Seifertit dhe lakoret pas çdo elementi të saj.
+- **Mënyra Foto**: nyja si litar i vërtetë me fizikën e vet, mbi një tavolinë
+  në diell ose e lidhur në një patike. Kapeni me miun, priteni dhe lidhni një
+  nyjë tjetër.
 - **Ushtrime**: trengjyrësimi dhe shenjat e kryqëzimeve mbi diagramin e
   nyjës.
 - **Skedarë**: ruani dhe hapni skedarë `.aknot`, ruani figura, diagrame
   (SVG, PNG) dhe koordinata.
-- Shqip dhe anglisht, temë e errët dhe e çelët.
+- **Për punën e përditshme**: Kthe prapa dhe Bëje përsëri, ruajtje automatike, gjetje e
+  shpejtë me Ctrl+K, shkurtore tastiere.
+- Shqip dhe anglisht, temë e errët dhe e hapur.
 
 ## Ndërtimi nga kodi burimor
 
@@ -82,8 +89,9 @@ Copyright © 2026 AKSIOMA. Softuer i lirë sipas
 ## English
 
 **AKSIOMA Knots** is an interactive 3D laboratory for knot theory: explore
-knots, compute their invariants, identify drawn knots and watch them being
-unknotted. Download the Windows installer from the
+knots, compute their invariants, identify drawn knots, watch them being
+unknotted or joined, build their Seifert surfaces, and handle them as real
+rope in Photo mode. Download the Windows installer from the
 [latest release](https://github.com/Albionn1/AKSIOMA-Knots/releases/latest);
 the program and the installer are in Albanian and English. See the
 [English manual](Manual/AKSIOMA_Knots_Manual_EN.pdf).

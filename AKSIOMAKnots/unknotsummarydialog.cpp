@@ -1,5 +1,6 @@
 #include "unknotsummarydialog.h"
 
+#include "controlhelp.h"
 #include "icons.h"
 #include "theme.h"
 
@@ -99,7 +100,7 @@ UnknotSummaryDialog::UnknotSummaryDialog(
     , summary_(summary)
 {
     setWindowTitle(tr("Unknotting summary"));
-    resize(900, 620);
+    ControlHelp::fitToScreen(this, 900, 620);
 
     const int changes = changeCount();
 

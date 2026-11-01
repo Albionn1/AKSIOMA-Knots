@@ -5,6 +5,7 @@
 #include <QLineEdit>
 #include <QMouseEvent>
 #include <QPointer>
+#include <QScreen>
 #include <QSlider>
 #include <QTimer>
 
@@ -100,6 +101,19 @@ void resetOnDoubleClick(
     new DoubleClickReset(slider, value);
 }
 
+void fitToScreen(
+    QWidget *dialog,
+    int width,
+    int height)
+{
+    const QWidget *owner = dialog->parentWidget() != nullptr ? dialog->parentWidget() : dialog;
+
+    // (its frame and title bar take some of the room)
+    const QSize room = owner->screen()->availableGeometry().size() - QSize(16, 48);
+
+    dialog->resize(QSize(width, height).boundedTo(room));
+}
+
 bool parseValue(
     const QString &text,
     double unit,
@@ -138,7 +152,12 @@ SliderValue::SliderValue(
       unit_(unit)
 {
     setCursor(Qt::IBeamCursor);
-    setToolTip(tr("Click to type a value. Double-click the slider to reset it."));
+    setToolTip(usualToolTip());
+}
+
+QString SliderValue::usualToolTip()
+{
+    return tr("Click to type a value. Double-click the slider to reset it.");
 }
 
 void SliderValue::mousePressEvent(QMouseEvent *event)

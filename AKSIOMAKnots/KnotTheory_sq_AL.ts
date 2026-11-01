@@ -40,8 +40,8 @@
         <translation>NDËRTUAR ME</translation>
     </message>
     <message>
-        <source>Qt (The Qt Company), used under the GNU Lesser General Public License version 3.</source>
-        <translation>Qt (The Qt Company), i përdorur sipas Licencës së Përgjithshme Publike të Kufizuar GNU, versioni 3.</translation>
+        <source>Qt (The Qt Company), used under the GNU Lesser General Public License version 3. Its license and the notices of the other libraries are in THIRD_PARTY_NOTICES.txt, in the program&apos;s folder.</source>
+        <translation>Qt (The Qt Company), i përdorur sipas Licencës së Përgjithshme Publike të Kufizuar GNU, versioni 3. Licenca e tij dhe njoftimet e bibliotekave të tjera janë te THIRD_PARTY_NOTICES.txt, në dosjen e programit.</translation>
     </message>
     <message>
         <source>MATHEMATICS</source>
@@ -69,7 +69,7 @@
     </message>
     <message>
         <source>The places and surfaces of Photo mode come from &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; and are free for any use (CC0): the HDRIs Chinese Garden (Andreas Mischok) and Meadow 2 (Sergej Majboroda), the textures Wood Table Large and Wood Floor Worn (Dimitrios Savva). The rope is a Cosserat rod solved directly (C. Deul, T. Kugelstadt, M. Weiler and J. Bender, 2018) by position based dynamics (XPBD: M. Macklin, M. Müller and N. Chentanez, 2016). The sneaker was made for AKSIOMA in Blender.</source>
-        <translation>Vendet dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): HDRI-të Chinese Garden (Andreas Mischok) dhe Meadow 2 (Sergej Majboroda), teksturat Wood Table Large dhe Wood Floor Worn (Dimitrios Savva). Litari është një shufër Cosserat e zgjidhur drejtpërdrejt (C. Deul, T. Kugelstadt, M. Weiler dhe J. Bender, 2018) me dinamikë të bazuar në pozicione (XPBD: M. Macklin, M. Müller dhe N. Chentanez, 2016). Atletja u bë për AKSIOMA në Blender.</translation>
+        <translation>Vendet dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): HDRI-të Chinese Garden (Andreas Mischok) dhe Meadow 2 (Sergej Majboroda), teksturat Wood Table Large dhe Wood Floor Worn (Dimitrios Savva). Litari është një shufër Cosserat e zgjidhur drejtpërdrejt (C. Deul, T. Kugelstadt, M. Weiler dhe J. Bender, 2018) me dinamikë të bazuar në pozicione (XPBD: M. Macklin, M. Müller dhe N. Chentanez, 2016). Patikja u bë për AKSIOMA në Blender.</translation>
     </message>
     <message>
         <source>About Qt</source>
@@ -119,11 +119,11 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Undo</source>
-        <translation>Zhbëj</translation>
+        <translation>Kthe prapa</translation>
     </message>
     <message>
         <source>Undo the last change (Ctrl+Z).</source>
-        <translation>Zhbëj ndryshimin e fundit (Ctrl+Z).</translation>
+        <translation>Kthe prapa ndryshimin e fundit (Ctrl+Z).</translation>
     </message>
     <message>
         <source>Alternate</source>
@@ -155,7 +155,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Moves the strands away from each other. The crossings stay, so it is the same knot.</source>
-        <translation>I largon fijet nga njëra-tjetra. Kryqëzimet mbeten, ndaj është e njëjta nyjë.</translation>
+        <translation>I largon fijet nga njëra-tjetra. Kryqëzimet mbeten, prandaj është e njëjta nyjë.</translation>
     </message>
     <message>
         <source>Flip crossing</source>
@@ -195,7 +195,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>The loop is gone: it was only a twist, so it is the same knot.</source>
-        <translation>Laku u hoq: ishte vetëm një përdredhje, ndaj është e njëjta nyjë.</translation>
+        <translation>Laku u hoq: ishte vetëm një përdredhje, prandaj është e njëjta nyjë.</translation>
     </message>
     <message>
         <source>The loop is gone, with the crossings on it: this can be another knot now.</source>
@@ -322,7 +322,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Fibered</source>
-        <translation>Me fibrim</translation>
+        <translation>Fibered</translation>
     </message>
     <message>
         <source>Amphicheiral</source>
@@ -335,6 +335,26 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Load knot</source>
         <translation>Ngarko nyjën</translation>
+    </message>
+    <message>
+        <source>chiral</source>
+        <translation>kirale</translation>
+    </message>
+    <message>
+        <source>reversible</source>
+        <translation>e kthyeshme</translation>
+    </message>
+    <message>
+        <source>fully amphicheiral</source>
+        <translation>plotësisht amfikirale</translation>
+    </message>
+    <message>
+        <source>positive amphicheiral</source>
+        <translation>amfikirale pozitive</translation>
+    </message>
+    <message>
+        <source>negative amphicheiral</source>
+        <translation>amfikirale negative</translation>
     </message>
     <message>
         <source>%1 of %2 knots</source>
@@ -424,6 +444,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
 <context>
     <name>KnotExport</name>
     <message>
+        <source>This file holds several curves: only the first was opened.</source>
+        <translation>Ky skedar ka disa kurba: u hap vetëm e para.</translation>
+    </message>
+    <message>
         <source>The file contains no coordinates (one &quot;x, y, z&quot; point per line).</source>
         <translation>Skedari nuk përmban koordinata (një pikë &quot;x, y, z&quot; për rresht).</translation>
     </message>
@@ -498,6 +522,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Writhe of the 3D curve</source>
         <translation>Përdredhja e kurbës 3D</translation>
+    </message>
+    <message>
+        <source>Writhe of the diagram</source>
+        <translation>Përdredhja e diagramit</translation>
     </message>
     <message>
         <source>Crossings in the XY projection</source>
@@ -614,6 +642,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Formula nuk është e përcaktuar për gjithë intervalin e parametrit 0 &lt;= t &lt;= 2*pi.</translation>
     </message>
     <message>
+        <source>The curve goes too far out: keep every coordinate under a million.</source>
+        <translation>Kurba shkon shumë larg: mbajeni çdo koordinatë nën një milion.</translation>
+    </message>
+    <message>
         <source>Numerical custom geometry</source>
         <translation>Gjeometri numerike e personalizuar</translation>
     </message>
@@ -656,10 +688,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Formula input must define x, y and z.</source>
         <translation>Formula duhet të përcaktojë x, y dhe z.</translation>
-    </message>
-    <message>
-        <source>One or more formulas could not be evaluated.</source>
-        <translation>Një ose më shumë formula nuk mund të llogariteshin.</translation>
     </message>
     <message>
         <source>Undefined as a single-knot Alexander polynomial</source>
@@ -751,6 +779,30 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Përdredhja dhe numri i kryqëzimeve janë numerike.</translation>
     </message>
     <message>
+        <source>The formula for %1 uses &quot;%2&quot;, which is not known here.</source>
+        <translation>Formula për %1 përdor &quot;%2&quot;, që këtu nuk njihet.</translation>
+    </message>
+    <message>
+        <source>The formula for %1 has a comma in a number: write 0.5, not 0,5.</source>
+        <translation>Formula për %1 ka presje në një numër: shkruani 0.5, jo 0,5.</translation>
+    </message>
+    <message>
+        <source>The formula for %1 has no value: it divides by zero, or takes a root or a logarithm where there is none.</source>
+        <translation>Formula për %1 nuk ka vlerë: pjesëton me zero, ose merr rrënjë a logaritëm aty ku nuk ka.</translation>
+    </message>
+    <message>
+        <source>The formula for %1 could not be read near &quot;%2&quot;.</source>
+        <translation>Formula për %1 nuk mund të lexohej afër &quot;%2&quot;.</translation>
+    </message>
+    <message>
+        <source>The curve does not close, so its ends were joined with a straight piece.</source>
+        <translation>Kurba nuk mbyllet, prandaj skajet e saj u bashkuan me një copë të drejtë.</translation>
+    </message>
+    <message>
+        <source>The formula for %1 is too long.</source>
+        <translation>Formula për %1 është shumë e gjatë.</translation>
+    </message>
+    <message>
         <source>Exact values for this knot type. The writhe and the crossings are measured on the 3D curve on screen.</source>
         <translation>Vlera të sakta për këtë lloj nyje. Përdredhja dhe kryqëzimet maten në kurbën 3D në ekran.</translation>
     </message>
@@ -773,6 +825,18 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>The knot type cannot be read off the shape alone. The values are measured on the 3D curve on screen.</source>
         <translation>Lloji i nyjës nuk mund të njihet vetëm nga forma. Vlerat maten në kurbën 3D në ekran.</translation>
+    </message>
+    <message>
+        <source>Not a knot: the curve passes through itself</source>
+        <translation>Nuk është nyjë: kurba kalon nëpër vetveten</translation>
+    </message>
+    <message>
+        <source>Not defined</source>
+        <translation>Nuk është e përcaktuar</translation>
+    </message>
+    <message>
+        <source>A knot is a closed curve that does not touch itself. Give the strands different heights where they meet.</source>
+        <translation>Nyja është një kurbë e mbyllur që nuk e prek vetveten. Jepu fijeve lartësi të ndryshme aty ku takohen.</translation>
     </message>
     <message>
         <source>Alexander polynomial: %1</source>
@@ -812,7 +876,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Custom Torus Knot T(p,q)</source>
-        <translation>Nyjë torike e personalizuar T(p,q)</translation>
+        <translation>Nyjë torike T(p,q)</translation>
     </message>
     <message>
         <source>Custom Coordinates / Formula</source>
@@ -1004,12 +1068,16 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Matrica e Seifertit nuk e kaloi kontrollin (det(V - V^T) = 1).</translation>
     </message>
     <message>
+        <source>The numbers of this Seifert matrix are too large to work out exactly.</source>
+        <translation>Numrat e kësaj matrice të Seifertit janë shumë të mëdhenj për t&apos;u llogaritur saktësisht.</translation>
+    </message>
+    <message>
         <source>Both knots must be closed curves.</source>
         <translation>Të dyja nyjet duhet të jenë kurba të mbyllura.</translation>
     </message>
     <message>
         <source>No way was found to place the two knots side by side with an arc of each facing the other. Try a thinner tube.</source>
-        <translation>Nuk u gjet mënyrë për t’i vendosur dy nyjet krah njëra-tjetrës me nga një hark përballë tjetrës. Provoni një tub më të hollë.</translation>
+        <translation>Nuk u gjet mënyrë për t’i vendosur dy nyjet pranë njëra-tjetrës me nga një hark përballë tjetrës. Provoni një tub më të hollë.</translation>
     </message>
 </context>
 <context>
@@ -1166,7 +1234,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>DRAG  ORBIT      RIGHT-DRAG  PAN      SCROLL  ZOOM</source>
-        <translation>TËRHIQ  RROTULLO      KLIK I DJATHTË  ZHVENDOS      RROTËZA  ZMADHO</translation>
+        <translation>TËRHIQ  RROTULLO      KLIK I DJATHTË  ZHVENDOS      SCROLL  ZMADHO</translation>
     </message>
     <message>
         <source>Reset view</source>
@@ -1214,7 +1282,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Custom Torus T(p,q)</source>
-        <translation>Nyjë torike e personalizuar T(p,q)</translation>
+        <translation>Nyjë torike T(p,q)</translation>
     </message>
     <message>
         <source>Custom Curve</source>
@@ -1246,7 +1314,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>APPLY</source>
-        <translation>ZBATO</translation>
+        <translation>APLIKO</translation>
     </message>
     <message>
         <source>APPEARANCE</source>
@@ -1337,10 +1405,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Hap nyjë...</translation>
     </message>
     <message>
-        <source>Save knot...</source>
-        <translation>Ruaj nyjën...</translation>
-    </message>
-    <message>
         <source>Export 3D picture...</source>
         <translation>Ruaj figurën 3D...</translation>
     </message>
@@ -1370,7 +1434,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Tied on a sneaker</source>
-        <translation>Lidhur në një atlete</translation>
+        <translation>Lidhur në një patike</translation>
     </message>
     <message>
         <source>Where the knot is photographed.</source>
@@ -1436,11 +1500,11 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Undo</source>
-        <translation>Zhbëj</translation>
+        <translation>Kthe prapa</translation>
     </message>
     <message>
         <source>Redo</source>
-        <translation>Ribëj</translation>
+        <translation>Bëje përsëri</translation>
     </message>
     <message>
         <source>Find anything...</source>
@@ -1451,6 +1515,22 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Hap të fundit</translation>
     </message>
     <message>
+        <source>Help</source>
+        <translation>Ndihmë</translation>
+    </message>
+    <message>
+        <source>The manual, keyboard shortcuts and the tour</source>
+        <translation>Manuali, shkurtesat e tastierës dhe udhëzimi</translation>
+    </message>
+    <message>
+        <source>Save as...</source>
+        <translation>Ruaj si...</translation>
+    </message>
+    <message>
+        <source>User manual</source>
+        <translation>Manuali i përdorimit</translation>
+    </message>
+    <message>
         <source>Keyboard shortcuts</source>
         <translation>Shkurtesat e tastierës</translation>
     </message>
@@ -1459,20 +1539,24 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Shfaq udhëzimin</translation>
     </message>
     <message>
+        <source>Copy diagnostic information</source>
+        <translation>Kopjo informacionin diagnostikues</translation>
+    </message>
+    <message>
         <source>Undo  (Ctrl+Z)</source>
-        <translation>Zhbëj  (Ctrl+Z)</translation>
+        <translation>Kthe prapa  (Ctrl+Z)</translation>
     </message>
     <message>
         <source>Nothing to undo yet.</source>
-        <translation>Ende s&apos;ka asgjë për të zhbërë.</translation>
+        <translation>Ende nuk ka asgjë për ta kthyer prapa.</translation>
     </message>
     <message>
         <source>Redo  (Ctrl+Y)</source>
-        <translation>Ribëj  (Ctrl+Y)</translation>
+        <translation>Bëje përsëri  (Ctrl+Y)</translation>
     </message>
     <message>
         <source>Nothing to redo.</source>
-        <translation>S&apos;ka asgjë për të ribërë.</translation>
+        <translation>Nuk ka asgjë për ta bërë përsëri.</translation>
     </message>
     <message>
         <source>Close</source>
@@ -1492,7 +1576,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Nothing to go back to: the knot has not been moved.</source>
-        <translation>S&apos;ka ku të kthehet: nyja nuk është lëvizur.</translation>
+        <translation>Nuk ka ku të kthehet: nyja nuk është lëvizur.</translation>
     </message>
     <message>
         <source>Start the unknotting first.</source>
@@ -1520,12 +1604,44 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Skip</source>
-        <translation>Kapërce</translation>
+        <translation>Kalo</translation>
     </message>
     <message>
         <source>Unknot</source>
         <comment>rail</comment>
         <translation>Zgjidhja</translation>
+    </message>
+    <message>
+        <source>t runs from 0 to 2π, and the two ends are joined.</source>
+        <translation>t shkon nga 0 deri në 2π, dhe dy skajet bashkohen.</translation>
+    </message>
+    <message>
+        <source>Functions: sin, cos, tan, sec, csc, cot, asin, acos, atan, atan2, sinh, cosh, tanh, exp, log (natural), log10, sqrt, abs, sign, floor, ceil, min, max, pow, mod. Constants: pi, e. Numbers use a decimal point.</source>
+        <translation>Funksionet: sin, cos, tan, sec, csc, cot, asin, acos, atan, atan2, sinh, cosh, tanh, exp, log (natyror), log10, sqrt, abs, sign, floor, ceil, min, max, pow, mod. Konstantet: pi, e. Numrat shkruhen me pikë dhjetore.</translation>
+    </message>
+    <message>
+        <source>Examples</source>
+        <translation>Shembuj</translation>
+    </message>
+    <message>
+        <source>Trefoil Knot</source>
+        <translation>Nyja trefletëshe</translation>
+    </message>
+    <message>
+        <source>Figure-Eight Knot</source>
+        <translation>Nyja në formë tetëshi</translation>
+    </message>
+    <message>
+        <source>Lissajous knot</source>
+        <translation>Nyja e Lissajous-it</translation>
+    </message>
+    <message>
+        <source>Make the curve  (Ctrl+Enter)</source>
+        <translation>Bëje kurbën  (Ctrl+Enter)</translation>
+    </message>
+    <message>
+        <source>Points along the curve. A knot that needs more points to stay the same knot gets them, whatever this says.</source>
+        <translation>Pikat përgjatë kurbës. Një nyjë që ka nevojë për më shumë pika që të mbetet e njëjta nyjë i merr ato, pavarësisht nga kjo vlerë.</translation>
     </message>
     <message>
         <source>Step by step (pause at every stage)</source>
@@ -1564,12 +1680,28 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>SIPËRFAQJA E SEIFERTIT</translation>
     </message>
     <message>
-        <source>Every knot is the edge of a surface with two sides, a Seifert surface. Seifert&apos;s algorithm builds one from the knot diagram in four steps.</source>
-        <translation>Çdo nyjë është buza e një sipërfaqeje me dy anë, një sipërfaqeje të Seifertit. Algoritmi i Seifertit e ndërton një të tillë nga diagrami i nyjës në katër hapa.</translation>
+        <source>How to read this</source>
+        <translation>Si lexohet kjo</translation>
     </message>
     <message>
-        <source>Go back and forth through the four steps.</source>
-        <translation>Lëvizni para dhe mbrapa nëpër katër hapat.</translation>
+        <source>What the wire, the sheet and its colours mean.</source>
+        <translation>Çfarë duan të thonë teli, fleta dhe ngjyrat e saj.</translation>
+    </message>
+    <message>
+        <source>Made of</source>
+        <translation>Prej</translation>
+    </message>
+    <message>
+        <source>Two-coloured cloth</source>
+        <translation>Pëlhurë me dy ngjyra</translation>
+    </message>
+    <message>
+        <source>Soap film</source>
+        <translation>Cipë sapuni</translation>
+    </message>
+    <message>
+        <source>Cloth shows the two sides of the surface. A soap film is the shape nature gives it, but has only one look.</source>
+        <translation>Pëlhura tregon dy anët e sipërfaqes. Cipa e sapunit është forma që i jep natyra, por ka vetëm një pamje.</translation>
     </message>
     <message>
         <source>CLASSIFICATION</source>
@@ -1590,6 +1722,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>JONES POLYNOMIAL</source>
         <translation>POLINOMI I JONESIT</translation>
+    </message>
+    <message>
+        <source>PROPERTIES</source>
+        <translation>VETITË</translation>
     </message>
     <message>
         <source>ANALYSIS</source>
@@ -1613,7 +1749,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Light</source>
-        <translation>E çelët</translation>
+        <translation>E hapur</translation>
     </message>
     <message>
         <source>Text size</source>
@@ -1648,8 +1784,24 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Mbaj mend madhësinë e dritares</translation>
     </message>
     <message>
+        <source>Reduce motion</source>
+        <translation>Zvogëlo lëvizjen</translation>
+    </message>
+    <message>
+        <source>Stops the drifting background and the turning knot.</source>
+        <translation>Ndal sfondin që lëviz dhe rrotullimin e nyjës.</translation>
+    </message>
+    <message>
+        <source>Simple graphics mode</source>
+        <translation>Mënyra e thjeshtë grafike</translation>
+    </message>
+    <message>
+        <source>For a computer whose 3D view stays black: slower, without Photo mode. It starts with the next start of AKSIOMA.</source>
+        <translation>Për një kompjuter ku pamja 3D mbetet e zezë: më e ngadaltë, pa mënyrën Foto. Fillon me hapjen tjetër të AKSIOMA-s.</translation>
+    </message>
+    <message>
         <source>Restore defaults</source>
-        <translation>Rikthe parazgjedhjet</translation>
+        <translation>Rikthe vlerat fillestare</translation>
     </message>
     <message>
         <source>Changes are saved automatically. F11 switches full screen on and off, Esc leaves it.</source>
@@ -1657,11 +1809,11 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Reset all settings to their default values?</source>
-        <translation>Të rikthehen të gjitha cilësimet në vlerat e parazgjedhura?</translation>
+        <translation>Të rikthehen të gjitha cilësimet në vlerat fillestare?</translation>
     </message>
     <message>
         <source>PRESET</source>
-        <translation>PARACAKTIMI</translation>
+        <translation>PRESET</translation>
     </message>
     <message>
         <source>Studio</source>
@@ -1697,7 +1849,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Fill light</source>
-        <translation>Drita mbushëse</translation>
+        <translation>Drita plotësuese</translation>
     </message>
     <message>
         <source>A weak light low on the right that brightens the shaded side.</source>
@@ -1777,7 +1929,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Sharper shadow edges need a larger shadow map in video memory.</source>
-        <translation>Skajet më të mprehta të hijeve kërkojnë një hartë hijesh më të madhe në memorien e videos.</translation>
+        <translation>Skajet më të mprehta të hijeve kërkojnë më shumë memorie të kartës grafike.</translation>
     </message>
     <message>
         <source>Low (4 MB)</source>
@@ -1833,7 +1985,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Three lights and soft boxes around the camera, with shadows: the full look.</source>
-        <translation>Tri drita dhe kuti drite rreth kamerës, me hije: pamja e plotë.</translation>
+        <translation>Tri drita dhe softbox rreth kamerës, me hije: pamja e plotë.</translation>
     </message>
     <message>
         <source>Gentle light and wide, soft shadows, without the rim light.</source>
@@ -1865,11 +2017,11 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>This program: %1 of %2 video memory</source>
-        <translation>Ky program: %1 nga %2 memorie videoje</translation>
+        <translation>Ky program: %1 nga %2 memorie të kartës grafike</translation>
     </message>
     <message>
         <source>The video memory cannot be read on this system.</source>
-        <translation>Memoria e videos nuk mund të lexohet në këtë sistem.</translation>
+        <translation>Memoria e kartës grafike nuk mund të lexohet në këtë sistem.</translation>
     </message>
     <message>
         <source>3D view in total (estimate): %1</source>
@@ -1877,7 +2029,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>3D view (estimate): knot %1, shadow map %2, picture buffers %3, floor %4. The rest is the window and its panels.</source>
-        <translation>Pamja 3D (vlerësim): nyja %1, harta e hijeve %2, buferat e figurës %3, dyshemeja %4. Pjesa tjetër është dritarja dhe panelet e saj.</translation>
+        <translation>Pamja 3D (vlerësim): nyja %1, hijet %2, figura %3, dyshemeja %4. Pjesa tjetër është dritarja dhe panelet e saj.</translation>
     </message>
     <message>
         <source>Leave full screen  (F11)</source>
@@ -1886,6 +2038,18 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Full screen  (F11)</source>
         <translation>Ekran i plotë  (F11)</translation>
+    </message>
+    <message>
+        <source>The 3D view could not start: it needs OpenGL 3.3. Updating the graphics driver usually solves this.</source>
+        <translation>Pamja 3D nuk mund të hapej: i duhet OpenGL 3.3. Përditësimi i driver-it të kartës grafike zakonisht e zgjidh këtë.</translation>
+    </message>
+    <message>
+        <source>Start in simple graphics mode</source>
+        <translation>Nise në mënyrën e thjeshtë grafike</translation>
+    </message>
+    <message>
+        <source>Photo mode needs a graphics card. Simple graphics mode is on in Settings.</source>
+        <translation>Mënyra Foto ka nevojë për kartë grafike. Mënyra e thjeshtë grafike është e ndezur te Cilësimet.</translation>
     </message>
     <message>
         <source>Save this knot before closing?</source>
@@ -1917,7 +2081,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Undo and redo</source>
-        <translation>Zhbëj dhe ribëj</translation>
+        <translation>Kthe prapa dhe bëje përsëri</translation>
     </message>
     <message>
         <source>Open and save a knot</source>
@@ -1945,7 +2109,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Space</source>
-        <translation>Hapësirë</translation>
+        <translation>Space</translation>
     </message>
     <message>
         <source>Play or pause what the open tool does</source>
@@ -1957,7 +2121,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>MOUSE</source>
-        <translation>MIUSHI</translation>
+        <translation>MIU</translation>
     </message>
     <message>
         <source>Drag</source>
@@ -1977,7 +2141,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Scroll</source>
-        <translation>Rrotëza</translation>
+        <translation>Scroll</translation>
     </message>
     <message>
         <source>Zoom</source>
@@ -1993,7 +2157,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Double-click a slider</source>
-        <translation>Klikim i dyfishtë mbi rrëshqitës</translation>
+        <translation>Klikim i dyfishtë mbi slider</translation>
     </message>
     <message>
         <source>Back to its usual value</source>
@@ -2001,7 +2165,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Click a slider&apos;s number</source>
-        <translation>Klikim mbi numrin e rrëshqitësit</translation>
+        <translation>Klikim mbi numrin e slider-it</translation>
     </message>
     <message>
         <source>Type an exact value</source>
@@ -2009,7 +2173,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>No files yet</source>
-        <translation>Ende s&apos;ka skedarë</translation>
+        <translation>Ende nuk ka skedarë</translation>
     </message>
     <message>
         <source>Clear the list</source>
@@ -2049,7 +2213,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Change its style, relax it, undo it, join two knots or build a surface. Click the open tool again to fold its panel.</source>
-        <translation>Ndryshoni stilin, relaksojeni, zgjidheni, bashkoni dy nyje ose ndërtoni një sipërfaqe. Klikoni sërish mjetin e hapur për të palosur panelin.</translation>
+        <translation>Ndryshoni stilin, relaksojeni, zgjidheni, bashkoni dy nyje ose ndërtoni një sipërfaqe. Klikoni përsëri mjetin e hapur për të palosur panelin.</translation>
     </message>
     <message>
         <source>Photo lays the knot down as real rope in the sun. Ctrl+K finds anything, and F1 lists every shortcut.</source>
@@ -2057,7 +2221,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Next</source>
-        <translation>Tjetri</translation>
+        <translation>Vazhdo</translation>
     </message>
     <message>
         <source>Done</source>
@@ -2074,6 +2238,20 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Restore</source>
         <translation>Rikthe</translation>
+    </message>
+    <message>
+        <source>Discard</source>
+        <translation>Hidhe poshtë</translation>
+    </message>
+    <message>
+        <source>Discard the knot that was not saved?</source>
+        <translation>Ta hedhim poshtë nyjën që nuk u ruajt?</translation>
+    </message>
+    <message>
+        <source>It is kept for %1 days in this folder, then deleted:
+%2</source>
+        <translation>Mbahet %1 ditë në këtë dosje, pastaj fshihet:
+%2</translation>
     </message>
     <message>
         <source>Saved: %1</source>
@@ -2164,12 +2342,20 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Krijimi i rrjetës së tubit dështoi.</translation>
     </message>
     <message>
-        <source>in this view; at least %1</source>
-        <translation>në këtë pamje; të paktën %1</translation>
+        <source>3D view of the knot</source>
+        <translation>Pamja 3D e nyjës</translation>
+    </message>
+    <message>
+        <source>The diagnostic information was copied.</source>
+        <translation>Informacioni diagnostikues u kopjua.</translation>
+    </message>
+    <message>
+        <source>The curve on screen could not be confirmed: computed directly, its polynomials differ from these products.</source>
+        <translation>Kurba në ekran nuk mund të konfirmohej: e llogaritur drejtpërdrejt, polinomet e saj ndryshojnë nga këto prodhime.</translation>
     </message>
     <message>
         <source>Only knots with up to 7 crossings can be tied on the sneaker: larger knots do not fit on a shoe.</source>
-        <translation>Në atlete mund të lidhen vetëm nyjet me deri në 7 kryqëzime: nyjet më të mëdha nuk zënë vend në një këpucë.</translation>
+        <translation>Në patike mund të lidhen vetëm nyjet me deri në 7 kryqëzime: nyjet më të mëdha nuk zënë vend në një këpucë.</translation>
     </message>
     <message>
         <source>Choose Tube Color</source>
@@ -2234,7 +2420,19 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Click the open tool again to fold its panel away.</source>
-        <translation>Kliko sërish mjetin e hapur për të palosur panelin e tij.</translation>
+        <translation>Kliko përsëri mjetin e hapur për të palosur panelin e tij.</translation>
+    </message>
+    <message>
+        <source>Every knot is the edge of a surface with two sides, a Seifert surface. Seifert&apos;s algorithm builds one from the knot diagram in four steps, and a fifth lets it relax like a soap film.</source>
+        <translation>Çdo nyjë është skaji i një sipërfaqeje me dy anë, një sipërfaqeje të Seifertit. Algoritmi i Seifertit e ndërton një të tillë nga diagrami i nyjës në katër hapa, dhe një i pestë e lë të qetësohet si një cipë sapuni.</translation>
+    </message>
+    <message>
+        <source>Go back and forth through the steps.</source>
+        <translation>Lëviz përpara dhe mbrapa nëpër hapat.</translation>
+    </message>
+    <message>
+        <source>This knot could not be laid down as a rope without changing it, so it stays a smooth tube.</source>
+        <translation>Kjo nyjë nuk mund të vendosej si litar pa u ndryshuar, prandaj mbetet një tub i lëmuar.</translation>
     </message>
     <message>
         <source>Preparing the animation...</source>
@@ -2266,11 +2464,11 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>The &lt;span style=&apos;color:#5B9BFF;&apos;&gt;blue&lt;/span&gt; strand (on top) and the &lt;span style=&apos;color:#D99B42;&apos;&gt;amber&lt;/span&gt; strand (below) pass through each other. Real rope cannot do this: it is the only move that can change the knot. The fewest such moves that undo a knot is its unknotting number.</source>
-        <translation>Fija &lt;span style=&apos;color:#5B9BFF;&apos;&gt;blu&lt;/span&gt; (sipër) dhe fija &lt;span style=&apos;color:#D99B42;&apos;&gt;qelibar&lt;/span&gt; (poshtë) kalojnë nëpër njëra-tjetrën. Një litar i vërtetë nuk mund ta bëjë këtë: është e vetmja lëvizje që mund ta ndryshojë nyjën. Numri më i vogël i lëvizjeve të tilla që zgjidhin një nyjë është numri i saj i zgjidhjes.</translation>
+        <translation>Fija &lt;span style=&apos;color:#5B9BFF;&apos;&gt;blu&lt;/span&gt; (sipër) dhe fija &lt;span style=&apos;color:#D99B42;&apos;&gt;portokalli&lt;/span&gt; (poshtë) kalojnë nëpër njëra-tjetrën. Një litar i vërtetë nuk mund ta bëjë këtë: është e vetmja lëvizje që mund ta ndryshojë nyjën. Numri më i vogël i lëvizjeve të tilla që zgjidhin një nyjë është numri i saj i zgjidhjes.</translation>
     </message>
     <message>
         <source>Downhill all the way</source>
-        <translation>Gjithmonë tatëpjetë</translation>
+        <translation>Gjithmonë teposhtë</translation>
     </message>
     <message>
         <source>Walking from the white dot in the direction of the arrow, every crossing is now reached first on the upper strand. A diagram like this (&quot;descending&quot;) is always an unknot.</source>
@@ -2282,7 +2480,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Because the curve only goes downhill, it can be lifted apart without any strand passing through another.</source>
-        <translation>Meqë kurba shkon vetëm tatëpjetë, ajo mund të ngrihet e të hapet pa kaluar asnjë fije nëpër një tjetër.</translation>
+        <translation>Meqë kurba shkon vetëm teposhtë, ajo mund të ngrihet e të hapet pa kaluar asnjë fije nëpër një tjetër.</translation>
     </message>
     <message>
         <source>A plain circle</source>
@@ -2310,7 +2508,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Press &lt;b&gt;Steps&lt;/b&gt; to go through every crossing change again.</source>
-        <translation>Shtyp &lt;b&gt;Hapat&lt;/b&gt; për të kaluar sërish nëpër çdo ndryshim kryqëzimi.</translation>
+        <translation>Shtyp &lt;b&gt;Hapat&lt;/b&gt; për të kaluar përsëri nëpër çdo ndryshim kryqëzimi.</translation>
     </message>
     <message>
         <source>(Warning: this curve is very tight, tubes may overlap.)</source>
@@ -2381,36 +2579,128 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Sipërfaqja e Seifertit ndërtohet këtu për një nyjë të vetme të mbyllur. Zgjidhni një nyjë të gatshme, një nyjë nga tabela ose një kurbë të personalizuar.</translation>
     </message>
     <message>
-        <source>1 / 4   THE KNOT DIAGRAM</source>
-        <translation>1 / 4   DIAGRAMI I NYJËS</translation>
+        <source>1 / 5   THE KNOT DIAGRAM</source>
+        <translation>1 / 5   DIAGRAMI I NYJËS</translation>
     </message>
     <message>
         <source>The knot is laid flat: its diagram, from the direction with the fewest crossings. The knot has a direction, and every crossing is kept as it is.</source>
         <translation>Nyja shtrihet rrafsh: diagrami i saj, nga drejtimi me sa më pak kryqëzime. Nyja ka një drejtim dhe çdo kryqëzim mbahet ashtu siç është.</translation>
     </message>
     <message>
-        <source>2 / 4   SEIFERT CIRCLES</source>
-        <translation>2 / 4   RRATHËT E SEIFERTIT</translation>
+        <source>2 / 5   SEIFERT CIRCLES</source>
+        <translation>2 / 5   RRATHËT E SEIFERTIT</translation>
     </message>
     <message>
         <source>Walk along the knot and, at every crossing, turn onto the other strand instead of crossing it. The diagram falls apart into loops that never cross: the Seifert circles. A circle inside another one is lifted higher.</source>
         <translation>Ecni përgjatë nyjës dhe, në çdo kryqëzim, kthehuni në fijen tjetër në vend që ta kaloni. Diagrami ndahet në laqe që nuk kryqëzohen kurrë: rrathët e Seifertit. Një rreth brenda një tjetri ngrihet më lart.</translation>
     </message>
     <message>
-        <source>3 / 4   DISKS</source>
-        <translation>3 / 4   DISQET</translation>
+        <source>3 / 5   DISKS</source>
+        <translation>3 / 5   DISQET</translation>
     </message>
     <message>
         <source>Every circle is filled with a disk. The two sides get different colours: amber is the side from which the circle runs anticlockwise, blue the other side.</source>
-        <translation>Çdo rreth mbushet me një disk. Dy anët marrin ngjyra të ndryshme: ngjyrë qelibari është ana nga e cila rrethi shkon në drejtim kundërorar, blu ana tjetër.</translation>
+        <translation>Çdo rreth mbushet me një disk. Dy anët marrin ngjyra të ndryshme: portokalli është ana nga e cila rrethi shkon kundër akrepave të orës, blu ana tjetër.</translation>
     </message>
     <message>
-        <source>4 / 4   TWISTED BANDS</source>
-        <translation>4 / 4   SHIRITAT E PËRDREDHUR</translation>
+        <source>4 / 5   TWISTED BANDS</source>
+        <translation>4 / 5   SHIRITAT E PËRDREDHUR</translation>
     </message>
     <message>
         <source>At every crossing the two disks are joined by a band with a half twist, turned like the crossing. The edge of the surface is the knot again. Amber always meets amber: the surface has two sides (it is orientable).</source>
-        <translation>Në çdo kryqëzim dy disqet bashkohen me një shirit me një gjysmëpërdredhje, të kthyer si kryqëzimi. Buza e sipërfaqes është sërish nyja. Qelibari takon gjithmonë qelibarin: sipërfaqja ka dy anë (është e orientueshme).</translation>
+        <translation>Në çdo kryqëzim dy disqet bashkohen me një shirit me gjysmë përdredhjeje, të kthyer si kryqëzimi. Skaji i sipërfaqes është përsëri nyja. Portokallia takon gjithmonë portokallinë: sipërfaqja ka dy anë (është e orientueshme).</translation>
+    </message>
+    <message>
+        <source>5 / 5   PULLED TIGHT</source>
+        <translation>5 / 5   E TENDOSUR</translation>
+    </message>
+    <message>
+        <source>Bend the knot in wire and stretch cloth over it, or dip it in soapy water: the sheet pulls itself as tight as it can, so its mean curvature comes close to zero. No part of the surface passes through another on the way, so it is the same surface: the same edge, the same genus, the same Seifert matrix.</source>
+        <translation>Përkuleni nyjën në tel dhe tendosni pëlhurë mbi të, ose zhyteni në ujë me sapun: fleta tërhiqet sa më shumë që mundet, prandaj lakimi i saj mesatar i afrohet zeros. Asnjë pjesë e sipërfaqes nuk kalon nëpër një tjetër gjatë rrugës, praprandaj është e njëjta sipërfaqe: i njëjti skaj, e njëjta gjini, e njëjta matricë e Seifertit.</translation>
+    </message>
+    <message>
+        <source>A soap film on a wire</source>
+        <translation>Një cipë sapuni mbi një tel</translation>
+    </message>
+    <message>
+        <source>The wire is the knot, the film is the surface. Its colours are only light: they show how thick the film is, not anything about the knot.</source>
+        <translation>Teli është nyja, cipa është sipërfaqja. Ngjyrat e saj janë vetëm dritë: tregojnë sa e trashë është cipa, jo diçka për nyjën.</translation>
+    </message>
+    <message>
+        <source>Cloth stretched on a wire</source>
+        <translation>Pëlhurë e tendosur mbi një tel</translation>
+    </message>
+    <message>
+        <source>The wire is the knot, the cloth is the surface. Amber is one side and blue the other, and amber never turns into blue. On some knots, like the trefoil, the blue side faces the table.</source>
+        <translation>Teli është nyja, pëlhura është sipërfaqja. Portokallia është njëra anë dhe bluja tjetra, dhe portokallia nuk kthehet kurrë në blu. Te disa nyje, si nyja trefletëshe, ana blu është nga tavolina.</translation>
+    </message>
+    <message>
+        <source>How to read a Seifert surface</source>
+        <translation>Si lexohet një sipërfaqe e Seifertit</translation>
+    </message>
+    <message>
+        <source>What this is</source>
+        <translation>Çfarë është kjo</translation>
+    </message>
+    <message>
+        <source>A knot is a closed loop. A Seifert surface is a sheet whose whole edge is that loop, as a drum skin has its rim for an edge. Every knot has one, however tangled it is, and the sheet tells us things about the knot that the loop alone hides.</source>
+        <translation>Një nyjë është një lak i mbyllur. Një sipërfaqe e Seifertit është një fletë, i gjithë skaji i së cilës është ky lak, ashtu si lëkura e daulles e ka rrethin për skaj. Çdo nyjë ka një të tillë, sado e ngatërruar të jetë, dhe fleta na tregon për nyjën gjëra që laku vetëm i fsheh.</translation>
+    </message>
+    <message>
+        <source>The wire</source>
+        <translation>Teli</translation>
+    </message>
+    <message>
+        <source>The wire is the knot itself. It is the same knot as in the 3D view, bent into a shape where the surface can be seen well.</source>
+        <translation>Teli është vetë nyja. Është e njëjta nyjë si në pamjen 3D, e përkulur në një formë ku sipërfaqja shihet mirë.</translation>
+    </message>
+    <message>
+        <source>The cloth and its two colours</source>
+        <translation>Pëlhura dhe dy ngjyrat e saj</translation>
+    </message>
+    <message>
+        <source>The cloth is the surface. A surface like this has two sides, and one is dyed amber, the other blue. Follow the cloth across a twisted band with your eye: amber always stays amber. A Möbius strip has only one side, so amber would run into blue on it: no Seifert surface can be like that.</source>
+        <translation>Pëlhura është sipërfaqja. Një sipërfaqe e tillë ka dy anë: njëra është portokalli, tjetra blu. Ndiqeni pëlhurën me sy nëpër një shirit të përdredhur: portokallia mbetet gjithmonë portokalli. Shiriti i Möbiusit ka vetëm një anë, prandaj mbi të portokallia do të takonte blunë: asnjë sipërfaqe e Seifertit nuk mund të jetë kështu.</translation>
+    </message>
+    <message>
+        <source>The disks and the bands</source>
+        <translation>Disqet dhe shiritat</translation>
+    </message>
+    <message>
+        <source>Steps 2 to 4 show how it is made: the knot is cut at every crossing into circles, each circle is filled with a disk, and a band with a half twist joins two disks at every crossing. The twist of a band is the crossing.</source>
+        <translation>Hapat 2 deri në 4 tregojnë si ndërtohet: nyja pritet te çdo kryqëzim në rrathë, çdo rreth mbushet me një disk, dhe te çdo kryqëzim një shirit me gjysmë përdredhjeje bashkon dy disqe. Përdredhja e shiritit është vetë kryqëzimi.</translation>
+    </message>
+    <message>
+        <source>Why it is curved</source>
+        <translation>Pse është e lakuar</translation>
+    </message>
+    <message>
+        <source>Step 5 lets the surface pull itself tight, the way stretched cloth or a soap film does. Nothing is cut and nothing passes through anything: it is the same surface, only easier to see.</source>
+        <translation>Hapi 5 e lë sipërfaqen të tërhiqet sa më shumë, ashtu si pëlhura e tendosur ose një cipë sapuni. Asgjë nuk pritet dhe asgjë nuk kalon nëpër diçka tjetër: është e njëjta sipërfaqe, vetëm më e lehtë për t&apos;u parë.</translation>
+    </message>
+    <message>
+        <source>The holes: genus</source>
+        <translation>Vrimat: gjinia</translation>
+    </message>
+    <message>
+        <source>The genus is the largest number of closed loops you can cut along the surface, side by side without touching, and still have it in one piece: its number of &quot;handles&quot;. The genus of a knot is the smallest one any of its surfaces has. Only the unknot has genus 0: a knot is undone exactly when a plain disk can span it.</source>
+        <translation>Gjinia është numri më i madh i laqeve të mbyllura që mund të prisni përgjatë sipërfaqes, njëri pranë tjetrit pa u prekur, duke e lënë atë në një copë: numri i saj i &quot;dorezave&quot;. Gjinia e një nyje është më e vogla që ka ndonjë nga sipërfaqet e saj. Vetëm nyja triviale ka gjini 0: një nyjë është e zgjidhur pikërisht kur një disk i thjeshtë mund ta mbulojë.</translation>
+    </message>
+    <message>
+        <source>The numbers beside it</source>
+        <translation>Numrat pranë saj</translation>
+    </message>
+    <message>
+        <source>The Seifert matrix records how loops on the surface wind around each other. Click one of its entries to see its two loops on the surface: green on it, pink just off it. From these numbers come the signature, the determinant and the Alexander polynomial.</source>
+        <translation>Matrica e Seifertit regjistron si mbështillen laqet e sipërfaqes rreth njëri-tjetrit. Klikoni një element të saj për të parë dy laqet e tij mbi sipërfaqe: i gjelbri mbi të, roza pak larg saj. Nga këta numra dalin signatura, përcaktori dhe polinomi i Aleksandrit.</translation>
+    </message>
+    <message>
+        <source>The soap film</source>
+        <translation>Cipa e sapunit</translation>
+    </message>
+    <message>
+        <source>Choose Soap film to see the same surface as a real one: dip a wire knot in soapy water and a film like this hangs on it. Its rainbow colours mean nothing about the knot. They are light, reflected from the film&apos;s two faces a few hundred nanometres apart, so they only show how thick the film is. Soap cannot show the two sides, which is why the cloth comes first.</source>
+        <translation>Zgjidhni Cipë sapuni për ta parë të njëjtën sipërfaqe si një të vërtetë: zhytni një nyjë teli në ujë me sapun dhe mbi të varet një cipë si kjo. Ngjyrat e saj të ylberta nuk thonë asgjë për nyjën. Ato janë dritë e pasqyruar nga dy faqet e cipës, disa qindra nanometra larg njëra-tjetrës, prandaj tregojnë vetëm sa e trashë është cipa. Sapuni nuk mund t&apos;i tregojë dy anët, prandaj pëlhura vjen e para.</translation>
     </message>
     <message>
         <source>No Seifert surface could be built: %1</source>
@@ -2429,10 +2719,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Gjinia e kësaj nyjeje është %1 (KnotInfo), prandaj kjo sipërfaqe është sa më e thjeshtë që të jetë e mundur.</translation>
     </message>
     <message>
-        <source>The genus of this knot is %1 (KnotInfo): another diagram gives a simpler surface.</source>
-        <translation>Gjinia e kësaj nyjeje është %1 (KnotInfo): një diagram tjetër jep një sipërfaqe më të thjeshtë.</translation>
-    </message>
-    <message>
         <source>The Alexander polynomial shows that every surface of this knot has genus at least %1, so this one is as simple as possible: the knot has genus %1.</source>
         <translation>Polinomi i Aleksandrit tregon se çdo sipërfaqe e kësaj nyjeje ka gjini të paktën %1, prandaj kjo është sa më e thjeshtë që të jetë e mundur: nyja ka gjini %1.</translation>
     </message>
@@ -2442,7 +2728,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>&lt;b&gt;Seifert matrix V&lt;/b&gt; (%1 × %1): the linking numbers of %1 loops on the surface with the loops lifted off its amber side.</source>
-        <translation>&lt;b&gt;Matrica e Seifertit V&lt;/b&gt; (%1 × %1): numrat e lidhjes së %1 laqeve mbi sipërfaqe me laqet e ngritura nga ana e saj ngjyrë qelibari.</translation>
+        <translation>&lt;b&gt;Matrica e Seifertit V&lt;/b&gt; (%1 × %1): numrat e lidhjes së %1 laqeve mbi sipërfaqe me laqet e ngritura nga ana e saj portokalli.</translation>
     </message>
     <message>
         <source>Click an entry of V to see its two loops on the surface.</source>
@@ -2450,11 +2736,11 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>&lt;b&gt;V[%1][%1] = lk(a&lt;sub&gt;%1&lt;/sub&gt;, a&lt;sub&gt;%1&lt;/sub&gt;&lt;sup&gt;+&lt;/sup&gt;) = %2&lt;/b&gt;&lt;br&gt;The &lt;span style=&apos;color:#46CD78;&apos;&gt;green&lt;/span&gt; loop a&lt;sub&gt;%1&lt;/sub&gt; lies on the surface, the &lt;span style=&apos;color:#E150C8;&apos;&gt;pink&lt;/span&gt; loop is its own copy lifted off the amber side. The entry counts how many times the copy winds around the loop: how many full twists the surface makes along it.</source>
-        <translation>&lt;b&gt;V[%1][%1] = lk(a&lt;sub&gt;%1&lt;/sub&gt;, a&lt;sub&gt;%1&lt;/sub&gt;&lt;sup&gt;+&lt;/sup&gt;) = %2&lt;/b&gt;&lt;br&gt;Laku &lt;span style=&apos;color:#46CD78;&apos;&gt;jeshil&lt;/span&gt; a&lt;sub&gt;%1&lt;/sub&gt; shtrihet mbi sipërfaqe, laku &lt;span style=&apos;color:#E150C8;&apos;&gt;rozë&lt;/span&gt; është kopja e tij e ngritur nga ana ngjyrë qelibari. Elementi numëron sa herë kopja mbështillet rreth lakut: sa përdredhje të plota bën sipërfaqja përgjatë tij.</translation>
+        <translation>&lt;b&gt;V[%1][%1] = lk(a&lt;sub&gt;%1&lt;/sub&gt;, a&lt;sub&gt;%1&lt;/sub&gt;&lt;sup&gt;+&lt;/sup&gt;) = %2&lt;/b&gt;&lt;br&gt;Laku &lt;span style=&apos;color:#46CD78;&apos;&gt;jeshil&lt;/span&gt; a&lt;sub&gt;%1&lt;/sub&gt; shtrihet mbi sipërfaqe, laku &lt;span style=&apos;color:#E150C8;&apos;&gt;rozë&lt;/span&gt; është kopja e tij e ngritur nga ana portokalli. Elementi numëron sa herë kopja mbështillet rreth lakut: sa përdredhje të plota bën sipërfaqja përgjatë tij.</translation>
     </message>
     <message>
         <source>&lt;b&gt;V[%1][%2] = lk(a&lt;sub&gt;%1&lt;/sub&gt;, a&lt;sub&gt;%2&lt;/sub&gt;&lt;sup&gt;+&lt;/sup&gt;) = %3&lt;/b&gt;&lt;br&gt;The &lt;span style=&apos;color:#46CD78;&apos;&gt;green&lt;/span&gt; loop a&lt;sub&gt;%1&lt;/sub&gt; lies on the surface, the &lt;span style=&apos;color:#E150C8;&apos;&gt;pink&lt;/span&gt; loop is a&lt;sub&gt;%2&lt;/sub&gt; lifted off the amber side. The entry, their linking number, counts how many times the two loops wind around each other (with a sign for the direction).</source>
-        <translation>&lt;b&gt;V[%1][%2] = lk(a&lt;sub&gt;%1&lt;/sub&gt;, a&lt;sub&gt;%2&lt;/sub&gt;&lt;sup&gt;+&lt;/sup&gt;) = %3&lt;/b&gt;&lt;br&gt;Laku &lt;span style=&apos;color:#46CD78;&apos;&gt;jeshil&lt;/span&gt; a&lt;sub&gt;%1&lt;/sub&gt; shtrihet mbi sipërfaqe, laku &lt;span style=&apos;color:#E150C8;&apos;&gt;rozë&lt;/span&gt; është a&lt;sub&gt;%2&lt;/sub&gt; i ngritur nga ana ngjyrë qelibari. Elementi, numri i lidhjes së tyre, numëron sa herë dy laqet mbështillen rreth njëri-tjetrit (me një shenjë për drejtimin).</translation>
+        <translation>&lt;b&gt;V[%1][%2] = lk(a&lt;sub&gt;%1&lt;/sub&gt;, a&lt;sub&gt;%2&lt;/sub&gt;&lt;sup&gt;+&lt;/sup&gt;) = %3&lt;/b&gt;&lt;br&gt;Laku &lt;span style=&apos;color:#46CD78;&apos;&gt;jeshil&lt;/span&gt; a&lt;sub&gt;%1&lt;/sub&gt; shtrihet mbi sipërfaqe, laku &lt;span style=&apos;color:#E150C8;&apos;&gt;rozë&lt;/span&gt; është a&lt;sub&gt;%2&lt;/sub&gt; i ngritur nga ana portokalli. Elementi, numri i lidhjes së tyre, numëron sa herë dy laqet mbështillen rreth njëri-tjetrit (me një shenjë për drejtimin).</translation>
     </message>
     <message>
         <source>Clear</source>
@@ -2545,16 +2831,56 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>NDËRTO SIPËRFAQEN</translation>
     </message>
     <message>
+        <source>The sum of the crossing signs in this view.</source>
+        <translation>Shuma e shenjave të kryqëzimeve në këtë pamje.</translation>
+    </message>
+    <message>
+        <source>in this diagram: %1</source>
+        <translation>në këtë diagram: %1</translation>
+    </message>
+    <message>
+        <source>in this view. Crossing number: %1</source>
+        <translation>në këtë pamje. Numri i kryqëzimeve: %1</translation>
+    </message>
+    <message>
+        <source>Determinant</source>
+        <translation>Përcaktori</translation>
+    </message>
+    <message>
+        <source>Tricolourable</source>
+        <translation>E trengjyrësueshme</translation>
+    </message>
+    <message>
+        <source>yes</source>
+        <translation>po</translation>
+    </message>
+    <message>
+        <source>no</source>
+        <translation>jo</translation>
+    </message>
+    <message>
+        <source>The manual was not found. Installing AKSIOMA again brings it back.</source>
+        <translation>Manuali nuk u gjet. Instalimi përsëri i AKSIOMA-s e kthen përsëri.</translation>
+    </message>
+    <message>
         <source>Cancelled. Turn on Photo to lay the rope down again.</source>
         <translation>U anulua. Ndizni Foto për ta shtrirë litarin përsëri.</translation>
     </message>
     <message>
+        <source>Preparing the place</source>
+        <translation>Po përgatitet vendi</translation>
+    </message>
+    <message>
         <source>The photographed place could not be loaded. Installing AKSIOMA again brings it back.</source>
-        <translation>Vendi i fotografuar nuk u ngarkua. Rinstalimi i AKSIOMA-s e kthen përsëri.</translation>
+        <translation>Vendi i fotografuar nuk u ngarkua. Instalimi përsëri i AKSIOMA-s e kthen përsëri.</translation>
+    </message>
+    <message>
+        <source>This curve passes through itself, so it is not a knot. Give the strands different heights where they meet.</source>
+        <translation>Kjo kurbë kalon nëpër vetveten, prandaj nuk është nyjë. Jepu fijeve lartësi të ndryshme aty ku takohen.</translation>
     </message>
     <message>
         <source>The curve could not be made: %1 Check the formula, or press Undo to go back.</source>
-        <translation>Kurba nuk u bë dot: %1 Kontrolloni formulën, ose shtypni Zhbëj për t&apos;u kthyer.</translation>
+        <translation>Kurba nuk u bë dot: %1 Kontrolloni formulën, ose shtypni Kthe prapa për t&apos;u kthyer.</translation>
     </message>
     <message>
         <source>PAUSE</source>
@@ -2573,8 +2899,16 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Nyja nuk u hap: %1 Zgjidhni një skedar .aknot ose një skedar teksti me koordinata.</translation>
     </message>
     <message>
+        <source>Its type is not known here.</source>
+        <translation>Lloji i saj këtu nuk njihet.</translation>
+    </message>
+    <message>
         <source>The knot could not be saved: %1 Try another folder or file name.</source>
         <translation>Nyja nuk u ruajt: %1 Provoni një dosje ose emër tjetër skedari.</translation>
+    </message>
+    <message>
+        <source>Finishing the picture</source>
+        <translation>Po përfundohet fotografia</translation>
     </message>
     <message>
         <source>The picture could not be saved. Try another folder or file name.</source>
@@ -2603,6 +2937,14 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>BACK TO THE KNOT</source>
         <translation>KTHEHU TE NYJA</translation>
+    </message>
+    <message>
+        <source>The genus of this knot is %1 (KnotInfo), so a simpler surface exists. Another diagram may give it, though Seifert&apos;s algorithm does not always reach it.</source>
+        <translation>Gjinia e kësaj nyjeje është %1 (KnotInfo), pra ekziston një sipërfaqe më e thjeshtë. Një diagram tjetër mund ta japë, por algoritmi i Seifertit nuk e arrin gjithmonë.</translation>
+    </message>
+    <message>
+        <source>The soap film step is not available for this diagram: its strands lie too tight for a mesh that holds the knot for sure.</source>
+        <translation>Hapi i cipës së sapunit nuk është i mundshëm për këtë diagram: fijet e tij janë aq afër sa nuk bëhet dot një rrjetë që e mban nyjën me siguri.</translation>
     </message>
     <message>
         <source>Pick the rope up with the left mouse button and move it: held up, it goes over the other strands; hold Shift while grabbing to push it under them. Cut the rope to tie another knot.</source>
@@ -2706,7 +3048,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>The two knots are placed side by side, each turned so that one of its arcs faces the other knot.</source>
-        <translation>Dy nyjet vendosen krah njëra-tjetrës, secila e kthyer që një nga harqet e saj të jetë përballë nyjës tjetër.</translation>
+        <translation>Dy nyjet vendosen pranë njëra-tjetrës, secila e kthyer që një nga harqet e saj të jetë përballë nyjës tjetër.</translation>
     </message>
     <message>
         <source>2 / 4  Cut</source>
@@ -2722,7 +3064,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Two strands join the four loose ends. They run straight across the gap, so the band adds no knotting of its own.</source>
-        <translation>Dy fije bashkojnë katër skajet e lira. Ato e kalojnë hapësirën drejt, ndaj shiriti nuk shton asnjë nyjëzim të vetin.</translation>
+        <translation>Dy fije bashkojnë katër skajet e lira. Ato e kalojnë hapësirën drejt, prandaj shiriti nuk shton asnjë nyjëzim të vetin.</translation>
     </message>
     <message>
         <source>4 / 4  One knot</source>
@@ -2745,6 +3087,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Dy nyje trefletëshe me të njëjtin drejtim japin nyjën “granny”, me drejtime të kundërta nyjën katrore: i njëjti polinom i Aleksandrit, por polinome të Jonesit të ndryshme.</translation>
     </message>
     <message>
+        <source>This knot has a direction: the sum uses the direction shown.</source>
+        <translation>Kjo nyjë ka drejtim: shuma përdor drejtimin e treguar.</translation>
+    </message>
+    <message>
         <source>The Alexander polynomial of the joined curve is the product of those of the two knots, as it must be.</source>
         <translation>Polinomi i Aleksandrit i kurbës së bashkuar është prodhimi i atyre të dy nyjeve, siç duhet të jetë.</translation>
     </message>
@@ -2755,6 +3101,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>So is its Jones polynomial.</source>
         <translation>Po ashtu edhe polinomi i saj i Jonesit.</translation>
+    </message>
+    <message>
+        <source>Jones polynomial: the product of those of the two knots.</source>
+        <translation>Polinomi i Jonesit: prodhimi i atyre të dy nyjeve.</translation>
     </message>
     <message>
         <source>Jones polynomial: the product of those of the two knots (this diagram is too large to compute it directly).</source>
@@ -2789,7 +3139,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>A knot with 3 to 8 crossings from the knot table; its name is shown when you are done.</source>
-        <translation>Një nyjë me 3 deri në 8 kryqëzime nga tabela e nyjeve; emri i saj shfaqet kur të keni mbaruar.</translation>
+        <translation>Një nyjë me 3 deri në 8 kryqëzime nga tabela e nyjeve; emri i saj shfaqet kur të keni përfunduar.</translation>
     </message>
     <message>
         <source>Draw...</source>
@@ -2825,7 +3175,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Claim that no colouring with two or more colours exists.</source>
-        <translation>Pohoni se nuk ekziston asnjë ngjyrosje me dy ose më shumë ngjyra.</translation>
+        <translation>Thoni se nuk ekziston asnjë ngjyrosje me dy ose më shumë ngjyra.</translation>
     </message>
     <message>
         <source>Show a solution</source>
@@ -3068,11 +3418,11 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Discard</source>
-        <translation>Hidh poshtë</translation>
+        <translation>Mos e ruaj</translation>
     </message>
     <message>
         <source>Apply</source>
-        <translation>Zbato</translation>
+        <translation>Apliko</translation>
     </message>
     <message>
         <source>Reset</source>
@@ -3080,7 +3430,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Restore Defaults</source>
-        <translation>Rikthe parazgjedhjet</translation>
+        <translation>Rikthe vlerat fillestare</translation>
     </message>
     <message>
         <source>Help</source>
@@ -3099,7 +3449,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <name>SliderValue</name>
     <message>
         <source>Click to type a value. Double-click the slider to reset it.</source>
-        <translation>Klikoni për të shkruar një vlerë. Klikoni dy herë rrëshqitësin për ta rikthyer.</translation>
+        <translation>Klikoni për të shkruar një vlerë. Klikoni dy herë slider-in për ta rikthyer.</translation>
     </message>
 </context>
 <context>
@@ -3144,11 +3494,11 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Previous</source>
-        <translation>Prapa</translation>
+        <translation>Mbrapa</translation>
     </message>
     <message>
         <source>Next</source>
-        <translation>Para</translation>
+        <translation>Përpara</translation>
     </message>
     <message>
         <source>Show in 3D</source>
@@ -3180,8 +3530,8 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message numerus="yes">
         <source>%n crossing(s) are reached on the lower strand first. They are circled in &lt;span style=&apos;color:#D99B42;&apos;&gt;amber&lt;/span&gt; and numbered in the order they are changed.</source>
         <translation>
-            <numerusform>%n kryqëzim arrihet së pari në fijen e poshtme. Ai është rrethuar me ngjyrë &lt;span style=&apos;color:#D99B42;&apos;&gt;qelibar&lt;/span&gt; dhe është numëruar sipas radhës së ndryshimit.</numerusform>
-            <numerusform>%n kryqëzime arrihen së pari në fijen e poshtme. Ato janë rrethuar me ngjyrë &lt;span style=&apos;color:#D99B42;&apos;&gt;qelibar&lt;/span&gt; dhe janë numëruar sipas radhës në të cilën ndryshohen.</numerusform>
+            <numerusform>%n kryqëzim arrihet së pari në fijen e poshtme. Ai është rrethuar me ngjyrë &lt;span style=&apos;color:#D99B42;&apos;&gt;portokalli&lt;/span&gt; dhe është numëruar sipas radhës së ndryshimit.</numerusform>
+            <numerusform>%n kryqëzime arrihen së pari në fijen e poshtme. Ato janë rrethuar me ngjyrë &lt;span style=&apos;color:#D99B42;&apos;&gt;portokalli&lt;/span&gt; dhe janë numëruar sipas radhës në të cilën ndryshohen.</numerusform>
         </translation>
     </message>
     <message>
@@ -3198,11 +3548,11 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Walking from the white dot, this crossing is reached first %1 % of the way along, on the strand &lt;span style=&apos;color:#D99B42;&apos;&gt;below&lt;/span&gt;, and again at %2 % on the strand &lt;span style=&apos;color:#5B9BFF;&apos;&gt;on top&lt;/span&gt;.</source>
-        <translation>Duke ecur nga pika e bardhë, ky kryqëzim arrihet së pari pas %1 % të rrugës, në fijen &lt;span style=&apos;color:#D99B42;&apos;&gt;poshtë&lt;/span&gt;, dhe sërish pas %2 %, në fijen &lt;span style=&apos;color:#5B9BFF;&apos;&gt;sipër&lt;/span&gt;.</translation>
+        <translation>Duke ecur nga pika e bardhë, ky kryqëzim arrihet së pari pas %1 % të rrugës, në fijen &lt;span style=&apos;color:#D99B42;&apos;&gt;poshtë&lt;/span&gt;, dhe përsëri pas %2 %, në fijen &lt;span style=&apos;color:#5B9BFF;&apos;&gt;sipër&lt;/span&gt;.</translation>
     </message>
     <message>
         <source>A descending diagram meets every crossing on top first, so the two strands pass through each other: now the &lt;span style=&apos;color:#D99B42;&apos;&gt;amber&lt;/span&gt; strand runs over the &lt;span style=&apos;color:#5B9BFF;&apos;&gt;blue&lt;/span&gt; one. Real rope cannot do this - it is the one move that changes the knot.</source>
-        <translation>Një diagram zbritës e takon çdo kryqëzim së pari nga sipër, prandaj dy fijet kalojnë nëpër njëra-tjetrën: tani fija &lt;span style=&apos;color:#D99B42;&apos;&gt;qelibar&lt;/span&gt; kalon mbi fijen &lt;span style=&apos;color:#5B9BFF;&apos;&gt;blu&lt;/span&gt;. Një litar i vërtetë nuk mund ta bëjë këtë - është e vetmja lëvizje që e ndryshon nyjën.</translation>
+        <translation>Një diagram zbritës e takon çdo kryqëzim së pari nga sipër, prandaj dy fijet kalojnë nëpër njëra-tjetrën: tani fija &lt;span style=&apos;color:#D99B42;&apos;&gt;portokalli&lt;/span&gt; kalon mbi fijen &lt;span style=&apos;color:#5B9BFF;&apos;&gt;blu&lt;/span&gt;. Një litar i vërtetë nuk mund ta bëjë këtë - është e vetmja lëvizje që e ndryshon nyjën.</translation>
     </message>
     <message>
         <source>DESCENDING DIAGRAM</source>
@@ -3210,7 +3560,7 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     </message>
     <message>
         <source>Downhill all the way: an unknot</source>
-        <translation>Gjithmonë tatëpjetë: nyja triviale</translation>
+        <translation>Gjithmonë teposhtë: nyja triviale</translation>
     </message>
     <message>
         <source>Now every crossing is reached on top first (the circles are &lt;span style=&apos;color:#6CC08B;&apos;&gt;green&lt;/span&gt;). Such a curve only goes downhill, so it can be lifted apart into a plain circle without passing any strand through another.</source>

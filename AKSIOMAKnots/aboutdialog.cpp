@@ -1,5 +1,6 @@
 #include "aboutdialog.h"
 
+#include "controlhelp.h"
 #include "theme.h"
 
 #include <QApplication>
@@ -15,7 +16,7 @@ AboutDialog::AboutDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("About AKSIOMA Knots"));
-    resize(620, 820);
+    ControlHelp::fitToScreen(this, 620, 820);
 
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(20, 20, 20, 20);
@@ -102,7 +103,8 @@ AboutDialog::AboutDialog(QWidget *parent)
                     "Moore for making the data available."),
                  tr("BUILT WITH"),
                  tr("Qt (The Qt Company), used under the GNU Lesser General Public "
-                    "License version 3."),
+                    "License version 3. Its license and the notices of the other "
+                    "libraries are in THIRD_PARTY_NOTICES.txt, in the program's folder."),
                  tr("MATHEMATICS"))
             .arg(tr("Writhe and linking numbers: exact Gauss integrals of polygons "
                     "(K. Klenin and J. Langowski, Biopolymers 54, 2000)."),

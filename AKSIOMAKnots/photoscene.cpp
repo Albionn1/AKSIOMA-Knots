@@ -1,9 +1,12 @@
 #include "photoscene.h"
 
 #include <QFile>
+#include <QHash>
+#include <QImage>
 
 #include <algorithm>
 #include <cmath>
+#include <mutex>
 
 namespace Photo
 {
@@ -80,7 +83,77 @@ QVector3D Environment::irradianceAt(const QVector3D &normal) const
     return QVector3D(std::max(e.x(), 0.0f), std::max(e.y(), 0.0f), std::max(e.z(), 0.0f));
 }
 
+namespace
+{
+
+// what preloadScene read, until the window has taken it
+std::mutex keptMutex;
+QString keptPath;
+Environment keptEnvironment;
+QHash<QString, QImage> keptPictures;
+
+Environment readEnvironment(const QString &path);
+
+} // namespace
+
+void preloadScene(const SceneInfo &info)
+{
+    Environment environment = readEnvironment(info.environment);
+
+    QHash<QString, QImage> pictures;
+
+    for (const QString &path : {info.surfaceColor, info.surfaceNormal, info.surfaceRoughness})
+    {
+        if (!path.isEmpty())
+            pictures.insert(path, QImage(path));
+    }
+
+    const std::lock_guard<std::mutex> lock(keptMutex);
+
+    keptPath = info.environment;
+    keptEnvironment = std::move(environment);
+    keptPictures = std::move(pictures);
+}
+
+void forgetPreloaded()
+{
+    const std::lock_guard<std::mutex> lock(keptMutex);
+
+    keptPath.clear();
+    keptEnvironment = Environment();
+    keptPictures.clear();
+}
+
+QImage preloadedPicture(const QString &path)
+{
+    {
+        const std::lock_guard<std::mutex> lock(keptMutex);
+
+        const auto kept = keptPictures.constFind(path);
+
+        if (kept != keptPictures.constEnd())
+            return kept.value();
+    }
+
+    return QImage(path);
+}
+
 Environment loadEnvironment(const QString &path)
+{
+    {
+        const std::lock_guard<std::mutex> lock(keptMutex);
+
+        if (path == keptPath)
+            return keptEnvironment;
+    }
+
+    return readEnvironment(path);
+}
+
+namespace
+{
+
+Environment readEnvironment(const QString &path)
 {
     Environment environment;
 
@@ -516,6 +589,8 @@ Environment loadEnvironment(const QString &path)
 
     return environment;
 }
+
+} // namespace
 
 QMatrix4x4 flatPose(const QVector<QVector3D> &points)
 {

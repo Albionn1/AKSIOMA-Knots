@@ -96,6 +96,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; the program with its Qt and MinGW libraries (windeployqt)
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 ; the user manuals (English, Albanian, and both in one)
 Source: "{#ManualDir}\AKSIOMA_Knots_Manual_EN.pdf"; DestDir: "{app}\Manual"; Flags: ignoreversion

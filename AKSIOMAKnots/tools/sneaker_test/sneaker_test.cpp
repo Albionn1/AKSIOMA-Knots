@@ -140,7 +140,14 @@ void tie(const QString &name, const QVector<Vec3> &curve, const QString &file)
     {
         const Vec3 &p = lace.at(i);
 
-        sunk = std::max(sunk, shoe.heightAt(p.x, p.z) + r - p.y);
+        // along the surface's normal: on the near-vertical side of the sole a
+        // hair of the rope is a long way straight down
+        double slopeX = 0.0;
+        double slopeZ = 0.0;
+
+        const double top = shoe.heightAt(p.x, p.z, &slopeX, &slopeZ);
+
+        sunk = std::max(sunk, (top + r - p.y) / std::sqrt(1.0 + slopeX * slopeX + slopeZ * slopeZ));
     }
 
     result.sunk = sunk / r;

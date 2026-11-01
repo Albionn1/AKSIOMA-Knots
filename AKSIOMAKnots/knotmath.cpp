@@ -91,6 +91,9 @@ Vec3 axisUnit(int axis)
  * ("2t", "3pi", "2(t+1)", "sin(t)cos(t)") is supported.
  * Variable: t.  Constants: pi, e.
  */
+constexpr int MaxFormulaLength = 4000;
+constexpr double MaxCustomCoordinate = 1.0e6;
+
 struct ExprParser
 {
     ExprParser(const QString &expression, double variableT)
@@ -98,10 +101,22 @@ struct ExprParser
     {
     }
 
+    // Deeper than any real formula, and shallow enough for the stack: every
+    // nested bracket, sign or power passes through parseUnary.
+    static constexpr int MaxDepth = 200;
+
     QString source;
     int position = 0;
+    int depth = 0;
     bool error = false;
     double t = 0.0;
+
+    // a word that means nothing here, for the message
+    QString unknownWord;
+
+    // the last thing read was a plain number: "1 2" is a typing error, not
+    // the product of 1 and 2
+    bool numberLast = false;
 
     void skipSpaces()
     {
@@ -204,7 +219,59 @@ struct ExprParser
             return 0.0;
         }
 
+        numberLast = true;
+
         return value;
+    }
+
+    // 1 / x, where there is one
+    double reciprocal(double x)
+    {
+        if (std::abs(x) < Epsilon)
+        {
+            error = true;
+            return 0.0;
+        }
+
+        return 1.0 / x;
+    }
+
+    double applyFunction(const QString &name, double a, double b)
+    {
+        if (name == QStringLiteral("min"))
+            return std::min(a, b);
+
+        if (name == QStringLiteral("max"))
+            return std::max(a, b);
+
+        if (name == QStringLiteral("atan2"))
+            return std::atan2(a, b);
+
+        if (name == QStringLiteral("pow"))
+        {
+            const double result = std::pow(a, b);
+
+            if (!finiteValue(result))
+                error = true;
+
+            return result;
+        }
+
+        if (name == QStringLiteral("mod"))
+        {
+            if (std::abs(b) < Epsilon)
+            {
+                error = true;
+                return 0.0;
+            }
+
+            return a - b * std::floor(a / b);
+        }
+
+        unknownWord = name;
+        error = true;
+
+        return 0.0;
     }
 
     double applyFunction(const QString &name, double argument)
@@ -217,6 +284,18 @@ struct ExprParser
 
         if (name == QStringLiteral("tan"))
             return std::tan(argument);
+
+        if (name == QStringLiteral("sec"))
+            return reciprocal(std::cos(argument));
+
+        if (name == QStringLiteral("csc"))
+            return reciprocal(std::sin(argument));
+
+        if (name == QStringLiteral("cot"))
+            return reciprocal(std::tan(argument));
+
+        if (name == QStringLiteral("sign"))
+            return (argument > 0.0 ? 1.0 : 0.0) - (argument < 0.0 ? 1.0 : 0.0);
 
         if (name == QStringLiteral("asin"))
             return std::asin(argument);
@@ -270,13 +349,28 @@ struct ExprParser
             return std::log(argument);
         }
 
+        if (name == QStringLiteral("log10"))
+        {
+            if (argument <= 0.0)
+            {
+                error = true;
+                return 0.0;
+            }
+
+            return std::log10(argument);
+        }
+
+        unknownWord = name;
         error = true;
+
         return 0.0;
     }
 
     double parsePrimary()
     {
         skipSpaces();
+
+        numberLast = false;
 
         if (position >= source.size())
         {
@@ -290,6 +384,8 @@ struct ExprParser
 
             if (!consume(')'))
                 error = true;
+
+            numberLast = false;
 
             return value;
         }
@@ -316,17 +412,25 @@ struct ExprParser
             {
                 const double argument = parseExpression();
 
+                const bool second = consume(',');
+
+                const double other = second ? parseExpression() : 0.0;
+
                 if (!consume(')'))
                 {
                     error = true;
                     return 0.0;
                 }
 
-                return applyFunction(lower, argument);
+                numberLast = false;
+
+                return second ? applyFunction(lower, argument, other)
+                              : applyFunction(lower, argument);
             }
 
             // unknown identifier (this includes p and q, which are not
             // variables of the curve language)
+            unknownWord = lower;
             error = true;
             return 0.0;
         }
@@ -337,13 +441,26 @@ struct ExprParser
 
     double parseUnary()
     {
+        if (depth >= MaxDepth)
+        {
+            error = true;
+            return 0.0;
+        }
+
+        ++depth;
+
+        double value = 0.0;
+
         if (consume('-'))
-            return -parseUnary();
+            value = -parseUnary();
+        else if (consume('+'))
+            value = parseUnary();
+        else
+            value = parsePower();
 
-        if (consume('+'))
-            return parseUnary();
+        --depth;
 
-        return parsePower();
+        return value;
     }
 
     double parsePower()
@@ -401,6 +518,14 @@ struct ExprParser
             }
             else if (implicitMultiplicationFollows())
             {
+                const QChar next = source.at(position);
+
+                if (numberLast && (next.isDigit() || next == '.'))
+                {
+                    error = true;
+                    return value;
+                }
+
                 value *= parsePower();
             }
             else
@@ -456,14 +581,99 @@ double evaluateExpression(const QString &expression, double t, bool &ok)
     return value;
 }
 
+// What a formula copied from a page, or from this app's own polynomials,
+// looks like: pi and minus signs of print, and powers set as small figures.
 QString normalizeFormula(const QString &formula)
 {
-    QString result = formula.trimmed();
+    static const QString superscripts = QStringLiteral("⁰¹²³⁴⁵⁶⁷⁸⁹");
+
+    QString result;
+
+    const QString text = formula.trimmed();
+
+    for (qsizetype i = 0; i < text.size(); ++i)
+    {
+        const QChar c = text.at(i);
+
+        if (c == QChar(0x03C0))
+        {
+            result += QStringLiteral(" pi ");
+        }
+        else if (c == QChar(0x2212) || c == QChar(0x2013))
+        {
+            result += QLatin1Char('-');
+        }
+        else if (c == QChar(0x00D7) || c == QChar(0x00B7) || c == QChar(0x22C5))
+        {
+            result += QLatin1Char('*');
+        }
+        else if (c == QChar(0x00F7))
+        {
+            result += QLatin1Char('/');
+        }
+        else if (c == QChar(0x207B) || superscripts.contains(c))
+        {
+            result += QStringLiteral("^(");
+
+            for (; i < text.size() && (text.at(i) == QChar(0x207B) || superscripts.contains(text.at(i))); ++i)
+            {
+                if (text.at(i) == QChar(0x207B))
+                    result += QLatin1Char('-');
+                else
+                    result += QString::number(superscripts.indexOf(text.at(i)));
+            }
+
+            --i;
+
+            result += QLatin1Char(')');
+        }
+        else
+        {
+            result += c;
+        }
+    }
+
+    result = result.trimmed();
 
     if (result.startsWith('='))
         result.remove(0, 1);
 
     return result.trimmed();
+}
+
+// What is wrong with one line of a formula, in words.
+QString describeFormulaError(const QString &axis, const QString &expression)
+{
+    ExprParser parser(expression, 0.37);
+
+    parser.evaluate();
+
+    if (!parser.unknownWord.isEmpty())
+    {
+        return knotTr("The formula for %1 uses \"%2\", which is not known here.")
+            .arg(axis, parser.unknownWord);
+    }
+
+    static const QRegularExpression decimalComma(QStringLiteral("\\d,\\d"));
+
+    if (decimalComma.match(expression).hasMatch())
+    {
+        return knotTr("The formula for %1 has a comma in a number: write 0.5, not 0,5.")
+            .arg(axis);
+    }
+
+    // read to its end, and no value came out
+    if (parser.position >= expression.size())
+    {
+        return knotTr("The formula for %1 has no value: it divides by zero, or "
+                      "takes a root or a logarithm where there is none.")
+            .arg(axis);
+    }
+
+    const int at = std::max(0, parser.position - 2);
+
+    return knotTr("The formula for %1 could not be read near \"%2\".")
+        .arg(axis, expression.mid(at, 8));
 }
 
 /*
@@ -1535,7 +1745,10 @@ QVector<Vec3> torusCurve(int p, int q, int samples, double tubeOffset)
         },
         [=](double t)
         {
-            return minorRadius * std::sin(dq * t + tubeOffset);
+            // minus: seen from above the strand going over runs outward, so
+            // every crossing is positive and T(p,q) with p, q > 0 is the
+            // positive (right-handed) torus knot, as the convention has it
+            return -minorRadius * std::sin(dq * t + tubeOffset);
         },
         samples);
 }
@@ -1558,7 +1771,10 @@ QVector<Vec3> unknotCurve(int samples)
 
 QVector<Vec3> trefoilCurve(int samples)
 {
-    return torusKnotCurve(3, 2, samples);
+    // T(3,2) = T(2,3). Going p times round the axis shows (p - 1)q crossings
+    // from above, so the smaller number goes round the axis: the three-lobed
+    // picture with 3 crossings.
+    return torusKnotCurve(2, 3, samples);
 }
 
 QVector<Vec3> figureEightCurve(int samples)
@@ -1578,7 +1794,7 @@ QVector<Vec3> figureEightCurve(int samples)
 
 QVector<Vec3> cinquefoilCurve(int samples)
 {
-    return torusKnotCurve(5, 2, samples);
+    return torusKnotCurve(2, 5, samples);
 }
 
 QVector<Vec3> stevedoreCurve(int samples)
@@ -1778,6 +1994,108 @@ int knownCrossingNumber(Preset preset, int torusP, int torusQ)
     return -1;
 }
 
+namespace
+{
+
+// how far a curve reaches from the origin
+double sizeOfCurve(const QVector<Vec3> &points)
+{
+    double extent = 0.0;
+
+    for (const Vec3 &p : points)
+        extent = std::max(extent, p.length());
+
+    return extent;
+}
+
+void scaleCurve(QVector<Vec3> &points, double scale)
+{
+    for (Vec3 &p : points)
+    {
+        p.x *= scale;
+        p.y *= scale;
+        p.z *= scale;
+    }
+}
+
+std::map<int, long long> termsOfPolynomial(const QVector<long long> &coefficients, int lowest)
+{
+    std::map<int, long long> terms;
+
+    for (int i = 0; i < coefficients.size(); ++i)
+    {
+        if (coefficients.at(i) != 0)
+            terms[lowest + i] = coefficients.at(i);
+    }
+
+    return terms;
+}
+
+// A curve of this table knot with at least `samples` points that is that knot.
+// (The polygon of the table always is. Smoothing it, or taking fewer points,
+// can carry one strand across another.)
+QVector<Vec3> tableCurveFor(int index, int samples, int fine)
+{
+    const KnotTable &table = KnotTable::instance();
+    const KnotTableRecord &record = table.at(index);
+
+    const std::map<int, long long> alexander = KnotTable::normalisedAlexander(record);
+
+    std::map<int, long long> mirrored;
+
+    for (const auto &term : record.jones)
+        mirrored[-term.first] = term.second;
+
+    auto isTheKnot = [&](const QVector<Vec3> &curve)
+    {
+        const AlexanderPolynomial a = computeAlexanderPolynomial(curve);
+
+        if (!a.valid || termsOfPolynomial(a.coefficients, a.lowestPower) != alexander)
+            return false;
+
+        const JonesPolynomial j = computeJonesPolynomial(curve);
+
+        if (!j.valid)
+            return true;
+
+        const std::map<int, long long> v = termsOfPolynomial(j.coefficients, j.lowestPower);
+
+        return v == record.jones || v == mirrored;
+    };
+
+    const QVector<Vec3> raw = table.curve(index);
+    const QVector<Vec3> smooth = resampleByArcLength(refineCurve(raw, 4, true), fine, true);
+
+    for (const int count : {samples, 200, 240, 280, 320, 400})
+    {
+        if (count < samples)
+            continue;
+
+        const QVector<Vec3> curve = resampleByArcLength(smooth, count, true);
+
+        if (isTheKnot(curve))
+            return curve;
+    }
+
+    // every corner of the table's polygon stays
+    const int pieces = std::max(1, std::min(samples, 400) / static_cast<int>(raw.size()));
+
+    QVector<Vec3> polygon;
+
+    for (int i = 0; i < raw.size(); ++i)
+    {
+        const Vec3 &a = raw.at(i);
+        const Vec3 &b = raw.at((i + 1) % raw.size());
+
+        for (int k = 0; k < pieces; ++k)
+            polygon.push_back(a + (b - a) * (static_cast<double>(k) / pieces));
+    }
+
+    return polygon;
+}
+
+} // namespace
+
 CurveData buildPreset(
     Preset preset,
     int samples,
@@ -1791,7 +2109,7 @@ CurveData buildPreset(
 
     // Curves are generated finely and then resampled at uniform arc length,
     // which gives evenly spaced tube rings (and consistent crossing data).
-    const int fine = std::max(samples * 2, 600);
+    int fine = std::max(samples * 2, 600);
 
     switch (preset)
     {
@@ -1852,11 +2170,20 @@ CurveData buildPreset(
 
         result.name = knotTr("Custom Torus Knot");
 
+        // a large torus knot winds many times: enough points for each turn,
+        // or its corners show
+        samples = std::max(samples, std::min(24 * std::max(torusP, torusQ), 800));
+        fine = std::max(samples * 2, 600);
+
         const int common = std::gcd(torusP, torusQ);
 
         if (common == 1)
         {
-            result.points = torusKnotCurve(torusP, torusQ, fine);
+            // T(p,q) = T(q,p): the same knot, drawn with the fewest crossings
+            result.points = torusKnotCurve(
+                std::min(torusP, torusQ),
+                std::max(torusP, torusQ),
+                fine);
 
             result.classification =
                 knotTr("Torus knot T(%1,%2)").arg(torusP).arg(torusQ);
@@ -1949,6 +2276,70 @@ CurveData buildPreset(
                             .constData());
                 }
             }
+
+            // t runs over [0, 2 pi) and the polygon is closed by itself: a
+            // curve that does not come back to its start gets a straight
+            // piece, which is part of the knot and has to be said.
+            const Vec3 gap =
+                Vec3(fx(2.0 * Pi), fy(2.0 * Pi), fz(2.0 * Pi)) - result.points.first();
+
+            Vec3 low = result.points.first();
+            Vec3 high = low;
+
+            for (const Vec3 &point : result.points)
+            {
+                low = Vec3(std::min(low.x, point.x), std::min(low.y, point.y), std::min(low.z, point.z));
+                high = Vec3(std::max(high.x, point.x), std::max(high.y, point.y), std::max(high.z, point.z));
+            }
+
+            if (gap.length() > 0.01 * (high - low).length())
+            {
+                result.warning =
+                    knotTr("The curve does not close, so its ends were joined "
+                           "with a straight piece.");
+            }
+        }
+
+        // Tubes are drawn in floats around a view of a few units: a curve
+        // far beyond that (tan(t) near its poles) could not be seen anyway.
+        for (const Vec3 &point : result.points)
+        {
+            // (written so that a NaN from overflowing lengths fails it too)
+            const bool inReach =
+                std::abs(point.x) <= MaxCustomCoordinate &&
+                std::abs(point.y) <= MaxCustomCoordinate &&
+                std::abs(point.z) <= MaxCustomCoordinate;
+
+            if (!inReach)
+            {
+                throw std::runtime_error(
+                    knotTr("The curve goes too far out: keep every coordinate "
+                           "under a million.")
+                        .toUtf8()
+                        .constData());
+            }
+        }
+
+        /*
+         * The tube's thickness is a length, so a curve of a very different
+         * size from the presets (outer radius about 2.7) would be a blob or
+         * a hairline. Only those are scaled: the rest keep their coordinates,
+         * and a drawn or joined knot stays exactly where it was put.
+         */
+        Vec3 centre;
+
+        for (const Vec3 &point : result.points)
+            centre += point / static_cast<double>(result.points.size());
+
+        double outerRadius = 0.0;
+
+        for (const Vec3 &point : result.points)
+            outerRadius = std::max(outerRadius, (point - centre).length());
+
+        if (outerRadius > 0.0 && (outerRadius < 0.25 || outerRadius > 25.0))
+        {
+            for (Vec3 &point : result.points)
+                point = (point - centre) * (2.7 / outerRadius);
         }
 
         result.classification = knotTr("Numerical custom geometry");
@@ -1978,20 +2369,15 @@ CurveData buildPreset(
 
         const KnotTableRecord &record = table.at(index);
 
-        // KnotInfo's curve (about 130 points), made smooth before it is
-        // resampled
-        result.points = resampleByArcLength(
-            refineCurve(table.curve(index), 4, true),
-            fine,
-            true);
-
         result.name = knotTr("Knot %1").arg(KnotTable::displayName(record.name));
         result.classification = result.name;
         result.polynomial = KnotTable::alexanderText(record);
         result.exactBuiltIn = true;
         result.tableIndex = index;
 
-        result.points = resampleByArcLength(result.points, samples, true);
+        // KnotInfo's curve (about 130 points), made smooth and resampled,
+        // and checked to be still the same knot
+        result.points = tableCurveFor(index, samples, fine);
         result.knownCrossingNumber = record.crossings;
 
         return result;
@@ -2148,20 +2534,30 @@ bool parseFormula(
         return false;
     }
 
-    auto testExpression = [](const QString &expression)
+    // (a formula is worked out at every point of the curve: one this long
+    // would stop the window for many seconds)
+    auto testExpression = [&errorMessage](const QString &axis, const QString &expression)
     {
+        if (expression.size() > MaxFormulaLength)
+        {
+            errorMessage = knotTr("The formula for %1 is too long.").arg(axis);
+            return false;
+        }
+
         bool ok = false;
 
         evaluateExpression(expression, 0.37, ok);
 
+        if (!ok)
+            errorMessage = describeFormulaError(axis, expression);
+
         return ok;
     };
 
-    if (!testExpression(xExpression) ||
-        !testExpression(yExpression) ||
-        !testExpression(zExpression))
+    if (!testExpression(QStringLiteral("x"), xExpression) ||
+        !testExpression(QStringLiteral("y"), yExpression) ||
+        !testExpression(QStringLiteral("z"), zExpression))
     {
-        errorMessage = knotTr("One or more formulas could not be evaluated.");
         return false;
     }
 
@@ -2206,15 +2602,16 @@ QVector<CrossingInfo> detectProjectionCrossings(
 
 QColor crossingColor(int crossingIndex)
 {
+    // (Okabe and Ito's colours: they stay apart for colour-blind eyes)
     static const QVector<QColor> palette = {
-        QColor(59, 130, 246),
-        QColor(45, 200, 255),
-        QColor(37, 99, 235),
-        QColor(16, 185, 129),
-        QColor(75, 85, 99),
-        QColor(100, 116, 139),
-        QColor(245, 158, 11),
-        QColor(236, 72, 153),
+        QColor(0, 114, 178),
+        QColor(230, 159, 0),
+        QColor(0, 158, 115),
+        QColor(204, 121, 167),
+        QColor(86, 180, 233),
+        QColor(213, 94, 0),
+        QColor(240, 228, 66),
+        QColor(148, 103, 189),
     };
 
     const int count = palette.size();
@@ -2225,14 +2622,14 @@ QColor crossingColor(int crossingIndex)
 QColor strandColor(int strandIndex)
 {
     static const QVector<QColor> palette = {
-        QColor(37, 99, 235),
-        QColor(59, 130, 246),
-        QColor(45, 200, 255),
-        QColor(16, 185, 129),
-        QColor(245, 158, 11),
-        QColor(236, 72, 153),
-        QColor(100, 116, 139),
-        QColor(168, 85, 247),
+        QColor(0, 114, 178),
+        QColor(213, 94, 0),
+        QColor(0, 158, 115),
+        QColor(240, 228, 66),
+        QColor(204, 121, 167),
+        QColor(86, 180, 233),
+        QColor(230, 159, 0),
+        QColor(148, 103, 189),
     };
 
     const int count = palette.size();
@@ -2806,19 +3203,24 @@ void computeAmbientOcclusion(Mesh &mesh, double strength)
     // spatial grid of the occluding spheres
     const double reach = reachInRadii * maxRadius;
 
+    // (a curve like tan(t) goes very far out: cells that cannot be told apart
+    // there only cost a look at their spheres)
     auto cellOf = [reach](double value)
     {
-        return static_cast<long long>(std::floor(value / reach));
+        return static_cast<long long>(std::floor(std::clamp(value / reach, -1.0e15, 1.0e15)));
     };
 
+    // unsigned: bits shifted out are simply gone
     auto key = [](long long x, long long y, long long z)
     {
-        constexpr long long offset = 1LL << 20;
+        constexpr unsigned long long offset = 1ULL << 20;
 
-        return ((x + offset) << 42) ^ ((y + offset) << 21) ^ (z + offset);
+        return ((static_cast<unsigned long long>(x) + offset) << 42) ^
+               ((static_cast<unsigned long long>(y) + offset) << 21) ^
+               (static_cast<unsigned long long>(z) + offset);
     };
 
-    std::unordered_map<long long, std::vector<int>> grid;
+    std::unordered_map<unsigned long long, std::vector<int>> grid;
 
     for (int k = 0; k < casters.size(); ++k)
     {
@@ -2926,6 +3328,60 @@ void computeAmbientOcclusion(Mesh &mesh, double strength)
  * =============================================================
  */
 
+namespace
+{
+
+// Writhe and linking numbers do not depend on size: the tolerances of the
+// solid angle are meant for curves of about unit size.
+void normaliseSize(QVector<Vec3> &points)
+{
+    const double extent = sizeOfCurve(points);
+
+    if (extent > 0.0)
+        scaleCurve(points, 1.0 / extent);
+}
+
+double segmentDistance3D(const Vec3 &p1, const Vec3 &q1, const Vec3 &p2, const Vec3 &q2);
+
+// Two segments that do not share a point touch: this is no embedded curve,
+// so it is no knot at all, whatever its polynomials come out as. (A figure
+// eight in a plane looks clean to the crossing test, which needs two heights.)
+bool curvePassesThroughItself(const QVector<Vec3> &curve)
+{
+    const int n = curve.size();
+
+    if (n < 5)
+        return false;
+
+    const double limit = 1.0e-7 * sizeOfCurve(curve);
+
+    for (int i = 0; i < n; ++i)
+    {
+        const Vec3 &a = curve.at(i);
+        const Vec3 &b = curve.at((i + 1) % n);
+        const double reach = (b - a).length() + limit;
+
+        for (int j = i + 2; j < n; ++j)
+        {
+            if (i == 0 && j == n - 1)
+                continue;
+
+            const Vec3 &c = curve.at(j);
+            const Vec3 &d = curve.at((j + 1) % n);
+
+            if ((a - c).length() > reach + (d - c).length())
+                continue;
+
+            if (segmentDistance3D(a, b, c, d) <= limit)
+                return true;
+        }
+    }
+
+    return false;
+}
+
+} // namespace
+
 double computeWrithe(const QVector<Vec3> &curve, int maxSamples)
 {
     if (curve.size() < 4)
@@ -2946,6 +3402,8 @@ double computeWrithe(const QVector<Vec3> &curve, int maxSamples)
 
     if (n < 4)
         return 0.0;
+
+    normaliseSize(sampled);
 
     double sum = 0.0;
 
@@ -2987,6 +3445,15 @@ double computeLinkingNumber(
 
     if (maxSamples > 0 && b.size() > maxSamples)
         b = resampleByArcLength(b, maxSamples, true);
+
+    // one common factor: the two curves keep their places
+    const double extent = std::max(sizeOfCurve(a), sizeOfCurve(b));
+
+    if (extent > 0.0)
+    {
+        scaleCurve(a, 1.0 / extent);
+        scaleCurve(b, 1.0 / extent);
+    }
 
     const int na = a.size();
     const int nb = b.size();
@@ -3183,6 +3650,8 @@ Invariants computeInvariantsWithCrossings(
             jones = torusKnotJonesPolynomial(torusP, torusQ).mirrored();
     }
 
+    result.jonesValid = jones.valid;
+
     if (jones.valid)
     {
         result.jonesPolynomial = jones.text;
@@ -3247,6 +3716,10 @@ Invariants computeInvariantsWithCrossings(
         break;
 
     case Preset::CustomTorus:
+        // T(p,q): 1 when p and q are odd, otherwise the odd one
+        if (std::gcd(torusP, torusQ) == 1)
+            result.determinant = torusP % 2 == 0 ? torusQ : (torusQ % 2 == 0 ? torusP : 1);
+
         result.classification =
             knotTr("Torus knot T(%1, %2)").arg(torusP).arg(torusQ) +
             torusHandedness(torusP, torusQ);
@@ -3294,14 +3767,37 @@ Invariants computeInvariantsWithCrossings(
             "The knot type cannot be read off the shape alone. The values are "
             "measured on the 3D curve on screen.");
 
-        if (preset == Preset::CustomCoordinates && closed)
+        if (preset == Preset::CustomCoordinates && closed &&
+            curvePassesThroughItself(curve))
+        {
+            result.notAKnot = true;
+            result.classification = knotTr("Not a knot: the curve passes through itself");
+            result.alexanderPolynomial = knotTr("Not defined");
+            result.jonesPolynomial = knotTr("Not defined");
+            result.methodology =
+                knotTr("A knot is a closed curve that does not touch itself. Give "
+                       "the strands different heights where they meet.");
+        }
+        else if (preset == Preset::CustomCoordinates && closed)
         {
             const AlexanderPolynomial alexander =
                 computeAlexanderPolynomial(curve);
 
             if (alexander.valid)
             {
+                result.alexanderValid = true;
                 result.alexanderPolynomial = alexander.text;
+
+                long long atMinusOne = 0;
+
+                for (int i = 0; i < alexander.coefficients.size(); ++i)
+                {
+                    const bool odd = (alexander.lowestPower + i) % 2 != 0;
+
+                    atMinusOne += odd ? -alexander.coefficients.at(i) : alexander.coefficients.at(i);
+                }
+
+                result.determinant = std::abs(atMinusOne);
                 result.classification = identifyKnot(alexander, jones);
 
                 result.methodology =

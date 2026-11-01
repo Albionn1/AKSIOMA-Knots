@@ -2,7 +2,13 @@
 #define KNOTBROWSER_H
 
 #include <QDialog>
+#include <QPair>
 #include <QVector>
+
+namespace KnotMath
+{
+struct KnotTableRecord;
+}
 
 class KnotGLWidget;
 class KnotListModel;
@@ -28,7 +34,13 @@ public:
     // KnotInfo name of the chosen knot, empty if none
     QString selectedKnot() const;
 
+    // what KnotInfo knows of a knot: (name, value) rows, ready to show
+    static QVector<QPair<QString, QString>> knotFacts(const KnotMath::KnotTableRecord &record);
+
 private:
+    // KnotInfo's word for a knot's symmetry, in the language of the window
+    static QString symmetryText(const QString &symmetry);
+
     void applyFilter();
     void showKnot(int tableIndex);
     void currentChanged(const QModelIndex &index);

@@ -173,6 +173,9 @@ struct CurveData
 
     // Preset::KnotTable: index in KnotTable, otherwise -1.
     int tableIndex = -1;
+
+    // Something the user should be told about the curve that was made.
+    QString warning;
 };
 
 struct Invariants
@@ -191,6 +194,18 @@ struct Invariants
     int knownCrossingNumber = -1;
 
     bool multiStrand = false;
+
+    // The curve passes through itself, so it is no knot: the tube is drawn at
+    // the size asked for, and whatever needs a knot says so and stops.
+    bool notAKnot = false;
+
+    // These polynomials were computed from the curve itself, not taken from
+    // a table or left out because the diagram is too large.
+    bool alexanderValid = false;
+    bool jonesValid = false;
+
+    // |Alexander(-1)| of a curve that has none in the table, -1 = not known.
+    long long determinant = -1;
 
     QString classification;
     QString alexanderPolynomial;

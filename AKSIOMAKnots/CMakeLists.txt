@@ -47,6 +47,7 @@ qt_add_executable(AKSIOMAKnots
     knotexport.cpp
     knotseifert.h
     knotseifert.cpp
+    knotfilm.cpp
     knotjoin.h
     knotjoin.cpp
     photoscene.h
@@ -118,6 +119,9 @@ qt_add_resources(AKSIOMAKnots "photo"
         data/photo/sneaker_floor.png
 )
 
+# One place for the version: project() above, for the program and the installer.
+target_compile_definitions(AKSIOMAKnots PRIVATE AKSIOMA_VERSION="${PROJECT_VERSION}")
+
 target_link_libraries(AKSIOMAKnots PRIVATE
     Qt6::Widgets
     # QWindowsApplication (full screen pop-up fix in main.cpp)
@@ -136,8 +140,9 @@ else()
     # The relaxation runs tens of thousands of steps while you watch, and
     # the rope in Photo mode is simulated and rebuilt for every frame while
     # it is in the hand, so these are optimised in Debug builds too (about
-    # ten times faster). The same for spreading a drawing apart.
-    set_source_files_properties(knotrelax.cpp ropephysics.cpp knotmath.cpp knotglwidget.cpp knotdiagram.cpp PROPERTIES
+    # ten times faster). The same for spreading a drawing apart and for
+    # relaxing a Seifert surface into its film.
+    set_source_files_properties(knotrelax.cpp ropephysics.cpp knotmath.cpp knotglwidget.cpp knotdiagram.cpp knotfilm.cpp PROPERTIES
         COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
 endif()
 

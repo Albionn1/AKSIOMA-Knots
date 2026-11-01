@@ -160,6 +160,9 @@ public:
 
     const KnotMath::KnotDiagram &diagram() const;
 
+public slots:
+    void reject() override;
+
 private:
     void updateStatus();
     void updateReviewStatus();

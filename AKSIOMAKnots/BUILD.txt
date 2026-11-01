@@ -1,6 +1,8 @@
-Build (Qt 6.5+ recommended, with the "Qt Quick/OpenGL" modules installed)
+Build (Qt 6.12 with MinGW 13.1 is what is used and tested; main.cpp touches one
+private Qt interface, so another Qt version can stop it compiling. The Qt SVG and
+Qt Linguist modules must be installed.)
 
-  cmake -S . -B build -DCMAKE_PREFIX_PATH=<path to Qt, e.g. C:/Qt/6.8.0/msvc2022_64>
+  cmake -S . -B build -DCMAKE_PREFIX_PATH=<path to Qt, e.g. C:/Qt/6.12.0/mingw_64>
   cmake --build build --config Release
   run build/AKSIOMAKnots   (Windows: build/Release/AKSIOMAKnots.exe, run windeployqt first)
 
@@ -10,6 +12,12 @@ Uses the Qt SVG module (Qt Svg, installed with Qt by default) for diagram export
 
 NOTE: resources.qrc and the icons/ folder must stay next to CMakeLists.txt
 (they hold the dropdown arrows and the checkbox tick used by the theme).
+
+Headless checks: every folder in tools/ with a CMakeLists.txt builds on its own
+(cmake -S tools/<name> -B <somewhere> -DCMAKE_PREFIX_PATH=<path to Qt>). They need
+no screen: window_test runs the real main window hidden, with its own settings.
+math_audit is the acceptance test of the mathematics: after anything that touches
+curves, every line it prints must say ok.
 
 Translation: after changing texts in the code, build the "update_translations"
 target to add the new texts to KnotTheory_sq_AL.ts, then translate them

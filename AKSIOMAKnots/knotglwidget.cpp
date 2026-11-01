@@ -3,6 +3,7 @@
 #include "sneaker.h"
 #include "theme.h"
 
+#include <QApplication>
 #include <QFontMetrics>
 #include <QHash>
 #include <QHideEvent>
@@ -439,7 +440,7 @@ KnotGLWidget::KnotGLWidget(QWidget *parent)
 
     setFormat(format);
 
-    setMinimumSize(500, 500);
+    setMinimumSize(320, 240);
 
     initializeParticles();
 
@@ -522,7 +523,7 @@ KnotGLWidget::~KnotGLWidget()
 
 QSize KnotGLWidget::minimumSizeHint() const
 {
-    return QSize(500, 500);
+    return QSize(320, 240);
 }
 
 QSize KnotGLWidget::sizeHint() const
@@ -542,12 +543,20 @@ void KnotGLWidget::initializeGL()
 
     glInitialized_ = true;
 
+    const auto text = [this](GLenum name)
+    {
+        return QString::fromLatin1(reinterpret_cast<const char *>(glGetString(name)));
+    };
+
+    graphicsInfo_ =
+        QStringLiteral("%1, %2, OpenGL %3")
+            .arg(text(GL_VENDOR), text(GL_RENDERER), text(GL_VERSION));
+
     glEnable(GL_MULTISAMPLE);
 
     glClearColor(0.0235f, 0.0235f, 0.0235f, 1.0f);
 
     initializeShaders();
-    initializePhotoShaders();
     initializeShadowMap();
 
     // no timer on this graphics card: a safe middle for automatic quality
@@ -562,6 +571,11 @@ void KnotGLWidget::initializeGL()
     initializeFlatBuffers();
 
     uploadMesh();
+}
+
+bool KnotGLWidget::graphicsReady() const
+{
+    return glInitialized_ && meshProgram_ != nullptr && meshProgram_->isLinked();
 }
 
 void KnotGLWidget::initializeShaders()
@@ -629,6 +643,9 @@ uniform int uMaterial;      // 0 glossy, 1 satin, 2 metal, 3 rope, 4 lace,
 uniform int uDarkTheme;
 uniform float uRopeRadius;  // Photo mode: the rope's radius (view units)
 uniform float uMirrorLevel; // Photo mode: height of the surface it lies on
+uniform int uFilmPass;      // the sheet as a soap film (see the end of main)
+uniform int uCloth;         // Photo mode: the sheet is woven cloth
+uniform float uFilmScale;   // a length of about the film's own size
 
 // Settings, Lighting: 1 on, 0 off; brightness (1 = normal)
 uniform float uKeyOn;
@@ -894,6 +911,76 @@ vec3 directLight(vec3 n, vec3 v, vec3 l, vec3 radiance, float size, Surface s)
     return ((diffuse + specular + sheen) * (1.0 - fc) + coat) * radiance * nl;
 }
 
+// Soap film. n = 1.33; the wavelengths (nm) that stand for the spectrum and
+// what each adds to red, green and blue (CIE 1931, linear sRGB; they sum to 1).
+const float FilmIndex = 1.33;
+const int FilmWaves = 10;
+const float FilmWave[FilmWaves] = float[](410.0, 441.1, 472.2, 503.3, 534.4, 565.6, 596.7, 627.8, 658.9, 690.0);
+const vec3 FilmWeight[FilmWaves] = vec3[](
+    vec3(0.0144, -0.0149, 0.1138),
+    vec3(0.0476, -0.0621, 0.5599),
+    vec3(-0.0452, 0.0246, 0.3920),
+    vec3(-0.1647, 0.2273, 0.0599),
+    vec3(-0.1612, 0.4460, -0.0416),
+    vec3(0.1886, 0.3438, -0.0493),
+    vec3(0.5507, 0.0843, -0.0258),
+    vec3(0.4372, -0.0372, -0.0068),
+    vec3(0.1205, -0.0126, -0.0016),
+    vec3(0.0119, 0.0008, -0.0004));
+
+/*
+ * How thick the film is here, in nanometres. The water runs down under its
+ * own weight, so the film is thinner high up; and it never lies still, so its
+ * thickness is carried round in swirls (noise whose place is itself moved by
+ * noise, twice over, the way a flow folds things).
+ */
+float filmThickness(vec3 p)
+{
+    vec3 q = p / uFilmScale;
+
+    vec2 a = q.xz * 1.15 + vec2(0.0, 1.7 * q.y);
+
+    vec2 flow = vec2(noise2(a + vec2(1.7, 9.2)), noise2(a + vec2(8.3, 2.8)));
+    vec2 b = a + 1.7 * flow;
+
+    vec2 eddy = vec2(noise2(b * 1.9 + vec2(3.1, 0.7)), noise2(b * 1.9 + vec2(7.7, 4.4)));
+
+    float swirl = 0.72 * noise2(b + 2.3 * eddy) + 0.28 * noise2(b * 2.6 + eddy);
+
+    return clamp(170.0 + 760.0 * swirl - 260.0 * q.y, 30.0, 1400.0);
+}
+
+// Reflectance of a thin film in air for one polarisation (r: the amplitude at
+// one surface), both surfaces and all the bounces between them (Airy). The
+// two surfaces differ in sign, so a film far thinner than light goes black.
+float filmReflectance(float r, float phase)
+{
+    float r2 = r * r;
+    float c = cos(phase);
+
+    return 2.0 * r2 * (1.0 - c) / max(1.0 + r2 * r2 - 2.0 * r2 * c, 1.0e-6);
+}
+
+vec3 filmColour(float cosine, float thickness)
+{
+    float sine = sqrt(max(1.0 - cosine * cosine, 0.0)) / FilmIndex;
+    float inside = sqrt(max(1.0 - sine * sine, 0.0));
+
+    float rs = (cosine - FilmIndex * inside) / (cosine + FilmIndex * inside);
+    float rp = (FilmIndex * cosine - inside) / (FilmIndex * cosine + inside);
+
+    vec3 colour = vec3(0.0);
+
+    for (int k = 0; k < FilmWaves; ++k)
+    {
+        float phase = 4.0 * PI * FilmIndex * thickness * inside / FilmWave[k];
+
+        colour += FilmWeight[k] * 0.5 * (filmReflectance(rs, phase) + filmReflectance(rp, phase));
+    }
+
+    return max(colour, vec3(0.0));
+}
+
 void main()
 {
     mirrorData = vec2(1.0, vWorldPosition.y - uMirrorLevel);
@@ -907,6 +994,30 @@ void main()
 
     if (dot(n, v) < 0.0)
         n = normalize(n - 1.01 * dot(n, v) * v);
+
+    if (uFilmPass != 0)
+    {
+        /*
+         * A soap film has no colour of its own and scatters nothing: all it
+         * does is reflect a little of what is around it, and let the rest
+         * through unbent. Its colours are interference: the light from its
+         * two surfaces, a few hundred nanometres apart, adds up or cancels
+         * wavelength by wavelength.
+         */
+        float cosine = clamp(dot(n, v), 0.02, 1.0);
+
+        // (a little more than a plain film: one with glycerine, as for big
+        // bubbles, in a picture that has to carry it across a room)
+        vec3 reflected = 1.6 * filmColour(cosine, filmThickness(vWorldPosition));
+
+        vec3 seen = roomSpecular(reflect(-v, n), 0.03) * reflected * uReflections;
+
+        float share = dot(reflected, vec3(0.2126, 0.7152, 0.0722));
+
+        fragColor = vec4(cleanLight(seen), clamp(1.0 - share, 0.0, 1.0));
+
+        return;
+    }
 
     vec3 albedo = toLinear((uUseVertexColors != 0) ? vVertexColor : uBaseColor);
 
@@ -926,10 +1037,44 @@ void main()
 
     if (sheet)
     {
-        // half gloss, a faint sheen at the edges
-        rough = 0.55;
+        // satin paint under a thin lacquer: the curves of the surface show
+        // in its highlights
+        rough = 0.5;
         metal = 0.0;
         s.sheen = 0.15 * mix(albedo, vec3(1.0), 0.5);
+        s.coat = 0.3;
+
+        if (uCloth != 0 && uPhoto != 0)
+        {
+            /*
+             * Plain woven cotton, a colour dyed into each side. Threads run
+             * both ways over and under each other, on the flat model's
+             * coordinates, so they follow the cloth as it curves. Far away
+             * they fade into the colour instead of shimmering.
+             */
+            vec2 w = vTexcoord.xy * 150.0;
+
+            float footprint = length(fwidth(w));
+            float detail = 1.0 - smoothstep(0.3, 0.9, footprint);
+
+            bool warpOnTop = mod(floor(w.x) + floor(w.y), 2.0) < 1.0;
+
+            float across = warpOnTop ? fract(w.x) : fract(w.y);
+            float along = warpOnTop ? fract(w.y) : fract(w.x);
+
+            float thread = sqrt(max(sin(PI * across), 0.0)) * (0.75 + 0.25 * sin(PI * along));
+
+            float slub = noise2(vec2(floor(warpOnTop ? w.x : w.y) * 0.37, (warpOnTop ? w.y : w.x) * 0.06));
+
+            n = bumped(n, 0.004 * uFilmScale * thread * detail);
+
+            albedo *= mix(1.0, mix(0.8, 1.03, thread) * mix(0.94, 1.04, slub), detail);
+
+            rough = 0.9;
+            s.coat = 0.0;
+            s.sheen = 0.32 * mix(albedo, vec3(1.0), 0.25);
+            s.sheenRough = 0.6;
+        }
     }
     else if (uMaterial == 0)
     {
@@ -1007,6 +1152,17 @@ void main()
 
         fibre = l > 1.0e-20 && !isnan(l) ? grows / l : normalize(cross(n, vec3(0.31, 0.53, 0.79)));
         through = 1.0;
+        rough = 1.0;
+    }
+    else if (uMaterial >= 5 && vTexcoord.w < -0.1)
+    {
+        // A cut end (Photo::buildRopeMesh): fibres seen end on, pale ends with
+        // dark gaps between them, far finer than the yarns on the rope's side.
+        float ends = 0.65 * noise2(vTexcoord.xy * 34.0) + 0.35 * noise2(vTexcoord.xy * 71.0 + 5.3);
+
+        n = bumped(n, 0.05 * ends * uRopeRadius);
+
+        albedo *= mix(0.38, 0.95, smoothstep(0.3, 0.72, ends));
         rough = 1.0;
     }
     else if (uMaterial == 5)
@@ -1176,6 +1332,11 @@ void main()
         // the reflection of the main light is shadowed with it
         occluded *= mix(1.0, keyLit, pow(max(dot(pr, uKeyDir), 0.0), 4.0));
 
+        // polished metal, looking down: it sees the table under it, not the
+        // ground of the photograph beyond the table
+        if (metal > 0.5)
+            occluded *= mix(0.1, 1.0, smoothstep(-0.25, 0.05, pr.y));
+
         float coatRoom = s.coat * (0.04 + 0.96 * pow(1.0 - pnv, 5.0));
 
         float perceptual = sqrt(a);
@@ -1247,12 +1408,12 @@ void main()
 }
 )";
 
-    bool meshOk = meshProgram_->addShaderFromSourceCode(
+    bool meshOk = meshProgram_->addCacheableShaderFromSourceCode(
         QOpenGLShader::Vertex,
         meshVertexShader);
 
     meshOk = meshOk &&
-             meshProgram_->addShaderFromSourceCode(
+             meshProgram_->addCacheableShaderFromSourceCode(
                  QOpenGLShader::Fragment,
                  withPhoto(meshFragmentShader));
 
@@ -1317,12 +1478,12 @@ void main()
 }
 )";
 
-    bool backgroundOk = backgroundProgram_->addShaderFromSourceCode(
+    bool backgroundOk = backgroundProgram_->addCacheableShaderFromSourceCode(
         QOpenGLShader::Vertex,
         backgroundVertexShader);
 
     backgroundOk = backgroundOk &&
-                   backgroundProgram_->addShaderFromSourceCode(
+                   backgroundProgram_->addCacheableShaderFromSourceCode(
                        QOpenGLShader::Fragment,
                        backgroundFragmentShader);
 
@@ -1396,12 +1557,12 @@ void main()
 }
 )";
 
-    bool flatOk = flatProgram_->addShaderFromSourceCode(
+    bool flatOk = flatProgram_->addCacheableShaderFromSourceCode(
         QOpenGLShader::Vertex,
         flatVertexShader);
 
     flatOk = flatOk &&
-             flatProgram_->addShaderFromSourceCode(
+             flatProgram_->addCacheableShaderFromSourceCode(
                  QOpenGLShader::Fragment,
                  flatFragmentShader);
 
@@ -1489,12 +1650,12 @@ void main()
 }
 )";
 
-    bool shadowOk = shadowProgram_->addShaderFromSourceCode(
+    bool shadowOk = shadowProgram_->addCacheableShaderFromSourceCode(
         QOpenGLShader::Vertex,
         shadowVertexShader);
 
     shadowOk = shadowOk &&
-               shadowProgram_->addShaderFromSourceCode(
+               shadowProgram_->addCacheableShaderFromSourceCode(
                    QOpenGLShader::Fragment,
                    withShadows(shadowFragmentShader));
 
@@ -1555,8 +1716,8 @@ void main()
 
     photoBackgroundProgram_ = std::make_unique<QOpenGLShaderProgram>();
 
-    if (photoBackgroundProgram_->addShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
-        photoBackgroundProgram_->addShaderFromSourceCode(QOpenGLShader::Fragment,
+    if (photoBackgroundProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
+        photoBackgroundProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Fragment,
                                                          withPhoto(backgroundFragmentShader)))
     {
         photoBackgroundProgram_->link();
@@ -1735,8 +1896,8 @@ void main()
     {
         program = std::make_unique<QOpenGLShaderProgram>();
 
-        if (program->addShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
-            program->addShaderFromSourceCode(QOpenGLShader::Fragment, fragment))
+        if (program->addCacheableShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
+            program->addCacheableShaderFromSourceCode(QOpenGLShader::Fragment, fragment))
         {
             program->link();
         }
@@ -2024,8 +2185,8 @@ void main()
 
     photoFloorProgram_ = std::make_unique<QOpenGLShaderProgram>();
 
-    if (photoFloorProgram_->addShaderFromSourceCode(QOpenGLShader::Vertex, floorVertexShader) &&
-        photoFloorProgram_->addShaderFromSourceCode(QOpenGLShader::Fragment,
+    if (photoFloorProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Vertex, floorVertexShader) &&
+        photoFloorProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Fragment,
                                                     withPhoto(floorFragmentShader)))
     {
         photoFloorProgram_->bindAttributeLocation("aPosition", 0);
@@ -2206,8 +2367,8 @@ void main()
 
     developProgram_ = std::make_unique<QOpenGLShaderProgram>();
 
-    if (developProgram_->addShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
-        developProgram_->addShaderFromSourceCode(QOpenGLShader::Fragment,
+    if (developProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
+        developProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Fragment,
                                                  withPhoto(developFragmentShader)))
     {
         developProgram_->link();
@@ -2291,8 +2452,8 @@ void main()
 
     occlusionProgram_ = std::make_unique<QOpenGLShaderProgram>();
 
-    if (occlusionProgram_->addShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
-        occlusionProgram_->addShaderFromSourceCode(QOpenGLShader::Fragment, occlusionFragmentShader))
+    if (occlusionProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
+        occlusionProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Fragment, occlusionFragmentShader))
     {
         occlusionProgram_->link();
     }
@@ -2402,8 +2563,8 @@ void main()
 
     prefilterProgram_ = std::make_unique<QOpenGLShaderProgram>();
 
-    if (prefilterProgram_->addShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
-        prefilterProgram_->addShaderFromSourceCode(QOpenGLShader::Fragment, prefilterFragmentShader))
+    if (prefilterProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Vertex, screenVertexShader) &&
+        prefilterProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Fragment, prefilterFragmentShader))
     {
         prefilterProgram_->link();
     }
@@ -2684,8 +2845,8 @@ void main()
 
     shoeProgram_ = std::make_unique<QOpenGLShaderProgram>();
 
-    if (shoeProgram_->addShaderFromSourceCode(QOpenGLShader::Vertex, shoeVertexShader) &&
-        shoeProgram_->addShaderFromSourceCode(QOpenGLShader::Fragment, withPhoto(shoeFragmentShader)))
+    if (shoeProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Vertex, shoeVertexShader) &&
+        shoeProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Fragment, withPhoto(shoeFragmentShader)))
     {
         shoeProgram_->bindAttributeLocation("aPosition", 0);
         shoeProgram_->bindAttributeLocation("aNormal", 1);
@@ -2694,7 +2855,10 @@ void main()
         shoeProgram_->bindAttributeLocation("aShade", 4);
         shoeProgram_->link();
     }
+}
 
+void KnotGLWidget::initializeShadowMap()
+{
     // the shadow map read as plain depth (no comparison)
     QOpenGLExtraFunctions *extra = context()->extraFunctions();
 
@@ -2704,10 +2868,7 @@ void main()
     extra->glSamplerParameteri(depthSampler_, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     extra->glSamplerParameteri(depthSampler_, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     extra->glSamplerParameteri(depthSampler_, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-}
 
-void KnotGLWidget::initializeShadowMap()
-{
     depthProgram_ = std::make_unique<QOpenGLShaderProgram>();
 
     const char *depthVertexShader = R"(
@@ -2732,12 +2893,12 @@ void main()
 }
 )";
 
-    bool depthOk = depthProgram_->addShaderFromSourceCode(
+    bool depthOk = depthProgram_->addCacheableShaderFromSourceCode(
         QOpenGLShader::Vertex,
         depthVertexShader);
 
     depthOk = depthOk &&
-              depthProgram_->addShaderFromSourceCode(
+              depthProgram_->addCacheableShaderFromSourceCode(
                   QOpenGLShader::Fragment,
                   depthFragmentShader);
 
@@ -2777,8 +2938,6 @@ void main()
     // no colour attachment
     const GLenum none = GL_NONE;
 
-    QOpenGLExtraFunctions *extra = context()->extraFunctions();
-
     extra->glDrawBuffers(1, &none);
     extra->glReadBuffer(GL_NONE);
 
@@ -2791,6 +2950,8 @@ void main()
 
 void KnotGLWidget::allocateShadowMap()
 {
+    shadowDirty_ = true;
+
     glBindTexture(GL_TEXTURE_2D, shadowTexture_);
 
     glTexImage2D(
@@ -2875,6 +3036,17 @@ void KnotGLWidget::drawShadowMap()
         shadowDepthBias_ = 3.0f * shadowTexel_ / (farPlane - nearPlane);
     }
 
+    // What the map holds depends only on the light, the mesh and the shoe. A
+    // knot that stands still keeps its shadow, and the frame this pass cost.
+    const bool shoe = showShoe();
+
+    if (!shadowDirty_ && shadowDrawnLight_ == lightViewProjection && shadowDrawnShoe_ == shoe)
+        return;
+
+    shadowDirty_ = false;
+    shadowDrawnLight_ = lightViewProjection;
+    shadowDrawnShoe_ = shoe;
+
     // not bound for reading while it is drawn into
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -2899,12 +3071,13 @@ void KnotGLWidget::drawShadowMap()
 
     meshVao_.bind();
 
-    glDrawElements(GL_TRIANGLES, indexCount_, GL_UNSIGNED_INT, nullptr);
+    // (a soap film is too clear to cast a shadow)
+    glDrawElements(GL_TRIANGLES, solidIndexCount(), GL_UNSIGNED_INT, nullptr);
 
     meshVao_.release();
 
     // the sneaker casts its shadow too (on the floor and on the lace)
-    if (showShoe())
+    if (shoe)
     {
         QMatrix4x4 scale;
 
@@ -3448,6 +3621,40 @@ void KnotGLWidget::setPhotoStage(bool on)
     update();
 }
 
+void KnotGLWidget::setClothSheet(bool on)
+{
+    if (clothSheet_ == on)
+        return;
+
+    clothSheet_ = on;
+
+    ++photoVersion_;
+
+    update();
+}
+
+void KnotGLWidget::setSoapFilm(bool on)
+{
+    if (soapFilm_ == on)
+        return;
+
+    soapFilm_ = on;
+
+    ++photoVersion_;
+
+    update();
+}
+
+bool KnotGLWidget::soapFilmShown() const
+{
+    return photo_ && soapFilm_;
+}
+
+int KnotGLWidget::solidIndexCount() const
+{
+    return soapFilmShown() ? solidIndices_ : indexCount_;
+}
+
 void KnotGLWidget::setRopeTinted(bool tinted)
 {
     ropeTinted_ = tinted;
@@ -3905,6 +4112,8 @@ void KnotGLWidget::uploadMesh()
         vertices.constData(),
         static_cast<int>(vertices.size() * sizeof(Vertex)));
 
+    shadowDirty_ = true;
+
     indexBuffer_.create();
     indexBuffer_.setUsagePattern(QOpenGLBuffer::StaticDraw);
     indexBuffer_.bind();
@@ -3966,6 +4175,21 @@ void KnotGLWidget::uploadMesh()
 
     indexCount_ = mesh_.indices.size();
 
+    // a mesh ends with its sheet (seifertMesh)
+    solidIndices_ = indexCount_;
+
+    if (hasSheet)
+    {
+        for (int i = 0; i < indexCount_; ++i)
+        {
+            if (sheet[mesh_.indices.at(i)] > 0.5f)
+            {
+                solidIndices_ = i;
+                break;
+            }
+        }
+    }
+
     meshBytes_ =
         static_cast<qint64>(vertices.size()) * static_cast<qint64>(sizeof(Vertex)) +
         static_cast<qint64>(indexCount_) * static_cast<qint64>(sizeof(unsigned int));
@@ -3986,6 +4210,7 @@ void KnotGLWidget::destroyMeshBuffers()
         indexBuffer_.destroy();
 
     indexCount_ = 0;
+    solidIndices_ = 0;
     meshBytes_ = 0;
 }
 
@@ -4142,7 +4367,7 @@ void KnotGLWidget::drawGround(const QMatrix4x4 &viewProjection)
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
 
     flatProgram_->bind();
 
@@ -4208,7 +4433,7 @@ void KnotGLWidget::drawShadow(const QMatrix4x4 &viewProjection)
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
 
     shadowProgram_->bind();
 
@@ -4223,7 +4448,9 @@ void KnotGLWidget::drawShadow(const QMatrix4x4 &viewProjection)
 
     shadowProgram_->setUniformValue(
         "uFloor",
-        Theme::isDark() ? QVector3D(0.26f, 0.255f, 0.24f) : QVector3D(0.95f, 0.945f, 0.93f));
+        // (light theme: about the paper itself, so that the shadow does the work
+        // and no white patch lies under the knot)
+        Theme::isDark() ? QVector3D(0.26f, 0.255f, 0.24f) : QVector3D(0.86f, 0.853f, 0.833f));
 
     groundVao_.bind();
 
@@ -4333,7 +4560,15 @@ void KnotGLWidget::drawMesh(
         "uUseVertexColors",
         useVertexColors_ && (!(photo_ && restingRope_) || ropeTinted_) ? 1 : 0);
 
-    meshProgram_->setUniformValue("uMetallic", photo_ ? 0.0f : metallic_);
+    // the wire of a soap film or a cloth: polished brass
+    const bool wire = photo_ && (soapFilm_ || clothSheet_);
+
+    meshProgram_->setUniformValue("uCloth", clothSheet_ ? 1 : 0);
+
+    meshProgram_->setUniformValue("uFilmPass", 0);
+    meshProgram_->setUniformValue("uFilmScale", std::max(0.25f * (meshMax_ - meshMin_).length(), 1.0e-3f));
+
+    meshProgram_->setUniformValue("uMetallic", wire ? 1.0f : (photo_ ? 0.0f : metallic_));
     // Photo mode: the rope at rest has its real strands (5) or yarns (6);
     // a moving tube the painted pattern of rope (3) or lace (4)
     const int construction = photoInfo_.rope.construction;
@@ -4341,8 +4576,11 @@ void KnotGLWidget::drawMesh(
     const int photoMaterial =
         restingRope_ ? 4 + construction : (construction == 2 ? 4 : 3);
 
-    meshProgram_->setUniformValue("uRoughness", photo_ ? photoInfo_.rope.roughness : roughness_);
-    meshProgram_->setUniformValue("uMaterial", photo_ ? photoMaterial : material_);
+    meshProgram_->setUniformValue(
+        "uRoughness",
+        wire ? 0.3f : (photo_ ? photoInfo_.rope.roughness : roughness_));
+
+    meshProgram_->setUniformValue("uMaterial", wire ? 2 : (photo_ ? photoMaterial : material_));
     meshProgram_->setUniformValue(
         "uRopeRadius",
         mesh_.centerline.size() >= 4 ? mesh_.centerline.at(3) : 0.1f);
@@ -4364,7 +4602,31 @@ void KnotGLWidget::drawMesh(
 
     meshVao_.bind();
 
-    glDrawElements(GL_TRIANGLES, indexCount_, GL_UNSIGNED_INT, nullptr);
+    glDrawElements(GL_TRIANGLES, solidIndexCount(), GL_UNSIGNED_INT, nullptr);
+
+    /*
+     * The film, over everything solid. What is behind it is kept as far as
+     * the film lets it through, and what it reflects is added: nearly all
+     * adding, so the sheets need no sorting. Every sheet counts once, by the
+     * copy that faces the camera, and writes no depth.
+     */
+    if (soapFilmShown() && !mirrorPass_ && indexCount_ > solidIndices_)
+    {
+        meshProgram_->setUniformValue("uFilmPass", 1);
+
+        glEnable(GL_BLEND);
+        glBlendFuncSeparate(GL_ONE, GL_SRC_ALPHA, GL_ZERO, GL_ONE);
+        glDepthMask(GL_FALSE);
+
+        glDrawElements(
+            GL_TRIANGLES,
+            indexCount_ - solidIndices_,
+            GL_UNSIGNED_INT,
+            reinterpret_cast<const void *>(static_cast<quintptr>(solidIndices_) * sizeof(unsigned int)));
+
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+    }
 
     meshVao_.release();
     meshProgram_->release();
@@ -4424,7 +4686,7 @@ void KnotGLWidget::drawParticles(const QMatrix4x4 &viewProjection)
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
 
     flatProgram_->bind();
 
@@ -4572,13 +4834,15 @@ void KnotGLWidget::paintGL()
 
     stage(0);
 
-    const float dpr = static_cast<float>(devicePixelRatioF());
+    // (rounded as Qt rounds its framebuffer: truncating leaves a thin line at
+    // the edge at 150% with an odd width)
+    const QSize device = size() * devicePixelRatioF();
 
     glViewport(
         0,
         0,
-        static_cast<int>(static_cast<float>(width()) * dpr),
-        static_cast<int>(static_cast<float>(height()) * dpr));
+        device.width(),
+        device.height());
 
     glDisable(GL_SCISSOR_TEST);
     glDepthMask(GL_TRUE);
@@ -4596,8 +4860,8 @@ void KnotGLWidget::paintGL()
 
     // 1. background (no depth), 2. ground, 3. knot, 4. particles; in Photo
     // mode the room, the table and the rope
-    photoOutputWidth_ = static_cast<int>(static_cast<float>(width()) * dpr);
-    photoOutputHeight_ = static_cast<int>(static_cast<float>(height()) * dpr);
+    photoOutputWidth_ = device.width();
+    photoOutputHeight_ = device.height();
 
     const float frameScale = photo_ ? Lighting::photoLevel(photoLevel_).scale : 1.0f;
 
@@ -4866,9 +5130,31 @@ void KnotGLWidget::onAnimationTick()
         frameClock_.start();
     }
 
-    updateParticles(dt);
+    // a dialog in front has the graphics card to itself
+    const QWidget *modal = QApplication::activeModalWidget();
 
-    const bool turning = autoRotation_ && !ropeDragging_;
+    if (modal != nullptr && !modal->isAncestorOf(this))
+        return;
+
+    const bool turning = autoRotation_ && !ropeDragging_ && !reduceMotion_;
+
+    /*
+     * The faint particles of the plain view are not worth the whole of a
+     * graphics card, or a laptop's battery: ten frames a second, while the
+     * app is the one in use. Everything else asks for its own frame.
+     */
+    particleWait_ = std::min(particleWait_ + dt, 0.2f);
+
+    const bool particlesDue =
+        !photo_ && !reduceMotion_ &&
+        (cameraFlight_ || turning || (particleWait_ >= 0.1f && window()->isActiveWindow()));
+
+    if (particlesDue)
+    {
+        updateParticles(particleWait_);
+
+        particleWait_ = 0.0f;
+    }
 
     if (cameraFlight_)
     {
@@ -4883,9 +5169,24 @@ void KnotGLWidget::onAnimationTick()
             yaw_ -= 360.0f;
     }
 
-    // Photo mode has no particles: a still picture is not drawn again
-    if (!photo_ || cameraFlight_ || turning)
+    // a still picture is not drawn again
+    if (particlesDue || cameraFlight_ || turning)
         update();
+}
+
+void KnotGLWidget::setReduceMotion(bool reduced)
+{
+    reduceMotion_ = reduced;
+}
+
+QString KnotGLWidget::graphicsInfo() const
+{
+    return graphicsInfo_.isEmpty() ? QStringLiteral("OpenGL has not started") : graphicsInfo_;
+}
+
+bool KnotGLWidget::photoPictureFinished() const
+{
+    return !photo_ || photoSample_ >= PhotoSamples;
 }
 
 void KnotGLWidget::showEvent(QShowEvent *event)
@@ -5294,6 +5595,11 @@ void KnotGLWidget::placeCamera(
     panOffset_ = centre;
 
     update();
+}
+
+void KnotGLWidget::flyToMesh(float yaw, float pitch)
+{
+    flyToSphere(0.5f * (meshMin_ + meshMax_), 0.42f * (meshMax_ - meshMin_).length(), yaw, pitch);
 }
 
 void KnotGLWidget::flyToSphere(
@@ -5708,6 +6014,8 @@ void KnotGLWidget::resetCamera(float highestPitch, bool animate)
     {
         flightProgress_ = 1.0f;
         advanceCameraFlight(0.0f);
+
+        update();
     }
 }
 
@@ -5880,6 +6188,8 @@ void KnotGLWidget::clearRestingPose()
     restingRope_ = false;
     tableAnchored_ = false;
     poseDirty_ = true;
+
+    update();
 }
 
 QVector3D KnotGLWidget::tableMiddle() const
@@ -5888,6 +6198,20 @@ QVector3D KnotGLWidget::tableMiddle() const
         return QVector3D(tableAnchor_.x(), 0.0f, tableAnchor_.z());
 
     return QVector3D(0.5f * (meshMin_.x() + meshMax_.x()), 0.0f, 0.5f * (meshMin_.z() + meshMax_.z()));
+}
+
+QRectF KnotGLWidget::photoTableArea() const
+{
+    if (!photo_ || photoInfo_.tableWidthMm <= 0.0)
+        return QRectF();
+
+    const QVector3D middle = tableMiddle();
+
+    const double mm = static_cast<double>(worldPerMm());
+    const double wide = photoInfo_.tableWidthMm * mm;
+    const double deep = photoInfo_.tableDepthMm * mm;
+
+    return QRectF(middle.x() - 0.5 * wide, middle.z() - 0.5 * deep, wide, deep);
 }
 
 QVector3D KnotGLWidget::posed(const QVector3D &point) const
@@ -6031,7 +6355,7 @@ void KnotGLWidget::refreshPose()
 
 GLuint KnotGLWidget::loadTexture(const QString &path)
 {
-    QImage image(path);
+    QImage image = Photo::preloadedPicture(path);
 
     if (image.isNull())
         return 0;
@@ -6083,6 +6407,15 @@ GLuint KnotGLWidget::loadTexture(const QString &path)
 bool KnotGLWidget::loadPhotoScene()
 {
     destroyPhotoResources();
+
+    // (the long Photo shaders wait until they are wanted: a window that never
+    // opens Photo mode, or a preview, starts faster without them)
+    if (!photoShadersReady_)
+    {
+        initializePhotoShaders();
+
+        photoShadersReady_ = true;
+    }
 
     if (!prefilterProgram_ || !prefilterProgram_->isLinked() ||
         !photoFloorProgram_ || !photoFloorProgram_->isLinked() ||
@@ -6238,7 +6571,7 @@ bool KnotGLWidget::loadPhotoScene()
     floorRoughnessTexture_ = loadTexture(photoInfo_.surfaceRoughness);
 
     const QImage small =
-        QImage(photoInfo_.surfaceColor)
+        Photo::preloadedPicture(photoInfo_.surfaceColor)
             .scaled(16, 16, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
             .convertToFormat(QImage::Format_RGB32);
 
@@ -7218,7 +7551,7 @@ void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
 
     photoFloorProgram_->bind();
 
@@ -7479,7 +7812,7 @@ void KnotGLWidget::drawPhotoDepth(const QMatrix4x4 &model, const QMatrix4x4 &vie
         depthProgram_->setUniformValue("uLightViewProjection", viewProjection * model);
 
         meshVao_.bind();
-        glDrawElements(GL_TRIANGLES, indexCount_, GL_UNSIGNED_INT, nullptr);
+        glDrawElements(GL_TRIANGLES, solidIndexCount(), GL_UNSIGNED_INT, nullptr);
         meshVao_.release();
     }
 
@@ -7621,7 +7954,7 @@ void KnotGLWidget::developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &p
         glDisable(GL_CULL_FACE);
         glDepthMask(GL_FALSE);
         glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
 
         accumulateProgram_->bind();
 

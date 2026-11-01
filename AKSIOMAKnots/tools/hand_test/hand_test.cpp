@@ -51,8 +51,10 @@ double closestApproach(const QVector<Vec3> &x, bool closed)
 }
 
 // as MainWindow::cutPhotoRope: where the rope lies most on its own
-QVector<Vec3> cutOpen(const QVector<Vec3> &points)
+void cutOpen(Photo::RopeSimulation &rope)
 {
+    const QVector<Vec3> points = rope.points();
+
     const int n = points.size();
     const int apart = 16;
 
@@ -83,12 +85,7 @@ QVector<Vec3> cutOpen(const QVector<Vec3> &points)
         }
     }
 
-    QVector<Vec3> open;
-
-    for (int k = 0; k < n - 3; ++k)
-        open.push_back(points.at((cut + 2 + k) % n));
-
-    return open;
+    rope.cut(cut + 2, n - 3);
 }
 
 // as MainWindow::photoRopeCurve: the ends joined by an arch over the top
@@ -301,17 +298,16 @@ int main(int argc, char **argv)
             (!beforeJones.valid || !afterJones.valid || beforeJones.coefficients == afterJones.coefficients);
 
         // 2. cut open where nothing lies over it: joined, the same knot
-        const QVector<Vec3> open = cutOpen(rope.points());
-        const AlexanderPolynomial cut = computeAlexanderPolynomial(joined(open));
+        cutOpen(rope);
+
+        const AlexanderPolynomial cut = computeAlexanderPolynomial(joined(rope.points()));
 
         const bool cutSame = cut.valid && cut.text == after.text;
 
         // 3. with free ends, moved about again: perhaps another knot
-        Photo::RopeSimulation loose(open, {}, false, material);
+        const Moves openMoves = moveAbout(rope, moves, random);
 
-        const Moves openMoves = moveAbout(loose, moves, random);
-
-        const QVector<Vec3> ending = joined(loose.points());
+        const QVector<Vec3> ending = joined(rope.points());
         const AlexanderPolynomial end = computeAlexanderPolynomial(ending);
 
         const QString name = end.valid ? identifyKnot(end, computeJonesPolynomial(ending)) : QStringLiteral("(no polynomial)");

@@ -35,6 +35,20 @@ bool rememberWindow();
 void setRememberWindow(
     bool enabled);
 
+// no moving background, no turning knot
+bool reduceMotion();
+void setReduceMotion(
+    bool enabled);
+
+// OpenGL in software (opengl32sw.dll): slow, but it runs where the graphics
+// card or the remote desktop has no OpenGL 3.3. Read before the app starts.
+// A small log beside the autosave, for reports of problems.
+QString logPath();
+
+bool softwareGraphics();
+void setSoftwareGraphics(
+    bool enabled);
+
 QByteArray windowGeometry();
 void setWindowGeometry(
     const QByteArray &geometry);

@@ -33,7 +33,7 @@ const Theme::Colors LightColors =
     QColor(QStringLiteral("#1F1E1B")),
     QColor(QStringLiteral("#8C8981")),
     QColor(QStringLiteral("#5F5C56")),
-    QColor(QStringLiteral("#A5660F"))
+    QColor(QStringLiteral("#955A0A"))
 };
 
 // dark reference colour -> light theme colour
@@ -46,7 +46,7 @@ const QHash<QString, QString> &lightMapping()
         {QStringLiteral("#BAB9B4"), QStringLiteral("#1F1E1B")},
         {QStringLiteral("#53514C"), QStringLiteral("#8C8981")},
         {QStringLiteral("#8A8780"), QStringLiteral("#5F5C56")},
-        {QStringLiteral("#D99B42"), QStringLiteral("#A5660F")},
+        {QStringLiteral("#D99B42"), QStringLiteral("#955A0A")},
         {QStringLiteral("#1A1A1A"), QStringLiteral("#D6D4CE")},
         // blue strand in the unknotting texts
         {QStringLiteral("#5B9BFF"), QStringLiteral("#2C6BD1")},
@@ -166,7 +166,7 @@ const char *const StyleSheet = R"(
         border: none;
         border-left: 2px solid transparent;
         padding: 9px 0px 8px 0px;
-        font-size: 8pt;
+        font-size: 9pt;
         font-weight: 600;
     }
 
@@ -292,28 +292,28 @@ const char *const StyleSheet = R"(
 
     QLabel#BrandSub {
         color: #BAB9B4;
-        font-size: 8pt;
+        font-size: 9pt;
         font-weight: 600;
         letter-spacing: 2.5px;
     }
 
     QLabel#Caption {
         color: #8A8780;
-        font-size: 8pt;
+        font-size: 9pt;
         font-weight: 700;
         letter-spacing: 1.4px;
     }
 
     QLabel#SectionIndex {
         color: #D99B42;
-        font-size: 8pt;
+        font-size: 9pt;
         font-weight: 700;
         letter-spacing: 1px;
     }
 
     QLabel#Section {
         color: #BAB9B4;
-        font-size: 8pt;
+        font-size: 9pt;
         font-weight: 700;
         letter-spacing: 2.2px;
     }
@@ -566,6 +566,38 @@ const char *const StyleSheet = R"(
         color: #BAB9B4;
     }
 
+    /* ---------- where the keyboard is (MainWindow::markKeyboardFocus) ---------- */
+
+    QPushButton[keyboardFocus="true"],
+    QPushButton#GenerateButton[keyboardFocus="true"],
+    QPushButton#BrushButton[keyboardFocus="true"],
+    QToolButton[keyboardFocus="true"],
+    QComboBox[keyboardFocus="true"],
+    QSpinBox[keyboardFocus="true"] {
+        border: 1px solid #D99B42;
+    }
+
+    QPushButton#TopBarButton[keyboardFocus="true"],
+    QPushButton#DisclosureButton[keyboardFocus="true"] {
+        border: none;
+        color: #D99B42;
+        text-decoration: underline;
+    }
+
+    QCheckBox[keyboardFocus="true"]::indicator,
+    QRadioButton[keyboardFocus="true"]::indicator {
+        border-color: #D99B42;
+    }
+
+    QTabBar[keyboardFocus="true"]::tab:selected {
+        color: #D99B42;
+        border-bottom: 2px solid #D99B42;
+    }
+
+    QSlider[keyboardFocus="true"]::handle:horizontal {
+        background: #D99B42;
+    }
+
     /* ---------- slider ---------- */
 
     QSlider {
@@ -664,7 +696,7 @@ const char *const StyleSheet = R"(
         margin: 0;
         border: none;
         border-bottom: 2px solid #060606;
-        font-size: 8pt;
+        font-size: 9pt;
         font-weight: 700;
         letter-spacing: 2px;
     }

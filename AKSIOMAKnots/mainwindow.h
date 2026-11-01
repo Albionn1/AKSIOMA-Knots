@@ -34,6 +34,7 @@
 #include <map>
 
 class QButtonGroup;
+class QHBoxLayout;
 class QCheckBox;
 class QDialog;
 class QFrame;
@@ -69,6 +70,9 @@ public:
 protected:
     void closeEvent(
         QCloseEvent *event) override;
+
+    void resizeEvent(
+        QResizeEvent *event) override;
 
     void changeEvent(
         QEvent *event) override;
@@ -107,6 +111,9 @@ private slots:
     // lays the current knot on the table (as a rope of tubes of `radius`)
     // on a worker thread; rebuildMesh draws it once it lies still
     void layRestingRope(double radius);
+
+    // what is still being laid down is for nothing now
+    void cancelLaying();
 
     /*
      * Photo mode, the rope in the hand. With Grab on, the rope lying on
@@ -206,6 +213,11 @@ private slots:
     // lies still)
     void startUnknotDrop();
     bool advanceUnknotDrop(double seconds);
+
+    // a moment of the animation chosen by hand (unknotT_ is set): the loop
+    // that fell, if it did, goes back up
+    void returnUnknotToTheAir();
+
     void unknotScrubbed(
         int value);
 
@@ -281,6 +293,11 @@ private:
     void applyDefaultCustomText(
         int presetIndex);
 
+    // a drawn, tied or joined knot as the current knot: its text in the
+    // Custom Curve box, and one rebuild (not one for the text before it)
+    void showCustomCurve(
+        const QString &text);
+
     void showError(
         const QString &message);
 
@@ -309,13 +326,36 @@ private:
     bool worthKeeping() const;
     KnotExport::KnotFile currentKnotFile() const;
 
-    // true when written; false when cancelled or failed (it says so)
-    bool saveKnot();
+    // true when written; false when cancelled or failed (it says so).
+    // The file it came from or went to last, unless a name is asked for.
+    bool saveKnot(bool askForName);
     void writeAutosave();
     void offerAutosave();
+    void discardRecovered();
 
-    // opens a file; `remembered`: it counts as the file of this knot
-    void loadKnotFile(const QString &path, bool remembered);
+    // what is known of the current knot: (name, value) rows for the Analysis
+    // panel and the report
+    QVector<QPair<QString, QString>> currentFacts() const;
+
+    // beside the list of knots: its name, and the file it is in
+    void updateKnotTitle();
+
+    void openManual();
+    void copyDiagnostics();
+
+    // Small screens. On the first start the panels wait behind their buttons
+    // where there is little room; a panel that is opened sends the other one
+    // away if both do not fit; the top bar drops what it can do without.
+    void foldPanelsForRoom(const QSize &room);
+    void keepPanelsOnScreen(QWidget *opened);
+    void fitTopBar();
+
+    // shows the control the keyboard is on (see the style sheet)
+    void markKeyboardFocus(QWidget *widget, bool on);
+
+    // opens a file, true if it could be; `remembered`: it counts as the file
+    // of this knot
+    bool loadKnotFile(const QString &path, bool remembered);
 
     /*
      * The bar over the 3D view: what happened and what can be done about
@@ -333,7 +373,9 @@ private:
         const QString &text,
         Notice kind,
         const QString &actionText = QString(),
-        const std::function<void()> &action = nullptr);
+        const std::function<void()> &action = nullptr,
+        const QString &otherText = QString(),
+        const std::function<void()> &other = nullptr);
 
     void hideNotice();
     void placeNotice();
@@ -389,6 +431,7 @@ private:
     // File menu (knotexport.h): knot files and exports of the current knot.
     void openKnotFile();
     void saveKnotFile();
+    void saveKnotFileAs();
     void exportViewImage();
     void exportDiagram();
     void exportCoordinates();
@@ -402,6 +445,24 @@ private:
     void setSeifertStep(
         int step);
     void updateSeifertInfo();
+
+    // What the surface is made of in Photo mode, with a line on the picture
+    // that says what is seen.
+    void applySeifertMaterial();
+
+    // the window that tells how to read the surface
+    void showSeifertGuide();
+
+    // The curve the surface is built from: the knot's simplest shape we have
+    // when it is the same knot, the curve shown otherwise.
+    QVector<KnotMath::Vec3> seifertCurve() const;
+
+    // The surface as one mesh and the film it relaxes into take up to a
+    // second or two: worked out on a worker thread.
+    void buildSeifertSheetLater();
+
+    // the surface relaxing into its film, or back
+    void seifertFilmTick();
 
     // A clicked entry "i,j" of the Seifert matrix shows its two loops on
     // the surface; the same entry again, or "clear", removes them.
@@ -544,6 +605,9 @@ private:
     QPushButton *noticeAction_ =
         nullptr;
 
+    QPushButton *noticeOtherAction_ =
+        nullptr;
+
     QPushButton *noticeClose_ =
         nullptr;
 
@@ -551,9 +615,16 @@ private:
         nullptr;
 
     std::function<void()> noticeDo_;
+    std::function<void()> noticeOther_;
 
-    // closing the notice decides something (an unrestored knot is let go)
-    std::function<void()> noticeDismissed_;
+    // the notice says a curve could not be made: a curve that can be made
+    // takes it away
+    bool curveErrorShown_ =
+        false;
+
+    // what is said when a curve that passes through itself is asked to act
+    // as a knot
+    QString notAKnotText() const;
 
     std::shared_ptr<Photo::RopeProgress> layingProgress_;
     QTimer *layingTimer_ =
@@ -575,6 +646,18 @@ private:
 
     // shows and hides rightTabs_
     QPushButton *analysisButton_ =
+        nullptr;
+
+    QHBoxLayout *topLayout_ =
+        nullptr;
+
+    QLabel *brandSub_ =
+        nullptr;
+
+    QLabel *knotCaption_ =
+        nullptr;
+
+    QLabel *knotTitleLabel_ =
         nullptr;
 
     QTabWidget *rightTabs_ =
@@ -604,6 +687,12 @@ private:
         nullptr;
 
     QCheckBox *rememberWindowCheck_ =
+        nullptr;
+
+    QCheckBox *reduceMotionCheck_ =
+        nullptr;
+
+    QCheckBox *softwareGraphicsCheck_ =
         nullptr;
 
     QPushButton *fullScreenButton_ =
@@ -792,6 +881,15 @@ private:
     QLabel *writheValueLabel_ =
         nullptr;
 
+    QLabel *writheNoteLabel_ =
+        nullptr;
+
+    QFrame *factsTile_ =
+        nullptr;
+
+    QLabel *factsLabel_ =
+        nullptr;
+
     QLabel *crossingValueLabel_ =
         nullptr;
 
@@ -874,6 +972,9 @@ private:
     void startJoinDrop();
     void advanceJoinDrop();
     void landJoinedRope();
+
+    // the knot shown is the one that was joined (joined_)
+    bool isJoinedKnot() const;
 
     // the knot symbol of the current knot ("3₁", "T(2,5)", "3₁ # 4₁")
     QString currentKnotSymbol() const;
@@ -967,6 +1068,14 @@ private:
     // the last table knot chosen as the second knot
     QString joinTableName_ =
         QStringLiteral("3_1");
+
+    // one of the knots being joined cannot be reversed
+    bool joinHasDirection_ =
+        false;
+
+    // this diagram's surface has no soap film step
+    bool seifertNoFilm_ =
+        false;
 
     JoinedKnot pendingJoined_;
     JoinedKnot joined_;
@@ -1113,6 +1222,11 @@ private:
     bool hasData_ =
         false;
 
+    // the .aknot file of this knot (Save writes to it), and the knot it
+    // belongs to: another knot is another file
+    QString savedPath_;
+    QString savedDocument_;
+
     KnotMath::CurveData currentData_;
 
     // what the analysis panel shows (for the report)
@@ -1127,6 +1241,19 @@ private:
         true;
 
     int seifertStep_ =
+        0;
+
+    // 0: disks and bands, 1: the film
+    double seifertFilm_ =
+        0.0;
+
+    QTimer *seifertFilmTimer_ =
+        nullptr;
+
+    QElapsedTimer seifertFilmClock_;
+
+    // the newest sheet asked for
+    quint64 seifertSheetJob_ =
         0;
 
     KnotMath::SeifertSurface seifert_;
@@ -1144,6 +1271,13 @@ private:
         nullptr;
 
     QPushButton *seifertButton_ =
+        nullptr;
+
+    // Photo mode: cloth or soap film
+    QComboBox *seifertMaterialCombo_ =
+        nullptr;
+
+    QWidget *seifertMaterialRow_ =
         nullptr;
 
     QSlider *seifertStepSlider_ =
