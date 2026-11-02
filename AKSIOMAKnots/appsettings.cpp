@@ -146,6 +146,17 @@ void setReduceMotion(
     QSettings().setValue(QStringLiteral("reduceMotion"), enabled);
 }
 
+bool trainSound()
+{
+    return QSettings().value(QStringLiteral("trainSound"), true).toBool();
+}
+
+void setTrainSound(
+    bool enabled)
+{
+    QSettings().setValue(QStringLiteral("trainSound"), enabled);
+}
+
 bool showFrameRate()
 {
     return QSettings().value(QStringLiteral("showFrameRate"), false).toBool();

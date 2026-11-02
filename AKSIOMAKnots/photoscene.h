@@ -31,9 +31,12 @@ enum class Scene
     // a braided cotton shoelace on the wooden floor of a sunlit ballroom
     BallroomFloor,
 
-    // the knot as the track of a wooden toy train, on the stone of the
-    // garden (traintrack.h)
+    // the knot as the track of a wooden toy train (traintrack.h), on the
+    // paving of a courtyard at dusk, in the warm light from its windows
     TrainTrack,
+
+    // the same, on the stone of the garden by day
+    TrainDay,
 
     Count
 };
@@ -124,11 +127,24 @@ struct SceneInfo
 
     RopeMaterial rope;
 
-    // the room's floor is dark stone, as the table always is
+    // the room's floor is dark stone, as the table always is, this much
+    // paler
     bool stoneFloor = false;
+    float stoneLight = 1.0f;
 
     // the knot is the track of the toy train (traintrack.h)
     bool train = false;
+
+    /*
+     * Dusk: no sun in the picture to take the main light from, so the scene
+     * says where it comes from: low, from the side, as light from lit windows
+     * across a square does. The direction towards it, how strong it is, and
+     * how wide the source looks (the softness of its shadows, a tangent).
+     */
+    bool evening = false;
+    QVector3D sideLightDirection;
+    QVector3D sideLight;
+    float sideLightWidth = 0.05f;
 };
 
 SceneInfo sceneInfo(

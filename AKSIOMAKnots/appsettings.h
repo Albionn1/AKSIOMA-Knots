@@ -40,6 +40,11 @@ bool reduceMotion();
 void setReduceMotion(
     bool enabled);
 
+// the sound of the toy train
+bool trainSound();
+void setTrainSound(
+    bool enabled);
+
 // the frames per second in a corner of the 3D view
 bool showFrameRate();
 void setShowFrameRate(

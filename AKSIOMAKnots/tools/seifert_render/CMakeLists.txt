@@ -12,7 +12,7 @@ target_include_directories(seifert_render PRIVATE ${SRC})
 target_compile_options(seifert_render PRIVATE -O2 -Wall -Wextra)
 qt_add_resources(seifert_render "knottable" PREFIX "/" BIG_RESOURCES BASE ${SRC} FILES ${SRC}/data/knottable.dat)
 qt_add_resources(seifert_render "photo" PREFIX "/" BIG_RESOURCES BASE ${SRC} FILES
-    ${SRC}/data/photo/chinese_garden_4k.hdr ${SRC}/data/photo/meadow_2_4k.hdr
+    ${SRC}/data/photo/chinese_garden_4k.hdr ${SRC}/data/photo/meadow_2_4k.hdr ${SRC}/data/photo/evening_museum_courtyard_4k.hdr
     ${SRC}/data/photo/wood_table_large_diff.jpg ${SRC}/data/photo/wood_table_large_nor_gl.jpg
     ${SRC}/data/photo/wood_table_large_rough.jpg ${SRC}/data/photo/wood_floor_worn_diff.jpg
     ${SRC}/data/photo/wood_floor_worn_nor_gl.jpg ${SRC}/data/photo/wood_floor_worn_rough.jpg)

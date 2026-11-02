@@ -756,13 +756,11 @@ SceneInfo sceneInfo(Scene scene)
     switch (scene)
     {
     case Scene::TrainTrack:
-        // the garden's stone paving, wide enough for a long track
-        info.environment = QStringLiteral(":/data/photo/chinese_garden_4k.hdr");
-        info.cameraHeightM = 1.6;
-        info.roomRadiusM = 16.0;
-        info.exposure = 3.0f;
-        info.calmStage = 0.1f;
+    case Scene::TrainDay:
+    {
+        const bool evening = scene == Scene::TrainTrack;
 
+        // the wood of the track, whichever the place
         info.surfaceColor = QStringLiteral(":/data/photo/wood_table_large_diff.jpg");
         info.surfaceNormal = QStringLiteral(":/data/photo/wood_table_large_nor_gl.jpg");
         info.surfaceRoughness = QStringLiteral(":/data/photo/wood_table_large_rough.jpg");
@@ -777,7 +775,33 @@ SceneInfo sceneInfo(Scene scene)
         info.rope.roughness = 0.5f;
 
         info.train = true;
+        info.calmStage = 0.1f;
+        info.cameraHeightM = 1.6;
+
+        if (evening)
+        {
+            // a museum's courtyard at dusk: a deep blue sky, wide paving, and
+            // the lit windows along one side, low and warm
+            info.environment = QStringLiteral(":/data/photo/evening_museum_courtyard_4k.hdr");
+            info.roomRadiusM = 22.0;
+            info.exposure = 1.6f;
+
+            info.evening = true;
+            info.sideLightDirection = QVector3D(-0.87f, 0.27f, -0.48f).normalized();
+            info.sideLight = QVector3D(24.0f, 13.5f, 5.8f);
+            info.stoneLight = 3.2f;
+            info.sideLightWidth = 0.045f;
+        }
+        else
+        {
+            // the garden's stone paving, wide enough for a long track
+            info.environment = QStringLiteral(":/data/photo/chinese_garden_4k.hdr");
+            info.roomRadiusM = 16.0;
+            info.exposure = 3.0f;
+        }
+
         break;
+    }
 
     case Scene::BallroomFloor:
         // a Victorian ballroom in the morning sun: tall windows, a worn

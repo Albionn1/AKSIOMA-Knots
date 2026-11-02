@@ -6,7 +6,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui)
 set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 add_executable(train_test train_test.cpp
     ${SRC}/knotmath.cpp ${SRC}/knottable.cpp ${SRC}/knotdiagram.cpp ${SRC}/photoscene.cpp
-    ${SRC}/ropephysics.cpp ${SRC}/traintrack.cpp)
+    ${SRC}/ropephysics.cpp ${SRC}/traintrack.cpp ${SRC}/trainsynth.cpp)
 target_include_directories(train_test PRIVATE ${SRC})
 target_compile_options(train_test PRIVATE -O2 -Wall -Wextra)
 qt_add_resources(train_test "data" PREFIX "/" BIG_RESOURCES BASE ${SRC} FILES ${SRC}/data/knottable.dat)

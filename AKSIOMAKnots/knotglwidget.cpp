@@ -204,6 +204,7 @@ const char *PhotoGlsl = R"(
 uniform int uPhoto;
 uniform sampler2D uEnvironment;  // the room, with mipmaps
 uniform float uRoomScale;        // the pictures of the room hold light / uRoomScale
+uniform int uInMirror;           // this is the picture for the mirror
 uniform sampler2D uSpecular;     // the room blurred for roughness r: mip level 5 r
 uniform mat3 uEnvRotation;       // view -> room
 uniform vec3 uIrradiance[9];     // the room's light from above the horizon, without the sun
@@ -300,6 +301,101 @@ vec3 roomSpecular(vec3 d, float r)
     vec3 c = textureLod(uSpecular, roomUv(d), 5.0 * clamp(r, 0.0, 1.0)).rgb * uRoomScale;
 
     return mix(c, uFloorBounce / PhotoPi, smoothstep(0.02, -0.02 - 0.3 * r, d.y));
+}
+
+/*
+ * The lights of the night scene: lanterns that shine all round, and the
+ * locomotive's headlamp, a beam. Falling off with the square of the distance,
+ * and gently to nothing at uLampReach, so that a far lamp costs nothing.
+ */
+const int MostLamps = 48;
+
+uniform int uLampCount;
+uniform vec3 uLampPlace[MostLamps];
+uniform vec3 uLampColor[MostLamps];
+uniform float uLampReach;
+uniform vec3 uHeadPlace;
+uniform vec3 uHeadWay;
+uniform vec3 uHeadColor;
+
+vec3 lampShine(vec3 l, float q, vec3 e, vec3 n, vec3 v, vec3 albedo, vec3 f0, float rough)
+{
+    float nl = dot(n, l);
+
+    if (nl <= 0.0)
+        return vec3(0.0);
+
+    vec3 h = normalize(l + v);
+
+    float nh = max(dot(n, h), 0.0);
+    float a = max(rough * rough, 0.015);
+    float a2 = a * a;
+    float d = nh * nh * (a2 - 1.0) + 1.0;
+
+    return e * nl * (albedo / PhotoPi + f0 * a2 / (4.0 * PhotoPi * d * d));
+}
+
+vec3 lampLight(vec3 p, vec3 n, vec3 v, vec3 albedo, vec3 f0, float rough)
+{
+    vec3 sum = vec3(0.0);
+
+    float reach2 = uLampReach * uLampReach;
+
+    for (int i = 0; i < uLampCount; ++i)
+    {
+        vec3 d = uLampPlace[i] - p;
+
+        float q = dot(d, d);
+
+        if (q >= reach2)
+            continue;
+
+        float f = 1.0 - q / reach2;
+
+        sum += lampShine(d / sqrt(q), q, uLampColor[i] * f * f / (q + 0.04), n, v, albedo, f0, rough);
+    }
+
+    if (uLampCount > 0)
+    {
+        vec3 d = uHeadPlace - p;
+
+        float q = dot(d, d);
+
+        vec3 l = d / sqrt(max(q, 1.0e-6));
+
+        float beam = smoothstep(0.86, 0.975, dot(-l, uHeadWay));
+
+        float f = max(1.0 - q / (4.0 * reach2), 0.0);
+
+        if (beam > 0.0)
+            sum += lampShine(l, q, uHeadColor * beam * f * f / (q + 0.04), n, v, albedo, f0, rough);
+    }
+
+    return sum;
+}
+
+// the light in the air at p, for what shines from every side (steam)
+vec3 lampAir(vec3 p)
+{
+    vec3 sum = vec3(0.0);
+
+    float reach2 = uLampReach * uLampReach;
+
+    for (int i = 0; i < uLampCount; ++i)
+    {
+        vec3 d = uLampPlace[i] - p;
+
+        float q = dot(d, d);
+
+        if (q >= reach2)
+            continue;
+
+        float f = 1.0 - q / reach2;
+
+        sum += uLampColor[i] * f * f / (q + 0.04);
+    }
+
+    return sum;
 }
 
 // How much of the room a surface reflects (an analytic fit of the
@@ -511,6 +607,7 @@ KnotGLWidget::~KnotGLWidget()
         developProgram_.reset();
         occlusionProgram_.reset();
         trainProgram_.reset();
+        steamProgram_.reset();
         photoTimer_.reset();
         shadeProgram_.reset();
         shadeSmoothProgram_.reset();
@@ -1261,48 +1358,94 @@ void main()
     else if (uMaterial == 7 && vTexcoord.w < 0.5)
     {
         /*
-         * The wooden track (Photo::buildTrainTrack): vTexcoord holds the
-         * place along it and across it (mm), and how long a piece of track
-         * is. Each piece was cut from its own board of beech, oiled, and
-         * they meet in a thin dark line.
+         * The wooden track (Photo::buildTrainTrack): vTexcoord holds the place
+         * along it and across it (mm), how long a piece of track is, and what
+         * part of the outline this is. Each piece is its own length of beech:
+         * pale, with fine straight grain, soft bands of growth wandering down
+         * it and the short dark flecks that are the mark of beech, oiled and
+         * lacquered, and worn smooth where the wheels run.
          */
         float along = vTexcoord.x;
         float across = vTexcoord.y;
         float piece = vTexcoord.z;
+        float part = vTexcoord.w;
 
         float id = floor(along / piece);
         float local = along - id * piece;
 
         float tone = hash12(vec2(id, 1.7));
+        float seed = hash12(vec2(id, 7.3)) * 40.0;
 
-        float rings = noise2(vec2(along * 0.012 + id * 3.1, across * 0.2 + id));
-        float fine = noise2(vec2(along * 0.09, across * 1.7 + id * 5.0));
-        float pore = noise2(vec2(along * 0.4, across * 5.0 + id));
+        // finer than a pixel, the detail fades into its mean
+        float footprint = max(fwidth(across), fwidth(along) * 0.1);
+        float fine = 1.0 - smoothstep(0.35, 1.4, footprint);
 
-        albedo = mix(vec3(0.76, 0.50, 0.26), vec3(0.62, 0.39, 0.19), tone) *
-                 (0.8 + 0.3 * rings) * (0.92 + 0.14 * fine) * (0.95 + 0.08 * pore);
+        // the board's grain wanders slowly
+        float wander = 7.0 * noise2(vec2(along * 0.008 + seed, seed)) + 2.2 * noise2(vec2(along * 0.035, across * 0.1 + seed));
+        float place = across + wander;
 
-        float joint = 1.0 - smoothstep(0.25, 0.75, min(local, piece - local));
+        float bands = 0.5 + 0.5 * sin(place * 0.62 + 4.0 * noise2(vec2(place * 0.05, seed)));
+        float broad = 0.5 + 0.5 * sin(place * 0.17 + seed);
 
-        albedo *= 1.0 - 0.7 * joint;
+        float streak = noise2(vec2(along * 0.05 + seed, place * 2.3));
+        float pore = noise2(vec2(along * 0.45 + seed, place * 8.5));
+        float fleck = smoothstep(0.66, 0.78, noise2(vec2(along * 0.26 + seed, place * 3.1))) * fine;
 
-        rough = 0.46 + 0.1 * rings;
+        vec3 pale = vec3(0.80, 0.54, 0.29);
+        vec3 deep = vec3(0.58, 0.33, 0.15);
+
+        albedo = mix(pale, deep, 0.34 * bands * mix(0.5, 1.0, fine) + 0.24 * broad + 0.22 * tone);
+        albedo *= mix(1.0, 0.86 + 0.28 * streak, fine);
+        albedo *= mix(1.0, 0.92 + 0.14 * pore, fine);
+        albedo = mix(albedo, albedo * vec3(0.60, 0.42, 0.32), 0.6 * fleck);
+
+        float joint = 1.0 - smoothstep(0.2, 0.9, min(local, piece - local));
+
+        albedo *= 1.0 - 0.8 * joint;
+
+        rough = 0.42 + 0.1 * streak;
+        s.coat = 0.75 * (1.0 - joint);
+
+        float bump = 0.05 * (pore - 0.5) * fine + 0.05 * (streak - 0.5) * fine - 0.3 * joint;
+
+        // the grooves: darker in their corners, burnished down their middle
+        if (part > 0.05 && part < 0.15)
+        {
+            albedo *= vec3(0.74, 0.70, 0.66);
+            rough = 0.3;
+            s.coat = 0.3;
+        }
+        else if (part > 0.15 && part < 0.25)
+        {
+            albedo *= vec3(0.66, 0.62, 0.58);
+            s.coat = 0.2;
+        }
+
+        n = bumped(n, bump * uRopeRadius / 20.0);
     }
     else if (uMaterial == 7)
     {
         /*
-         * The toy blocks under the bridges: painted beech, vTexcoord the
-         * place on the face (mm), its colour, and 1.
+         * The toy blocks under the bridges: beech stained, not painted over,
+         * so the grain shows through the colour, under clear lacquer.
+         * vTexcoord: the place on the face (mm), its colour, and 1.
          */
-        vec3 paint = vTexcoord.z < 0.5 ? vec3(0.60, 0.05, 0.04) :
-                     vTexcoord.z < 1.5 ? vec3(0.86, 0.52, 0.05) :
-                     vTexcoord.z < 2.5 ? vec3(0.04, 0.15, 0.44) : vec3(0.07, 0.32, 0.14);
+        vec3 paint = vTexcoord.z < 0.5 ? vec3(0.56, 0.030, 0.028) :
+                     vTexcoord.z < 1.5 ? vec3(0.86, 0.50, 0.04) :
+                     vTexcoord.z < 2.5 ? vec3(0.018, 0.10, 0.36) : vec3(0.03, 0.24, 0.10);
 
-        float grain = noise2(vec2(vTexcoord.x * 0.9, vTexcoord.y * 0.09));
+        float u = vTexcoord.x;
+        float w = vTexcoord.y + 3.0 * noise2(vec2(vTexcoord.x * 0.03, vTexcoord.y * 0.05));
 
-        albedo = paint * (0.92 + 0.16 * grain);
+        float bands = 0.5 + 0.5 * sin(w * 0.22 + 4.0 * noise2(vec2(w * 0.04, u * 0.012)));
+        float fibre = noise2(vec2(u * 0.05, w * 3.4));
 
-        rough = 0.36;
+        albedo = paint * (0.88 + 0.16 * bands) * (0.94 + 0.12 * fibre);
+
+        rough = 0.4;
+        s.coat = 0.8;
+
+        n = bumped(n, 0.006 * (fibre - 0.5) * uRopeRadius / 20.0);
     }
 
     // Where the normal turns quickly across a pixel (thin or far tubes) a
@@ -1396,6 +1539,8 @@ void main()
                  occluded * (1.0 - coatRoom) * uReflections * dull;
 
         photo += roomSpecular(pr, sqrt(s.coatA)) * coatRoom * occluded * uReflections;
+
+        photo += lampLight(vWorldPosition, n, v, albedo * (1.0 - metal), s.f0, rough) * mix(0.6, 1.0, ao);
 
         // light as it is (the camera develops the frame)
         fragColor = vec4(cleanLight(photo), 1.0);
@@ -1757,7 +1902,9 @@ void main()
 
     vec3 hit = roomHit(uEye, d);
 
-    fragColor = vec4(textureLod(uEnvironment, roomUv(normalize(hit - uRoomCentre)), 0.0).rgb * uRoomScale, 1.0);
+    vec3 seen = textureLod(uEnvironment, roomUv(normalize(hit - uRoomCentre)), 0.0).rgb * uRoomScale;
+
+    fragColor = vec4(seen, 1.0);
 }
 )";
 
@@ -2019,6 +2166,7 @@ uniform float uReflections;
 // how much of a modern dark stone the wood is (always for the table, on
 // the stage of the unknotting for a floor), so the light rope stands out
 uniform float uStage;
+uniform float uStoneLight;
 
 // the rope and the train seen in the surface (premultiplied, half size), and
 // how high above it they are; how many pixels of the frame one view unit
@@ -2132,6 +2280,9 @@ void main()
 
         float cloud = noise2(vUv * 0.009) * 0.5 + noise2(vUv * 0.031) * 0.3 + noise2(vUv * 0.13) * 0.2;
 
+        if (uStoneLight > 1.5)
+            cloud = mix(0.5, cloud, 0.22);
+
         float speckle = 0.0;
         float tone = 0.0;
 
@@ -2147,7 +2298,7 @@ void main()
         vec3 stone = mix(vec3(0.021, 0.022, 0.025), vec3(0.038, 0.039, 0.043), cloud) * (1.0 + sharp * tone) +
                      mix(vec3(0.0022), vec3(0.042, 0.041, 0.043) * speckle, sharp);
 
-        albedo = mix(albedo, stone, uStage);
+        albedo = mix(albedo, stone * uStoneLight, uStage);
 
         // a honed slab: not quite flat at the scale of the eye
         vec2 wave = vec2(noise2(vUv * 0.021 + 3.0), noise2(vUv * 0.021 + 17.0)) - 0.5;
@@ -2199,6 +2350,8 @@ void main()
     }
 
     color += reflected * roomReflectance(vec3(0.04), rough, nv) * uReflections;
+
+    color += lampLight(vWorld, n, v, albedo, vec3(0.04), rough) * mix(0.55, 1.0, near);
 
     float fade = uFadeRadius > 0.0
         ? 1.0 - smoothstep(0.5, 1.0, length(vWorld.xz - uFadeCentre) / uFadeRadius)
@@ -2677,49 +2830,79 @@ void main()
     if (dot(n, v) < 0.0)
         n = -n;
 
-    // the grain runs along the toy; under the paint it is only just there
-    float grain = 0.6 * noise2(vec2(vMm.x * 0.05, (vMm.y + vMm.z) * 0.9)) +
-                  0.4 * noise2(vec2(vMm.x * 0.3, (vMm.y + vMm.z) * 2.3));
+    // the grain of the wood runs along the toy; under the paint it is only
+    // just there, a faint ripple in the reflections
+    float grainAt = vMm.x * 0.05;
+
+    float grain = 0.55 * noise2(vec2(grainAt, (vMm.y + vMm.z) * 0.9)) +
+                  0.3 * noise2(vec2(vMm.x * 0.3, (vMm.y + vMm.z) * 2.3)) +
+                  0.15 * noise2(vec2(vMm.x * 0.9, (vMm.y + vMm.z) * 5.3));
 
     vec3 albedo;
-    float rough = 0.34;
+
+    // the rough surface under the lacquer, how much lacquer lies on it
+    float rough = 0.45;
+    float coat = 1.0;
     float metal = 0.0;
+    vec3 glow = vec3(0.0);
 
     if (vMaterial == 0)
-        albedo = vec3(0.60, 0.045, 0.04);
+        albedo = vec3(0.52, 0.018, 0.022);
     else if (vMaterial == 1)
-        albedo = vec3(0.035, 0.13, 0.42);
+        albedo = vec3(0.012, 0.075, 0.30);
     else if (vMaterial == 2)
-        albedo = vec3(0.86, 0.52, 0.05);
+        albedo = vec3(0.86, 0.66, 0.30);
     else if (vMaterial == 6)
-        albedo = vec3(0.06, 0.30, 0.13);
+        albedo = vec3(0.018, 0.17, 0.075);
     else if (vMaterial == 3)
     {
-        // plain beech, oiled
-        albedo = vec3(0.72, 0.51, 0.31) * (0.78 + 0.4 * grain);
-        rough = 0.55;
+        // plain beech, oiled: darker bands, and a little lacquer
+        float bands = 0.5 + 0.5 * sin((vMm.y + vMm.z) * 2.1 + 5.0 * noise2(vec2(vMm.x * 0.03, vMm.z * 0.2)));
+
+        albedo = mix(vec3(0.72, 0.47, 0.25), vec3(0.47, 0.27, 0.13), 0.55 * bands + 0.45 * (1.0 - grain));
+        rough = 0.5;
+        coat = 0.35;
     }
     else if (vMaterial == 4)
     {
-        albedo = vec3(0.025, 0.025, 0.028);
-        rough = 0.3;
+        albedo = vec3(0.008, 0.008, 0.010);
+        rough = 0.35;
     }
     else if (vMaterial == 5)
     {
-        // polished brass
-        albedo = vec3(0.91, 0.74, 0.42);
-        rough = 0.26;
+        // polished brass, handled a little
+        albedo = vec3(0.95, 0.70, 0.30);
+        rough = 0.2 + 0.14 * grain;
+        coat = 0.0;
         metal = 1.0;
+    }
+    else if (vMaterial == 8)
+    {
+        // burnished steel
+        albedo = vec3(0.55, 0.56, 0.58);
+        rough = 0.3;
+        coat = 0.0;
+        metal = 1.0;
+    }
+    else if (vMaterial == 9)
+    {
+        // the lamp: lit
+        albedo = vec3(0.6, 0.55, 0.45);
+        glow = uLampCount > 0 ? vec3(8.0, 5.4, 2.4) : vec3(0.8, 0.6, 0.3);
+        rough = 0.1;
     }
     else
     {
-        // a painted window: dark, and shiny
-        albedo = vec3(0.012, 0.018, 0.03);
-        rough = 0.12;
+        // a window: dark glass by day, a warm room inside it at night
+        albedo = vec3(0.004, 0.007, 0.012);
+        rough = 0.05;
+
+        if (uLampCount > 0)
+            glow = vec3(1.7, 0.95, 0.34) * (0.7 + 0.5 * noise2(vMm.xy * 0.2));
     }
 
-    if (vMaterial != 3 && vMaterial != 5)
-        albedo *= 0.92 + 0.16 * grain;
+    if (vMaterial != 3 && vMaterial != 5 && vMaterial != 8)
+        albedo *= 0.94 + 0.12 * grain;
 
     float nv = max(dot(n, v), 1.0e-3);
 
@@ -2731,15 +2914,32 @@ void main()
     vec3 f0 = mix(vec3(0.04), albedo, metal);
     vec3 diffuse = albedo * (1.0 - metal);
 
-    // the sun
+    // the sun, on the surface
     vec3 h = normalize(l + v);
     float nh = max(dot(n, h), 0.0);
+    float vh = max(dot(h, v), 0.0);
     float a = max(rough * rough, 0.02);
 
-    vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
+    vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
     vec3 specular = fresnel * ggx(nh, a) * smith(nv, nl, a);
 
     vec3 color = (diffuse / PhotoPi + specular) * uKeyIrradiance * nl * sunLit;
+
+    /*
+     * The lacquer over it: a thin clear layer, smooth as glass. It takes its
+     * share of the light off the top, and gives the sharp bright highlight
+     * and the mirror image of the garden that make paint look deep.
+     */
+    float coatF = coat * (0.04 + 0.96 * pow(1.0 - nv, 5.0));
+
+    // a ripple of the grain under the lacquer bends its reflection a little
+    vec3 coatN = normalize(n + (vec3(0.0, 1.0, 0.0) - n * n.y) * (grain - 0.5) * 0.02);
+
+    vec3 ch = normalize(l + v);
+    float coatA = 0.012;
+
+    color += coat * (0.04 + 0.96 * pow(1.0 - vh, 5.0)) * ggx(max(dot(coatN, ch), 0.0), coatA) *
+             smith(nv, nl, coatA) * uKeyIrradiance * nl * sunLit;
 
     float open = vOpen * shadeHere();
 
@@ -2751,7 +2951,13 @@ void main()
 
     vec3 r = reflect(-v, n);
 
-    color += roomSpecular(r, rough) * roomReflectance(f0, rough, nv) * open * uReflections;
+    color += roomSpecular(r, rough) * roomReflectance(f0, rough, nv) * open * uReflections * (1.0 - coatF);
+
+    color += roomSpecular(reflect(-v, coatN), 0.06) * coatF * open * uReflections;
+
+    color += lampLight(vWorld, n, v, diffuse, f0, rough) + lampLight(vWorld, coatN, v, vec3(0.0), vec3(0.04 * coat), 0.08);
+
+    color = color * (1.0 - coatF * 0.5) + glow * (uInMirror != 0 ? 0.15 : 1.0);
 
     fragColor = vec4(cleanLight(color), 1.0);
 }
@@ -2767,6 +2973,96 @@ void main()
         trainProgram_->bindAttributeLocation("aOcclusion", 2);
         trainProgram_->bindAttributeLocation("aMaterial", 3);
         trainProgram_->link();
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * The steam: soft puffs, each a card turned to the camera. A puff is
+     * thicker in the middle, torn at the edge by a little noise, lit by the
+     * sun that reaches it and by the room, and it thins out as it spreads.
+     * ---------------------------------------------------------
+     */
+
+    const char *steamVertexShader = R"(
+#version 330 core
+
+uniform mat4 uViewProjection;
+uniform vec3 uCentre;
+uniform vec3 uRight;
+uniform vec3 uUp;
+uniform float uSize;
+
+out vec2 vCorner;
+out vec3 vWorld;
+
+void main()
+{
+    vCorner = vec2(gl_VertexID & 1, (gl_VertexID >> 1) & 1) * 2.0 - 1.0;
+
+    vWorld = uCentre + (uRight * vCorner.x + uUp * vCorner.y) * uSize;
+
+    gl_Position = uViewProjection * vec4(vWorld, 1.0);
+}
+)";
+
+    const char *steamFragmentShader = R"(
+in vec2 vCorner;
+in vec3 vWorld;
+
+uniform vec3 uCentre;
+uniform float uThickness;
+uniform float uSeed;
+uniform vec3 uHalo;
+
+layout(location = 0) out vec4 fragColor;
+
+void main()
+{
+    float r = length(vCorner);
+
+    if (r >= 1.0)
+        discard;
+
+    // the glow around a light, in the eye and the lens: it only adds
+    if (uHalo.r + uHalo.g + uHalo.b > 0.0)
+    {
+        float g = (1.0 - r) * (1.0 - r);
+
+        fragColor = vec4(uHalo * g * (0.1 * exp(-3.0 * r) + 0.9 * exp(-22.0 * r * r)), 0.0);
+
+        return;
+    }
+
+    vec2 p = vCorner * 2.1 + uSeed;
+
+    float billow = 0.55 * noise2(p) + 0.3 * noise2(p * 2.3 + 4.1) + 0.15 * noise2(p * 5.1 + 9.7);
+
+    float edge = 1.0 - smoothstep(0.2 + 0.5 * billow, 1.0, r);
+
+    float a = clamp(edge * uThickness * (0.45 + 1.1 * billow), 0.0, 1.0);
+
+    if (a <= 0.002)
+        discard;
+
+    // white vapour: it scatters what falls on it
+    float sunLit = keyShadow(uCentre, uKeyDir);
+
+    vec3 light = (uKeyIrradiance * sunLit * (0.55 + 0.45 * vCorner.y) * 0.6 + roomIrradiance(vec3(0.0, 1.0, 0.0))) * 0.9 / PhotoPi;
+
+    light += lampAir(uCentre) * 1.1 / PhotoPi;
+
+    light *= 0.78 + 0.34 * billow;
+
+    fragColor = vec4(cleanLight(light) * a, a);
+}
+)";
+
+    steamProgram_ = std::make_unique<QOpenGLShaderProgram>();
+
+    if (steamProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Vertex, steamVertexShader) &&
+        steamProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Fragment, withPhoto(steamFragmentShader)))
+    {
+        steamProgram_->link();
     }
 }
 
@@ -3025,7 +3321,7 @@ void KnotGLWidget::setShadowUniforms(QOpenGLShaderProgram &program, bool wanted)
     program.setUniformValue("uPcss", photo_ ? 1 : 0);
     program.setUniformValue("uPatternTurn", 2.3999632f * static_cast<float>(photoSample_));
     program.setUniformValue("uPcssTaps", Lighting::photoLevel(photoLevel_).shadowTaps);
-    program.setUniformValue("uLightTan", std::tan(environment_.sunRadius));
+    program.setUniformValue("uLightTan", photoInfo_.evening ? photoInfo_.sideLightWidth : std::tan(environment_.sunRadius));
     program.setUniformValue("uDepthRange", shadowDepthRange_);
     program.setUniformValue("uMapWorld", shadowMapWorld_);
     program.setUniformValue("uLightMatrix", lightMatrix_);
@@ -3641,6 +3937,107 @@ void KnotGLWidget::drawFrameRate(QPainter &painter)
 
     painter.setPen(Qt::white);
     painter.drawText(box, Qt::AlignCenter, text);
+}
+
+void KnotGLWidget::setTrainJourney(const QVector<Photo::TrainTrack::Pass> &journey)
+{
+    trainJourney_ = journey;
+
+    journeyBridge_ = 0;
+
+    update();
+}
+
+void KnotGLWidget::drawJourney(QPainter &painter)
+{
+    const int count = trainJourney_.size();
+
+    // the front of the train, and the first pass that is not behind it
+    const double head = std::fmod(trainAlong_ + 48.0, trainLength_);
+
+    constexpr double OnIt = 110.0;
+
+    int next = 0;
+
+    while (next < count && trainJourney_.at(next).along < head - OnIt)
+        ++next;
+
+    const bool lapped = next == count;
+
+    if (lapped)
+        next = 0;
+
+    const Photo::TrainTrack::Pass &pass = trainJourney_.at(next);
+
+    const bool onIt = !lapped && std::abs(pass.along - head) < OnIt;
+
+    journeyBridge_ = pass.bridge;
+
+    const QString title =
+        onIt ? (pass.over ? tr("Over bridge %1").arg(pass.bridge) : tr("Under bridge %1").arg(pass.bridge))
+             : (pass.over ? tr("Next: over bridge %1").arg(pass.bridge) : tr("Next: under bridge %1").arg(pass.bridge));
+
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+
+    QFont titleFont = painter.font();
+
+    titleFont.setBold(true);
+    titleFont.setPointSize(10);
+
+    QFont chipFont = titleFont;
+
+    chipFont.setPointSize(8);
+
+    constexpr int Margin = 12;
+    constexpr int Pad = 10;
+    constexpr int ChipW = 34;
+    constexpr int ChipH = 22;
+    constexpr int Gap = 4;
+
+    const int room = std::max(4, (width() - 2 * Margin - 2 * Pad - 110) / (ChipW + Gap));
+    const int perRow = std::min(count, std::min(room, 13));
+    const int rows = (count + perRow - 1) / perRow;
+
+    const QFontMetrics titleMetrics(titleFont);
+
+    const int wide = 2 * Pad + perRow * ChipW + (perRow - 1) * Gap;
+    const int high = 2 * Pad + titleMetrics.height() + 6 + rows * ChipH + (rows - 1) * Gap;
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(16, 16, 18, 200));
+    painter.drawRoundedRect(QRectF(Margin, Margin, wide, high), 8.0, 8.0);
+
+    painter.setFont(titleFont);
+    painter.setPen(Qt::white);
+    painter.drawText(QRectF(Margin + Pad, Margin + Pad, wide - 2 * Pad, titleMetrics.height()), Qt::AlignLeft | Qt::AlignVCenter, title);
+
+    painter.setFont(chipFont);
+
+    const int top = Margin + Pad + titleMetrics.height() + 6;
+
+    for (int k = 0; k < count; ++k)
+    {
+        const Photo::TrainTrack::Pass &item = trainJourney_.at(k);
+
+        const QRectF chip(Margin + Pad + (k % perRow) * (ChipW + Gap), top + (k / perRow) * (ChipH + Gap), ChipW, ChipH);
+
+        const bool passed = lapped || k < next;
+
+        const QColor colour = item.over ? QColor(226, 160, 66) : QColor(86, 146, 214);
+
+        QColor fill = colour;
+
+        fill.setAlpha(passed ? 235 : (k == next ? 255 : 55));
+
+        painter.setPen(k == next ? QPen(Qt::white, 2.0) : Qt::NoPen);
+        painter.setBrush(fill);
+        painter.drawRoundedRect(chip, 5.0, 5.0);
+
+        painter.setPen(passed || k == next ? QColor(16, 16, 18) : QColor(230, 230, 230));
+
+        painter.drawText(chip, Qt::AlignCenter, QStringLiteral("%1%2").arg(item.bridge).arg(item.over ? QChar(0x2191) : QChar(0x2193)));
+    }
 }
 
 void KnotGLWidget::drawCaption(QPainter &painter)
@@ -4706,8 +5103,10 @@ void KnotGLWidget::drawCrossingLabels(QPainter &painter)
             continue;
         }
 
+        const bool nextBridge = crossing.number == journeyBridge_ && showTrain();
+
         const QColor labelColor =
-            KnotMath::crossingColor(crossing.number - 1);
+            nextBridge ? QColor(255, 214, 120) : KnotMath::crossingColor(crossing.number - 1);
 
         const QString text = QString::number(crossing.number);
 
@@ -4716,7 +5115,7 @@ void KnotGLWidget::drawCrossingLabels(QPainter &painter)
         const double radius =
             std::max(
                 10.0,
-                std::max(textRect.width(), textRect.height()) * 0.75);
+                std::max(textRect.width(), textRect.height()) * 0.75) * (nextBridge ? 1.3 : 1.0);
 
         painter.setPen(Qt::NoPen);
         painter.setBrush(QColor(18, 18, 18, 225));
@@ -4914,6 +5313,7 @@ void KnotGLWidget::paintGL()
         stage(3);
         drawTrain(projection * view * model);
         drawMesh(model, view, projection);
+        drawSteam(projection * view, view);
         stage(4);
 
         developPhotoFrame(view, projection);
@@ -4957,7 +5357,7 @@ void KnotGLWidget::paintGL()
 
         // the next frame adds to this one, up to a clean picture; a train
         // that runs needs every frame
-        if (photoSample_ < PhotoSamples || (showTrain() && trainRunning()))
+        if (photoSample_ < PhotoSamples || (showTrain() && (trainRunning() || !steam_.isEmpty())))
             update();
     }
     else
@@ -4978,16 +5378,28 @@ void KnotGLWidget::paintGL()
     glDepthMask(GL_TRUE);
 
     // One QPainter per frame, only for the 2D overlays.
-    const bool labels = showCrossingNumbers_ && !crossings_.isEmpty();
+    const bool film = cinema();
+    // (the bridges are always numbered: the journey panel speaks of them)
+    const bool journey = showTrain() && !trainJourney_.isEmpty() && !film;
+    const bool labels = (showCrossingNumbers_ || journey) && !crossings_.isEmpty() && !film;
     const bool flashes = !flashPositions_.isEmpty();
-    const bool caption = !captionTitle_.isEmpty();
+    const bool caption = !captionTitle_.isEmpty() && !film;
 
     if (showFrameRate_)
         countFrame();
 
-    if (labels || flashes || showInset_ || caption || showFrameRate_)
+    if (labels || flashes || showInset_ || caption || showFrameRate_ || film || journey)
     {
         QPainter painter(this);
+
+        // the wide picture of a film, between black bars
+        if (film)
+        {
+            const int bar = std::max(0, (height() - static_cast<int>(width() / 2.39f)) / 2);
+
+            painter.fillRect(0, 0, width(), bar, Qt::black);
+            painter.fillRect(0, height() - bar, width(), bar, Qt::black);
+        }
 
         if (labels)
             drawCrossingLabels(painter);
@@ -5000,6 +5412,9 @@ void KnotGLWidget::paintGL()
 
         if (caption)
             drawCaption(painter);
+
+        if (journey)
+            drawJourney(painter);
 
         if (showFrameRate_)
             drawFrameRate(painter);
@@ -5381,6 +5796,8 @@ void KnotGLWidget::mousePressEvent(QMouseEvent *event)
     // the user takes over the camera
     stopCameraFlight();
 
+    setCinema(false);
+
     // a press on the rope grabs it (the view does not turn)
     QVector3D point;
 
@@ -5535,6 +5952,8 @@ void KnotGLWidget::wheelEvent(QWheelEvent *event)
 
     stopCameraFlight();
 
+    setCinema(false);
+
     distance_ *= static_cast<float>(std::pow(0.88, delta));
 
     // the whole of a long track needs more room
@@ -5666,8 +6085,8 @@ void KnotGLWidget::resetCamera(float highestPitch, bool animate)
      */
     if (showTrain())
     {
-        const float yaw = 25.0f;
-        const float pitch = 50.0f;
+        const float yaw = nightShown() ? 32.0f : 25.0f;
+        const float pitch = nightShown() ? 36.0f : 50.0f;
 
         const float pr = qDegreesToRadians(pitch);
         const float yr = qDegreesToRadians(yaw);
@@ -6855,6 +7274,10 @@ void KnotGLWidget::destroyPhotoFrame()
 
 QVector3D KnotGLWidget::photoKeyDirection() const
 {
+    // at dusk the main light comes low from the side
+    if (photoInfo_.evening)
+        return photoInfo_.sideLightDirection;
+
     // the sun where it is in the photograph (the room turned by its yaw)
     QMatrix4x4 turn;
 
@@ -6879,6 +7302,7 @@ void KnotGLWidget::setPhotoUniforms(QOpenGLShaderProgram &program)
     program.setUniformValue("uSpecular", 4);
     program.setUniformValue("uShade", 10);
     program.setUniformValue("uPhoto", photo_ ? 1 : 0);
+    program.setUniformValue("uInMirror", mirrorPass_ ? 1 : 0);
     program.setUniformValue("uUseShade", photo_ && !mirrorPass_ && lighting_.occlusion && shadeReady_ ? 1 : 0);
 
     if (!photo_)
@@ -6889,6 +7313,11 @@ void KnotGLWidget::setPhotoUniforms(QOpenGLShaderProgram &program)
     glActiveTexture(GL_TEXTURE0);
 
     program.setUniformValue("uRoomScale", photoRoomScale_);
+
+    // dusk: the train's lamps are lit, and the main light is the side light
+    const bool night = nightShown();
+
+    const QVector3D keyLight = night ? photoInfo_.sideLight : environment_.sunIrradiance;
 
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, environmentTexture_);
@@ -6902,7 +7331,20 @@ void KnotGLWidget::setPhotoUniforms(QOpenGLShaderProgram &program)
 
     program.setUniformValue("uEnvRotation", toRoom.normalMatrix());
     program.setUniformValueArray("uIrradiance", environment_.irradiance, 9);
-    program.setUniformValue("uKeyIrradiance", environment_.sunIrradiance);
+
+    program.setUniformValue("uKeyIrradiance", keyLight);
+
+    program.setUniformValue("uLampCount", night ? static_cast<int>(lampPlaces_.size()) : 0);
+
+    if (night && !lampPlaces_.isEmpty())
+    {
+        program.setUniformValueArray("uLampPlace", lampPlaces_.constData(), static_cast<int>(lampPlaces_.size()));
+        program.setUniformValueArray("uLampColor", lampColors_.constData(), static_cast<int>(lampColors_.size()));
+        program.setUniformValue("uLampReach", lampReach_);
+        program.setUniformValue("uHeadPlace", headPlace_);
+        program.setUniformValue("uHeadWay", headWay_);
+        program.setUniformValue("uHeadColor", QVector3D(2.4f, 1.7f, 0.85f));
+    }
 
     // a light of some size gives a wider, softer highlight
     program.setUniformValue("uKeySize", 0.5f * environment_.sunRadius);
@@ -6912,7 +7354,7 @@ void KnotGLWidget::setPhotoUniforms(QOpenGLShaderProgram &program)
 
     const QVector3D onTable =
         environment_.irradianceAt(QVector3D(0.0f, 1.0f, 0.0f)) +
-        environment_.sunIrradiance * std::max(sun.y(), 0.0f);
+        keyLight * std::max(sun.y(), 0.0f);
 
     program.setUniformValue("uFloorBounce", floorAlbedo_ * onTable);
 
@@ -6954,7 +7396,7 @@ void KnotGLWidget::setPhotoUniforms(QOpenGLShaderProgram &program)
     {
         const float channel = std::max(onTable[k], 1.0e-3f);
 
-        photoWhiteBalance_[k] = std::pow(grey / channel, 0.75f);
+        photoWhiteBalance_[k] = night ? 1.0f : std::pow(grey / channel, 0.75f);
     }
 
     program.setUniformValue("uWhiteBalance", photoWhiteBalance_);
@@ -7191,6 +7633,40 @@ void KnotGLWidget::bakeSurfaceOcclusion()
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
 }
 
+namespace
+{
+
+/*
+ * The time since the last look, at most a tenth of a second (a frame that came
+ * late does not make things jump), and 0 at the first. In nanoseconds: a frame
+ * can take less than a millisecond, and whole milliseconds would add up to
+ * nothing, so that what fades away would never be gone.
+ */
+double lapSeconds(QElapsedTimer &clock)
+{
+    if (!clock.isValid())
+    {
+        clock.start();
+
+        return 0.0;
+    }
+
+    const double seconds = static_cast<double>(clock.nsecsElapsed()) / 1.0e9;
+
+    clock.restart();
+
+    return std::min(seconds, 0.1);
+}
+
+float smoothstepUp(float t)
+{
+    t = std::clamp(t, 0.0f, 1.0f);
+
+    return t * t * (3.0f - 2.0f * t);
+}
+
+} // namespace
+
 bool KnotGLWidget::showTrain() const
 {
     return photo_ && photoInfo_.train && restingRope_ && trainIndexCount_ > 0 && trainPath_.size() >= 8;
@@ -7202,6 +7678,7 @@ void KnotGLWidget::setTrainPath(const QVector<KnotMath::Vec3> &path, double leng
     trainLength_ = length;
     trainAlong_ = 0.0;
     trainClock_.invalidate();
+    steam_.clear();
 
     ++photoVersion_;
     shadowDirty_ = true;
@@ -7254,11 +7731,7 @@ void KnotGLWidget::advanceTrain()
          * a little faster, so that a lap never takes much over a minute.
          * (A frame that came late does not make it jump.)
          */
-        const double seconds =
-            trainClock_.isValid() ? std::min(static_cast<double>(trainClock_.restart()) / 1000.0, 0.1) : 0.0;
-
-        if (!trainClock_.isValid())
-            trainClock_.start();
+        const double seconds = lapSeconds(trainClock_);
 
         const double speed = std::max(220.0, trainLength_ / 70.0);
 
@@ -7271,12 +7744,372 @@ void KnotGLWidget::advanceTrain()
         }
     }
 
+    trainPieces_ = Photo::placeTrain(trainPath_, trainLength_, trainAlong_);
+
+    updateLamps();
+
+    /*
+     * The funnel blows while the train runs. Steam already in the air goes
+     * on rising after it has stopped, by a clock of its own.
+     */
+    const float steamSeconds = static_cast<float>(lapSeconds(steamClock_));
+
+    if (!steamFrozen_ && (trainRunning() || !steam_.isEmpty()))
+    {
+        stepSteam(steamSeconds, trainRunning());
+
+        ++photoVersion_;
+    }
+
+    directCinema(steamSeconds);
+}
+
+void KnotGLWidget::setCinema(bool on)
+{
+    if (cinema_ == on)
+        return;
+
+    cinema_ = on;
+    cinemaTime_ = 0.0f;
+    cinemaShot_ = -1;
+
+    if (on)
+        stopCameraFlight();
+
+    emit cinemaChanged(on);
+
+    update();
+}
+
+void KnotGLWidget::trainSoundScene(double *speed, float *gain, float *pan) const
+{
+    const bool running = showTrain() && trainRunning();
+
+    *speed = running ? std::max(220.0, trainLength_ / 70.0) : 0.0;
+
+    // nearer is louder; to the left of the picture, to the left of the room
+    const float near = std::clamp(9.0f / std::max(distance_, 1.0f), 0.22f, 1.0f);
+
+    *gain = showTrain() ? near : 0.0f;
+
+    *pan = 0.0f;
+
+    if (!trainPieces_.isEmpty() && width() > 0)
+    {
+        const QVector3D engine = trainPieces_.first().place.map(QVector3D(0.0f, 20.0f, 0.0f)) * worldPerMm();
+
+        const QVector4D clip = lastViewProjection_ * QVector4D(engine, 1.0f);
+
+        if (clip.w() > 0.001f)
+            *pan = std::clamp(clip.x() / clip.w(), -1.0f, 1.0f);
+    }
+}
+
+void KnotGLWidget::playCinema(float seconds)
+{
+    cinemaTime_ = seconds;
+    cinemaShot_ = -1;
+
+    update();
+}
+
+bool KnotGLWidget::cinema() const
+{
+    return cinema_ && showTrain();
+}
+
+void KnotGLWidget::aimCamera(const QVector3D &eye, const QVector3D &target)
+{
+    const QVector3D toEye = eye - target;
+
+    const float distance = toEye.length();
+
+    yaw_ = qRadiansToDegrees(std::atan2(toEye.x(), toEye.z()));
+    pitch_ = qRadiansToDegrees(std::asin(std::clamp(toEye.y() / std::max(distance, 1.0e-4f), -1.0f, 1.0f)));
+    distance_ = distance;
+    panOffset_ = target;
+}
+
+void KnotGLWidget::directCinema(float seconds)
+{
+    if (!cinema() || trainPieces_.isEmpty())
+        return;
+
+    /*
+     * Four shots, cut one after the other, each a move a film crew would
+     * make: alongside the train, low, as if on a dolly; from the track ahead
+     * as it comes on and goes by; from the ground looking up past it at the
+     * lights; and a slow rise until the whole knot is in the picture.
+     */
+    constexpr float ShotLength = 9.0f;
+    constexpr int Shots = 4;
+
+    cinemaTime_ += seconds;
+
+    const int shot = static_cast<int>(cinemaTime_ / ShotLength) % Shots;
+
+    const float t = std::fmod(cinemaTime_, ShotLength) / ShotLength;
+
+    const float mm = worldPerMm();
+
+    const QMatrix4x4 &locomotive = trainPieces_.first().place;
+
+    const QVector3D engine = locomotive.map(QVector3D(0.0f, 24.0f, 0.0f)) * mm;
+    const QVector3D ahead = locomotive.mapVector(QVector3D(1.0f, 0.0f, 0.0f)).normalized();
+    const QVector3D side = locomotive.mapVector(QVector3D(0.0f, 0.0f, 1.0f)).normalized();
+
+    // a place along the track, a little ahead, is chosen at the cut and stays
+    if (shot != cinemaShot_)
+    {
+        cinemaShot_ = shot;
+
+        const double lead = shot == 2 ? 420.0 : 900.0;
+
+        const float speed = static_cast<float>(std::max(220.0, trainLength_ / 70.0));
+
+        const double aheadOfIt = lead + 0.35 * speed * ShotLength;
+
+        const QMatrix4x4 there = Photo::placeVehicle(trainPath_, trainLength_, trainAlong_ + aheadOfIt, 26.0);
+
+        cinemaSpot_ = there.map(QVector3D(0.0f, 0.0f, 0.0f)) * mm;
+        cinemaSide_ = there.mapVector(QVector3D(0.0f, 0.0f, 1.0f)).normalized();
+    }
+
+    const float floor = photoFloorLevel() + 14.0f * mm;
+
+    const QVector3D middle(0.5f * (meshMin_.x() + meshMax_.x()), floor, 0.5f * (meshMin_.z() + meshMax_.z()));
+
+    const float wide = std::max(meshMax_.x() - meshMin_.x(), meshMax_.z() - meshMin_.z());
+
+    QVector3D eye;
+    QVector3D target = engine;
+
+    switch (shot)
+    {
+    case 0:
+    {
+        // beside the train, drifting from the wagons up to the engine
+        eye = engine - ahead * ((150.0f - 190.0f * t) * mm) + side * (135.0f * mm) +
+              QVector3D(0.0f, 8.0f * mm, 0.0f);
+
+        target = engine - ahead * ((70.0f - 90.0f * t) * mm);
+
+        break;
+    }
+
+    case 1:
+    {
+        // from beside the track ahead: it comes on, and goes by
+        eye = cinemaSpot_ + cinemaSide_ * (120.0f * mm) + QVector3D(0.0f, 34.0f * mm, 0.0f);
+
+        break;
+    }
+
+    case 2:
+    {
+        // from the floor, looking up past it at the string lights
+        eye = cinemaSpot_ + cinemaSide_ * (230.0f * mm);
+
+        eye.setY(floor);
+
+        target = engine * 0.5f + cinemaSpot_ * 0.5f;
+        target.setY(photoFloorLevel() + (95.0f + 45.0f * t) * mm);
+
+        break;
+    }
+
+    default:
+    {
+        // rising and turning, until the knot lies open below
+        const float e = t * t * (3.0f - 2.0f * t);
+
+        const float a = qDegreesToRadians(cinemaTime_ * 3.0f);
+
+        const float away = wide * (0.72f + 0.42f * e);
+
+        eye = middle + QVector3D(std::sin(a) * away, wide * (0.1f + 0.62f * e), std::cos(a) * away);
+
+        target = middle * e + engine * (1.0f - e);
+
+        break;
+    }
+    }
+
+    eye.setY(std::max(eye.y(), floor));
+
+    aimCamera(eye, target);
+
+    ++photoVersion_;
+}
+
+bool KnotGLWidget::nightShown() const
+{
+    return photo_ && photoInfo_.evening;
+}
+
+void KnotGLWidget::updateLamps()
+{
+    lampPlaces_.clear();
+    lampColors_.clear();
+
+    if (!nightShown() || trainPieces_.isEmpty())
+        return;
+
+    const float mm = worldPerMm();
+
+    lampReach_ = 900.0f * mm;
+
+    const QMatrix4x4 &locomotive = trainPieces_.first().place;
+
+    headPlace_ = locomotive.map(QVector3D(50.0f, 19.0f, 0.0f)) * mm;
+    headWay_ = locomotive.mapVector(QVector3D(1.0f, -0.09f, 0.0f)).normalized();
+
+    // the lit carriage carries a little light with it
     const Photo::TrainModel &train = Photo::trainModel();
 
-    for (int k = 0; k < Photo::TrainModel::Vehicles; ++k)
+    for (const Photo::TrainPiece &piece : std::as_const(trainPieces_))
     {
-        trainPlace_[k] = Photo::placeVehicle(trainPath_, trainLength_, trainAlong_ - train.behind[k], train.axles[k]);
+        if (piece.firstIndex == train.parts[2].firstIndex)
+        {
+            lampPlaces_.push_back(piece.place.map(QVector3D(0.0f, 42.0f, 0.0f)) * mm);
+            lampColors_.push_back(QVector3D(1.0f, 0.62f, 0.28f) * 0.035f);
+        }
     }
+}
+
+void KnotGLWidget::stepSteam(float seconds, bool blowing)
+{
+    constexpr float Life = 2.6f;
+    constexpr float Every = 0.04f;
+
+    // the puffs that are there rise, spread and thin out
+    for (int k = steam_.size() - 1; k >= 0; --k)
+    {
+        SteamPuff &puff = steam_[k];
+
+        puff.age += seconds;
+
+        if (puff.age >= Life)
+        {
+            steam_.remove(k);
+
+            continue;
+        }
+
+        const float slowing = std::exp(-1.1f * puff.age);
+
+        puff.place += puff.drift * (seconds * slowing);
+        puff.place.setY(puff.place.y() + seconds * (34.0f + 62.0f * slowing));
+    }
+
+    if (!blowing || trainPieces_.isEmpty())
+        return;
+
+    steamWait_ -= seconds;
+
+    if (steamWait_ > 0.0f)
+        return;
+
+    steamWait_ = Every;
+
+    const QMatrix4x4 &locomotive = trainPieces_.first().place;
+
+    SteamPuff puff;
+
+    puff.place = locomotive.map(QVector3D(38.5f, 41.0f, 0.0f));
+
+    // a little of its own way, and left behind by the moving train
+    const float seed = steamSeed_ += 0.618034f;
+
+    const QVector3D ahead = locomotive.mapVector(QVector3D(1.0f, 0.0f, 0.0f));
+    const QVector3D side = locomotive.mapVector(QVector3D(0.0f, 0.0f, 1.0f));
+
+    puff.drift = ahead * 26.0f + side * (34.0f * std::sin(seed * 9.1f));
+    puff.seed = std::fmod(seed * 37.0f, 40.0f);
+
+    steam_.push_back(puff);
+}
+
+void KnotGLWidget::runSteam(float seconds)
+{
+    if (trainPieces_.isEmpty() && trainPath_.size() >= 8)
+        trainPieces_ = Photo::placeTrain(trainPath_, trainLength_, trainAlong_);
+
+    for (float t = 0.0f; t < seconds; t += 1.0f / 30.0f)
+        stepSteam(1.0f / 30.0f, true);
+
+    steamFrozen_ = true;
+
+    ++photoVersion_;
+
+    update();
+}
+
+void KnotGLWidget::drawSteam(const QMatrix4x4 &viewProjection, const QMatrix4x4 &view)
+{
+    if (!showTrain() || (steam_.isEmpty() && !nightShown()) || !steamProgram_ || !steamProgram_->isLinked())
+        return;
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+
+    // (light already times its share; what is behind shows through the rest)
+    glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+
+    steamProgram_->bind();
+
+    setShadowUniforms(*steamProgram_, lighting_.knotShadows);
+    setPhotoUniforms(*steamProgram_);
+
+    const float mm = worldPerMm();
+
+    // the camera's own directions, in the world
+    const QVector3D right(view(0, 0), view(0, 1), view(0, 2));
+    const QVector3D up(view(1, 0), view(1, 1), view(1, 2));
+
+    steamProgram_->setUniformValue("uViewProjection", viewProjection);
+    steamProgram_->setUniformValue("uRight", right);
+    steamProgram_->setUniformValue("uUp", up);
+
+    backgroundVao_.bind();
+
+    // the oldest first: they lie furthest behind the funnel
+    for (const SteamPuff &puff : std::as_const(steam_))
+    {
+        const float age = puff.age / 2.6f;
+
+        const float size = (9.0f + 36.0f * std::sqrt(age)) * mm;
+
+        const float thickness = 0.2f * smoothstepUp(age / 0.05f) * std::pow(1.0f - age, 1.8f);
+
+        steamProgram_->setUniformValue("uCentre", puff.place * mm);
+        steamProgram_->setUniformValue("uSize", size);
+        steamProgram_->setUniformValue("uThickness", thickness);
+        steamProgram_->setUniformValue("uSeed", puff.seed);
+
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+
+    // the glow around every light
+    if (nightShown())
+    {
+        steamProgram_->setUniformValue("uCentre", headPlace_);
+        steamProgram_->setUniformValue("uSize", 42.0f * mm);
+        steamProgram_->setUniformValue("uHalo", QVector3D(1.3f, 0.85f, 0.4f));
+
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        steamProgram_->setUniformValue("uHalo", QVector3D(0.0f, 0.0f, 0.0f));
+    }
+
+    backgroundVao_.release();
+
+    steamProgram_->release();
+
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
 }
 
 void KnotGLWidget::uploadTrain()
@@ -7343,11 +8176,9 @@ void KnotGLWidget::destroyTrain()
 
 void KnotGLWidget::drawTrainVehicles(QOpenGLShaderProgram &program, const char *matrix, const QMatrix4x4 &viewProjection)
 {
-    const Photo::TrainModel &train = Photo::trainModel();
-
     trainVao_.bind();
 
-    for (int k = 0; k < Photo::TrainModel::Vehicles; ++k)
+    for (const Photo::TrainPiece &piece : std::as_const(trainPieces_))
     {
         if (matrix != nullptr)
         {
@@ -7355,18 +8186,18 @@ void KnotGLWidget::drawTrainVehicles(QOpenGLShaderProgram &program, const char *
 
             scale.scale(worldPerMm());
 
-            program.setUniformValue(matrix, viewProjection * scale * trainPlace_[k]);
+            program.setUniformValue(matrix, viewProjection * scale * piece.place);
         }
         else
         {
-            program.setUniformValue("uVehicle", trainPlace_[k]);
+            program.setUniformValue("uVehicle", piece.place);
         }
 
         glDrawElements(
             GL_TRIANGLES,
-            train.indexCount[k],
+            piece.indexCount,
             GL_UNSIGNED_INT,
-            reinterpret_cast<const void *>(static_cast<quintptr>(train.firstIndex[k]) * sizeof(quint32)));
+            reinterpret_cast<const void *>(static_cast<quintptr>(piece.firstIndex) * sizeof(quint32)));
     }
 
     trainVao_.release();
@@ -7510,6 +8341,9 @@ void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
 
     photoFloorProgram_->setUniformValue("uFadeCentre", QVector2D(middle.x(), middle.z()));
     photoFloorProgram_->setUniformValue("uFadeRadius", fade);
+
+    // the paving of the courtyard is paler than the table's dark stone
+    photoFloorProgram_->setUniformValue("uStoneLight", photoInfo_.stoneLight);
 
     photoFloorProgram_->setUniformValue("uReflections", lighting_.reflections ? 1.0f : 0.0f);
 

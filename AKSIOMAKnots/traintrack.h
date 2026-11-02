@@ -61,6 +61,24 @@ struct TrainTrack
     // every bridge, numbered, its label on the deck
     QVector<KnotMath::CrossingInfo> bridges;
 
+    /*
+     * The train's journey round the track: every time it passes a bridge, in
+     * order, and whether it goes over or under. Each bridge comes twice, once
+     * each way. This is the knot's Gauss code, the list that knot theory
+     * writes a knot down with.
+     */
+    struct Pass
+    {
+        double along = 0.0;     // mm along the track
+        int bridge = 0;
+        bool over = false;
+    };
+
+    QVector<Pass> journey;
+
+    // over and under take turns all the way round
+    bool alternating = false;
+
     // how it came out (train_test): the steepest slope, the tightest
     // bend (mm), the closest two pieces of track side by side (mm, middle
     // to middle), the blocks under the bridges and how long it took
@@ -83,27 +101,49 @@ TrainTrack buildTrainTrack(
  * The train: a locomotive and two wagons, made here from the shapes a wooden
  * toy is made of. Per vertex: position (mm; x forward, y up, the top of the
  * track at y = 0), normal, occlusion (1 = open), material (0 red, 1 blue,
- * 2 yellow, 3 plain wood, 4 black, 5 brass, 6 green, 7 dark window).
+ * 2 cream, 3 plain wood, 4 black, 5 brass, 6 green, 7 window, 8 steel,
+ * 9 the lit lamp). Bodies stand still on their frames; the wheels turn on
+ * their axles and the side rods go round with the crank pins.
  */
 struct TrainModel
 {
     static constexpr int VertexFloats = 8;
     static constexpr int Vehicles = 3;
 
+    // the axle's height over the track, and the wheels' radius
+    static constexpr double AxleHeight = 5.8;
+    static constexpr double WheelRadius = 8.0;
+    static constexpr double CrankRadius = 4.5;
+
+    struct Part
+    {
+        int firstIndex = 0;
+        int indexCount = 0;
+    };
+
     QVector<float> vertices;
     QVector<quint32> indices;
 
-    // the indices of each vehicle
-    int firstIndex[Vehicles] = {};
-    int indexCount[Vehicles] = {};
+    Part parts[Vehicles];
+    Part wheels;
+    Part rods;
 
     // how far behind the locomotive's middle each vehicle's middle runs,
-    // and half the distance between its axles (mm)
+    // half the distance between its outer axles (mm), and where its axles are
     double behind[Vehicles] = {};
     double axles[Vehicles] = {};
+    QVector<double> axleX[Vehicles];
 };
 
 const TrainModel &trainModel();
+
+// one thing to draw: a part of the model, and where it stands
+struct TrainPiece
+{
+    QMatrix4x4 place;
+    int firstIndex = 0;
+    int indexCount = 0;
+};
 
 // The turn and place of a vehicle whose middle is `along` millimetres along
 // the path, its axles on the track.
@@ -112,6 +152,13 @@ QMatrix4x4 placeVehicle(
     double length,
     double along,
     double halfAxles);
+
+// Everything of the train, with the locomotive's middle `along` millimetres
+// along the path: bodies, wheels turned as far as they have rolled, side rods.
+QVector<TrainPiece> placeTrain(
+    const QVector<KnotMath::Vec3> &path,
+    double length,
+    double along);
 
 } // namespace Photo
 

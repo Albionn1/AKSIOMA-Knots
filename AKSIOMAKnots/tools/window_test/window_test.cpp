@@ -31,6 +31,10 @@
 #include "appsettings.h"
 #include "controlhelp.h"
 #include "knotexport.h"
+#include "trainsound.h"
+
+#include <QAudioDevice>
+#include <QMediaDevices>
 
 namespace
 {
@@ -660,6 +664,22 @@ void clickScene(MainWindow &w, int scene)
 
 void trainChoice(MainWindow &w)
 {
+    // the real sound system, started and stopped, at no volume
+    {
+        std::printf("default sound output: %s\n", qPrintable(QMediaDevices::defaultAudioOutput().description()));
+
+        for (int k = 0; k < 3; ++k)
+        {
+            TrainSound sound;
+
+            sound.setScene(220.0, true, 0.0f, 0.0f);
+
+            run(500);
+        }
+
+        check(true, "the sound starts and stops, silently, three times over");
+    }
+
     std::printf("\nThe toy train can always be clicked; if it cannot run, the window says why\n");
 
     const int scene = w.photoSceneCombo_->findData(static_cast<int>(Photo::Scene::TrainTrack));
@@ -847,7 +867,23 @@ void toyTrain(MainWindow &w)
           "the track of the trefoil is built");
 
     check(w.trainButton_->isVisibleTo(w.trainButton_->parentWidget()), "with a button to stop the train");
+    check(w.soundButton_->isVisibleTo(w.soundButton_->parentWidget()) && !w.soundButton_->isChecked(), "the sound can be turned on, and is off here");
+
+    w.cinemaButton_->setChecked(true);
+
+    run(1500);
+
+    check(w.glWidget_->cinema() && w.glWidget_->captionTitle_.size() > 0, "Cinema takes the camera");
+
+    w.cinemaButton_->setChecked(false);
+
+    run(100);
+
+    check(!w.glWidget_->cinema(), "and gives it back");
+
     check(w.restingTrack_->bridges.size() == 3, "it has three bridges");
+    check(w.restingTrack_->journey.size() == 6 && w.restingTrack_->alternating, "the journey passes each twice, taking turns");
+    check(w.glWidget_->trainJourney_.size() == 6, "and the view is showing it");
     check(!w.glWidget_->captionTitle_.isEmpty(), "and the picture says what it shows");
 
     const double start = w.glWidget_->trainAlong();
@@ -1619,6 +1655,9 @@ int main(int argc, char **argv)
     QCoreApplication::setApplicationName(QStringLiteral("window test"));
 
     QSettings().setValue(QStringLiteral("language"), QStringLiteral("en"));
+
+    // (a test makes no noise)
+    QSettings().setValue(QStringLiteral("trainSound"), false);
 
     AppSettings::setTourSeen();
     AppSettings::applyAll();

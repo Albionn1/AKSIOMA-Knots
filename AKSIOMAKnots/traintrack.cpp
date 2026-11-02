@@ -585,13 +585,17 @@ void addBlock(
     }
 }
 
-// the across-the-track outline of the track: one face after another, each
-// with its own normal
+// The across-the-track outline of the track: one face after another, each
+// with the normals of its two ends. The edges are rounded over, as they are
+// on a toy made for hands: that is where the light gathers. `part`: 0 the top
+// and the round edges, 0.1 the floor of a groove, 0.2 a groove's wall, 0.3 the
+// sides, 0.4 the underside.
 struct Face
 {
-    double x0, y0, x1, y1;
-    double nx, ny;
+    double x0, y0, nx0, ny0;
+    double x1, y1, nx1, ny1;
     float open;
+    float part;
 };
 
 QVector<Face> trackProfile()
@@ -599,33 +603,71 @@ QVector<Face> trackProfile()
     const double w = 0.5 * TrackWidthMm;
     const double t = TrackThicknessMm;
 
-    constexpr double Groove = 3.0;
+    constexpr double Edge = 2.6;
+    constexpr double Lip = 0.9;
+    constexpr double Corner = 0.8;
+    constexpr double Groove = 3.2;
     constexpr double GrooveWide = 3.0;
     constexpr double GrooveAt = 10.0;
-    constexpr double Edge = 1.6;
 
-    constexpr float Inside = 0.72f;
+    constexpr float Inside = 0.62f;
+    constexpr float Walls = 0.7f;
 
     const double in = GrooveAt - GrooveWide;
     const double out = GrooveAt + GrooveWide;
 
-    const double s = std::sqrt(0.5);
+    QVector<Face> right;
 
-    return {
-        {-w, -t, w, -t, 0.0, -1.0, 0.25f},
-        {w, -t, w, -Edge, 1.0, 0.0, 0.8f},
-        {w, -Edge, w - Edge, 0.0, s, s, 1.0f},
-        {w - Edge, 0.0, out, 0.0, 0.0, 1.0, 1.0f},
-        {out, 0.0, out - 0.4, -Groove, -0.99, 0.13, Inside},
-        {out - 0.4, -Groove, in + 0.4, -Groove, 0.0, 1.0, Inside},
-        {in + 0.4, -Groove, in, 0.0, 0.99, 0.13, Inside},
-        {in, 0.0, -in, 0.0, 0.0, 1.0, 1.0f},
-        {-in, 0.0, -in - 0.4, -Groove, -0.99, 0.13, Inside},
-        {-in - 0.4, -Groove, -out + 0.4, -Groove, 0.0, 1.0, Inside},
-        {-out + 0.4, -Groove, -out, 0.0, 0.99, 0.13, Inside},
-        {-out, 0.0, -w + Edge, 0.0, 0.0, 1.0, 1.0f},
-        {-w + Edge, 0.0, -w, -Edge, -s, s, 1.0f},
-        {-w, -Edge, -w, -t, -1.0, 0.0, 0.8f}};
+    auto flat = [&right](double x0, double y0, double x1, double y1, double nx, double ny, float open, float part)
+    {
+        right.push_back({x0, y0, nx, ny, x1, y1, nx, ny, open, part});
+    };
+
+    // a quarter round: from angle a to b about (cx, cy), `sign` 1 where the
+    // surface looks away from the centre, -1 where it looks towards it
+    auto round = [&right](double cx, double cy, double r, double a, double b, int steps, double sign, float open, float part)
+    {
+        for (int k = 0; k < steps; ++k)
+        {
+            const double p = a + (b - a) * k / steps;
+            const double q = a + (b - a) * (k + 1) / steps;
+
+            right.push_back({cx + r * std::cos(p), cy + r * std::sin(p), sign * std::cos(p), sign * std::sin(p),
+                             cx + r * std::cos(q), cy + r * std::sin(q), sign * std::cos(q), sign * std::sin(q), open, part});
+        }
+    };
+
+    const double half = 0.5 * Pi;
+
+    // from the bottom of the right side, up and in to the middle
+    flat(w, -t, w, -Edge, 1.0, 0.0, 0.85f, 0.3f);
+    round(w - Edge, -Edge, Edge, 0.0, half, 4, 1.0, 1.0f, 0.0f);
+    flat(w - Edge, 0.0, out + Lip, 0.0, 0.0, 1.0, 1.0f, 0.0f);
+    round(out + Lip, -Lip, Lip, half, 2.0 * half, 2, 1.0, 0.9f, 0.0f);
+    flat(out, -Lip, out, -Groove + Corner, -1.0, 0.0, Walls, 0.2f);
+    round(out - Corner, -Groove + Corner, Corner, 0.0, -half, 2, -1.0, Inside, 0.1f);
+    flat(out - Corner, -Groove, in + Corner, -Groove, 0.0, 1.0, Inside, 0.1f);
+    round(in + Corner, -Groove + Corner, Corner, -half, -2.0 * half, 2, -1.0, Inside, 0.1f);
+    flat(in, -Groove + Corner, in, -Lip, 1.0, 0.0, Walls, 0.2f);
+    round(in - Lip, -Lip, Lip, 0.0, half, 2, 1.0, 0.9f, 0.0f);
+
+    QVector<Face> faces;
+
+    faces.push_back({-w, -t, 0.0, -1.0, w, -t, 0.0, -1.0, 0.25f, 0.4f});
+
+    faces += right;
+
+    faces.push_back({in - Lip, 0.0, 0.0, 1.0, -(in - Lip), 0.0, 0.0, 1.0, 1.0f, 0.0f});
+
+    // the left half, the other way round
+    for (int k = right.size() - 1; k >= 0; --k)
+    {
+        const Face &f = right.at(k);
+
+        faces.push_back({-f.x1, f.y1, -f.nx1, f.ny1, -f.x0, f.y0, -f.nx0, f.ny0, f.open, f.part});
+    }
+
+    return faces;
 }
 
 // how much of the room each ring of the track sees: less under a bridge
@@ -748,7 +790,7 @@ void addPiers(Builder &out, TrainTrack &track, const QVector<Vec3> &path, double
                 flat,
                 Vec3(0.0, 1.0, 0.0),
                 Vec3(0.5 * BlockAlongMm, 0.5 * each - 0.2, 0.5 * BlockAcrossMm),
-                1.8,
+                2.6,
                 (stack + k) % 4,
                 i);
 
@@ -877,20 +919,20 @@ void buildMesh(TrainTrack &track)
 
         for (const Face &face : faces)
         {
-            const Vec3 normal = (frame.side * face.nx + frame.up * face.ny).normalized();
-
             for (int end = 0; end < 2; ++end)
             {
                 const double x = end == 0 ? face.x0 : face.x1;
                 const double y = end == 0 ? face.y0 : face.y1;
+                const double nx = end == 0 ? face.nx0 : face.nx1;
+                const double ny = end == 0 ? face.ny0 : face.ny1;
 
                 out.vertex(
                     path.at(i) + frame.side * x + frame.up * y,
-                    normal,
+                    (frame.side * nx + frame.up * ny).normalized(),
                     float(along),
                     float(x + y),
                     float(piece),
-                    0.0f,
+                    face.part,
                     face.open * open.at(i),
                     i);
             }
@@ -1140,23 +1182,86 @@ struct ModelBuilder
         }
     }
 
-    void wheels(double x)
+    /*
+     * A shape turned on a lathe: `outline` is (place along the axis, radius),
+     * from one end to the other, the surface looking outward. `flatten`
+     * squashes it across (a roof), `shift` moves it there.
+     */
+    void lathe(
+        const Vec3 &base,
+        const Vec3 &axis,
+        const QVector<QPointF> &outline,
+        int material,
+        double flatten = 1.0,
+        const Vec3 &shift = Vec3(0.0, 0.0, 0.0))
     {
-        const Vec3 across(0.0, 0.0, 1.0);
+        const int rows = outline.size();
 
-        for (const double z : {-10.0, 10.0})
+        if (rows < 2)
+            return;
+
+        constexpr int Around = 32;
+
+        const Vec3 helper = std::abs(axis.y) < 0.9 ? Vec3(0.0, 1.0, 0.0) : Vec3(1.0, 0.0, 0.0);
+        const Vec3 u = Vec3::cross(axis, helper).normalized();
+        const Vec3 w = Vec3::cross(axis, u);
+
+        const int start = count();
+
+        for (int r = 0; r < rows; ++r)
         {
-            cylinder(Vec3(x, 5.8, z), across, 8.0, 2.4, 0.8, 3);
-            cylinder(Vec3(x, 5.8, z * 1.26), across, 2.2, 0.8, 0.3, 5);
+            const QPointF before = outline.at(std::max(r - 1, 0));
+            const QPointF after = outline.at(std::min(r + 1, rows - 1));
+
+            const double da = after.x() - before.x();
+            const double dr = after.y() - before.y();
+            const double l = std::max(std::hypot(da, dr), 1.0e-9);
+
+            const double nr = da / l;
+            const double na = -dr / l;
+
+            for (int k = 0; k < Around; ++k)
+            {
+                const double a = 2.0 * Pi * k / Around;
+
+                Vec3 out = u * std::cos(a) + w * std::sin(a);
+
+                // (the squashing is across y, as a roof is)
+                Vec3 place = out * outline.at(r).y();
+
+                place.y *= flatten;
+
+                Vec3 normal = out * nr + axis * na;
+
+                normal.y /= std::max(flatten, 0.05);
+
+                add(base + shift + axis * outline.at(r).x() + place, normal.normalized(), material);
+            }
         }
 
-        // the axle
-        cylinder(Vec3(x, 5.8, 0.0), across, 1.6, 9.0, 0.2, 5);
+        for (int r = 0; r + 1 < rows; ++r)
+        {
+            for (int k = 0; k < Around; ++k)
+            {
+                const int next = (k + 1) % Around;
+
+                quad(start + r * Around + k, start + r * Around + next, start + (r + 1) * Around + next, start + (r + 1) * Around + k);
+            }
+        }
+    }
+
+    // a round bar from one point to another
+    void bar(const Vec3 &a, const Vec3 &b, double radius, int material)
+    {
+        const Vec3 along = b - a;
+
+        cylinder((a + b) * 0.5, along.normalized(), radius, 0.5 * along.length(), 0.35 * radius, material);
     }
 
     void magnet(double x)
     {
-        cylinder(Vec3(x, 11.0, 0.0), Vec3(1.0, 0.0, 0.0), 3.2, 3.0, 0.8, 4);
+        lathe(Vec3(x > 0.0 ? x - 3.0 : x + 3.0, 11.0, 0.0), Vec3(x > 0.0 ? 1.0 : -1.0, 0.0, 0.0),
+              {{0.0, 2.4}, {3.6, 2.4}, {3.8, 3.4}, {5.6, 3.4}, {6.0, 2.8}, {6.1, 0.0}}, 8);
     }
 };
 
@@ -1168,84 +1273,265 @@ TrainModel makeTrain()
 
     const Vec3 forward(1.0, 0.0, 0.0);
     const Vec3 up(0.0, 1.0, 0.0);
+    const Vec3 across(0.0, 0.0, 1.0);
 
-    // the locomotive: 92 mm long, axles 26 mm either side of the middle
-    b.wheels(26.0);
-    b.wheels(-26.0);
-
-    b.box(Vec3(0.0, 12.5, 0.0), Vec3(44.0, 3.5, 12.5), 1.2, 3);
-    b.cylinder(Vec3(13.0, 22.5, 0.0), forward, 10.5, 28.0, 1.6, 0);
-    b.cylinder(Vec3(41.5, 22.5, 0.0), forward, 7.6, 1.2, 0.5, 5);
-    b.cylinder(Vec3(4.0, 22.5, 0.0), forward, 11.0, 1.1, 0.5, 2);
-    b.cylinder(Vec3(22.0, 22.5, 0.0), forward, 11.0, 1.1, 0.5, 2);
-
-    b.cylinder(Vec3(29.0, 34.0, 0.0), up, 3.5, 5.0, 0.5, 4);
-    b.cylinder(Vec3(29.0, 38.6, 0.0), up, 4.9, 1.4, 0.6, 4);
-    b.box(Vec3(9.0, 33.4, 0.0), Vec3(4.2, 3.0, 4.2), 2.8, 5);
-
-    b.box(Vec3(-28.0, 23.5, 0.0), Vec3(14.0, 12.5, 12.5), 1.8, 1);
-    b.box(Vec3(-28.0, 37.2, 0.0), Vec3(16.5, 1.5, 14.5), 1.2, 2);
-
-    for (const double z : {-12.3, 12.3})
-        b.box(Vec3(-29.0, 27.5, z), Vec3(7.5, 5.0, 0.7), 0.5, 7);
-
-    b.box(Vec3(44.5, 11.5, 0.0), Vec3(2.2, 4.5, 12.5), 1.0, 0);
-
-    for (const double z : {-7.5, 7.5})
-        b.cylinder(Vec3(48.0, 11.5, z), forward, 2.3, 1.6, 0.5, 5);
-
-    b.magnet(-47.0);
-
-    model.firstIndex[0] = 0;
-    model.indexCount[0] = b.index.size();
-    model.behind[0] = 0.0;
-    model.axles[0] = 26.0;
-
-    // a wagon with a yellow tub and three logs
+    enum
     {
-        const int first = b.index.size();
-        b.wheels(20.0);
-        b.wheels(-20.0);
+        Red = 0,
+        Blue = 1,
+        Cream = 2,
+        Wood = 3,
+        Black = 4,
+        Brass = 5,
+        Green = 6,
+        Glass = 7,
+        Steel = 8,
+        Lamp = 9
+    };
 
-        b.box(Vec3(0.0, 11.5, 0.0), Vec3(31.0, 3.0, 12.5), 1.2, 3);
-        b.box(Vec3(0.0, 21.5, 0.0), Vec3(30.0, 7.5, 13.0), 2.0, 2);
+    // the locomotive: 94 mm long, three coupled axles
+    b.box(Vec3(0.0, 11.5, 0.0), Vec3(45.0, 3.0, 10.0), 1.0, Black);
 
-        b.cylinder(Vec3(0.0, 30.0, -6.0), forward, 5.0, 25.0, 1.0, 3);
-        b.cylinder(Vec3(0.0, 30.0, 6.0), forward, 5.0, 25.0, 1.0, 3);
-        b.cylinder(Vec3(0.0, 34.6, 0.0), forward, 4.8, 22.0, 1.0, 3);
+    // the running board, with a thin brass edge
+    b.box(Vec3(-2.0, 15.0, 0.0), Vec3(47.0, 0.9, 14.0), 0.6, Black);
 
-        b.magnet(34.0);
-        b.magnet(-34.0);
+    for (const double z : {-14.1, 14.1})
+        b.box(Vec3(-2.0, 15.0, z), Vec3(47.0, 0.5, 0.25), 0.2, Brass);
 
-        model.firstIndex[1] = first;
-        model.indexCount[1] = b.index.size() - first;
-        model.behind[1] = 46.0 + 8.0 + 33.0;
-        model.axles[1] = 20.0;
+    // the boiler, its bands, and the smokebox with its round door
+    b.cylinder(Vec3(11.0, 25.0, 0.0), forward, 10.0, 26.0, 0.4, Red);
+
+    for (const double x : {-11.0, 0.5, 12.0, 23.5, 34.5})
+        b.lathe(Vec3(x, 25.0, 0.0), forward, {{-1.0, 10.0}, {-0.85, 10.42}, {0.85, 10.42}, {1.0, 10.0}}, Brass);
+
+    b.lathe(
+        Vec3(36.0, 25.0, 0.0),
+        forward,
+        {{0.0, 10.0}, {0.3, 10.6}, {8.0, 10.6}, {9.2, 10.2}, {10.0, 9.2}, {10.4, 8.0}, {10.5, 0.0}},
+        Black);
+
+    b.lathe(Vec3(46.4, 25.0, 0.0), forward, {{0.0, 7.6}, {0.5, 7.6}, {0.7, 7.0}, {0.7, 0.0}}, Steel);
+    b.lathe(Vec3(47.0, 25.0, 0.0), forward, {{0.0, 1.5}, {0.9, 1.3}, {1.3, 0.0}}, Brass);
+
+    // the funnel, flaring at the top
+    b.lathe(
+        Vec3(38.5, 33.0, 0.0),
+        up,
+        {{0.0, 5.6}, {1.0, 4.1}, {2.0, 3.5}, {4.5, 3.4}, {5.7, 3.9}, {6.4, 5.0}, {6.8, 5.3}, {6.9, 4.1}, {6.0, 3.1}, {5.0, 0.0}},
+        Black);
+
+    b.lathe(Vec3(38.5, 39.0, 0.0), up, {{0.0, 4.9}, {0.5, 5.4}, {0.8, 5.35}, {1.0, 4.7}}, Brass);
+
+    // the two brass domes, the whistle
+    for (const double x : {-1.0, 19.0})
+    {
+        b.lathe(
+            Vec3(x, 33.0, 0.0),
+            up,
+            {{0.0, 5.0}, {1.0, 3.7}, {1.6, 3.5}, {3.0, 3.4}, {4.2, 2.9}, {5.0, 1.9}, {5.4, 0.8}, {5.5, 0.0}},
+            Brass);
     }
 
-    // a green carriage with windows and a red roof
+    b.lathe(Vec3(-10.0, 34.5, 0.0), up, {{0.0, 0.9}, {2.0, 0.7}, {2.1, 1.2}, {3.4, 1.0}, {3.7, 0.0}}, Brass);
+
+    // handrails along the boiler, on their posts
+    for (const double z : {-11.3, 11.3})
+    {
+        b.bar(Vec3(-13.0, 28.5, z), Vec3(35.0, 28.5, z), 0.5, Brass);
+
+        for (const double x : {-8.0, 8.0, 24.0})
+            b.bar(Vec3(x, 28.5, z), Vec3(x, 27.0, z * 0.84), 0.4, Brass);
+    }
+
+    // the cylinders that drive the wheels
+    for (const double z : {-13.2, 13.2})
+    {
+        b.lathe(
+            Vec3(28.0, 11.0, z),
+            forward,
+            {{0.0, 0.0}, {0.1, 3.0}, {0.7, 3.6}, {1.5, 3.6}, {1.7, 3.3}, {10.3, 3.3}, {10.5, 3.6}, {11.3, 3.6}, {11.9, 3.0}, {12.0, 0.0}},
+            Green);
+
+        b.bar(Vec3(18.0, 8.2, z), Vec3(28.0, 8.2, z), 0.7, Steel);
+    }
+
+    // the cab: walls, framed windows, a roof with an overhang
+    b.box(Vec3(-29.0, 25.0, 0.0), Vec3(14.0, 10.5, 12.8), 1.4, Blue);
+
+    b.lathe(Vec3(-45.5, 29.5, 0.0), forward, {{0.0, 12.4}, {0.5, 14.2}, {32.5, 14.2}, {33.0, 12.4}}, Black, 0.5);
+    b.box(Vec3(-29.0, 32.6, 0.0), Vec3(16.4, 1.6, 15.0), 0.4, Black);
+
+    for (const double x : {-45.6, -12.4})
+        b.box(Vec3(x, 34.4, 0.0), Vec3(0.3, 0.4, 13.0), 0.15, Brass);
+
+    for (const double z : {-12.95, 12.95})
+    {
+        for (const double x : {-34.0, -22.5})
+        {
+            b.box(Vec3(x, 27.5, z), Vec3(4.6, 5.4, 0.28), 0.2, Brass);
+            b.box(Vec3(x, 27.5, z * 1.012), Vec3(3.8, 4.6, 0.25), 0.15, Glass);
+        }
+
+        // the number plate
+        b.box(Vec3(-28.5, 18.6, z), Vec3(5.5, 1.9, 0.3), 0.3, Brass);
+    }
+
+    for (const double z : {-6.2, 6.2})
+    {
+        b.box(Vec3(-14.85, 28.5, z), Vec3(0.3, 4.0, 4.0), 0.2, Brass);
+        b.box(Vec3(-14.7, 28.5, z), Vec3(0.28, 3.3, 3.3), 0.15, Glass);
+    }
+
+    // the buffer beam, its buffers and lamp, and the cow catcher
+    b.box(Vec3(45.5, 13.0, 0.0), Vec3(1.6, 3.6, 13.0), 0.9, Red);
+
+    for (const double z : {-8.0, 8.0})
+    {
+        b.lathe(
+            Vec3(46.8, 13.0, z),
+            forward,
+            {{0.0, 1.8}, {2.4, 1.6}, {2.5, 2.7}, {3.3, 2.7}, {3.6, 2.2}, {3.7, 0.0}},
+            Brass);
+    }
+
+    b.lathe(Vec3(45.5, 19.0, 0.0), forward, {{0.0, 0.0}, {0.1, 2.6}, {3.2, 2.9}, {3.6, 3.2}, {3.8, 2.8}}, Brass);
+    b.lathe(Vec3(49.1, 19.0, 0.0), forward, {{0.0, 2.8}, {0.5, 2.0}, {0.7, 0.0}}, Lamp);
+
+    for (const double z : {-10.0, -6.0, -2.0, 2.0, 6.0, 10.0})
+        b.bar(Vec3(46.5, 10.0, z), Vec3(55.0, 1.6, z * 0.12), 0.75, Cream);
+
+    b.magnet(-48.0);
+
+    model.parts[0] = TrainModel::Part{0, static_cast<int>(b.index.size())};
+    model.behind[0] = 0.0;
+    model.axles[0] = 26.0;
+    model.axleX[0] = {26.0, 0.0, -26.0};
+
+    // a wagon of logs, in a tub of planks, held by stakes
     {
         const int first = b.index.size();
 
-        b.wheels(20.0);
-        b.wheels(-20.0);
+        b.box(Vec3(0.0, 11.0, 0.0), Vec3(31.0, 2.6, 10.5), 1.0, Black);
+        b.box(Vec3(0.0, 15.0, 0.0), Vec3(32.0, 1.2, 13.5), 0.7, Wood);
 
-        b.box(Vec3(0.0, 11.5, 0.0), Vec3(31.0, 3.0, 12.5), 1.2, 3);
-        b.box(Vec3(0.0, 24.0, 0.0), Vec3(30.0, 10.0, 12.5), 1.8, 6);
-        b.box(Vec3(0.0, 35.6, 0.0), Vec3(32.0, 1.8, 14.5), 1.4, 0);
-
-        for (const double x : {-18.0, 0.0, 18.0})
+        for (const double y : {18.0, 21.2, 24.4})
         {
-            for (const double z : {-12.3, 12.3})
-                b.box(Vec3(x, 26.0, z), Vec3(6.0, 4.6, 0.7), 0.5, 7);
+            for (const double z : {-12.9, 12.9})
+                b.box(Vec3(0.0, y, z), Vec3(31.0, 1.45, 0.75), 0.55, Cream);
+
+            for (const double x : {-30.5, 30.5})
+                b.box(Vec3(x, y, 0.0), Vec3(0.75, 1.45, 12.4), 0.55, Cream);
         }
 
-        b.magnet(34.0);
+        for (const double x : {-22.0, 0.0, 22.0})
+        {
+            for (const double z : {-13.8, 13.8})
+                b.box(Vec3(x, 21.0, z), Vec3(1.1, 6.6, 0.55), 0.35, Red);
+        }
 
-        model.firstIndex[2] = first;
-        model.indexCount[2] = b.index.size() - first;
+        struct Log
+        {
+            double y, z, r;
+        };
+
+        for (const Log &log : {Log{27.0, -7.2, 4.7}, Log{27.0, 0.0, 4.9}, Log{27.0, 7.2, 4.6}, Log{33.4, -3.6, 4.6}, Log{33.4, 3.8, 4.5}})
+            b.lathe(Vec3(-27.0, log.y, log.z), forward, {{0.0, 0.0}, {0.05, log.r - 0.5}, {0.5, log.r}, {53.5, log.r}, {54.0, log.r - 0.5}, {54.05, 0.0}}, Wood);
+
+        b.magnet(34.5);
+        b.magnet(-34.5);
+
+        model.parts[1] = TrainModel::Part{first, static_cast<int>(b.index.size()) - first};
+        model.behind[1] = 46.0 + 8.0 + 33.0;
+        model.axles[1] = 20.0;
+        model.axleX[1] = {20.0, -20.0};
+    }
+
+    // a green carriage with framed windows, doors, a gold line and a lamp
+    {
+        const int first = b.index.size();
+
+        b.box(Vec3(0.0, 11.0, 0.0), Vec3(31.0, 2.6, 10.5), 1.0, Black);
+        b.box(Vec3(0.0, 15.0, 0.0), Vec3(32.0, 1.2, 13.5), 0.7, Black);
+        b.box(Vec3(0.0, 25.0, 0.0), Vec3(30.0, 9.6, 12.5), 1.6, Green);
+
+        // gold lines along the sides
+        for (const double z : {-12.55, 12.55})
+        {
+            b.box(Vec3(0.0, 19.6, z), Vec3(29.0, 0.4, 0.2), 0.15, Brass);
+            b.box(Vec3(0.0, 31.6, z), Vec3(29.0, 0.4, 0.2), 0.15, Brass);
+
+            for (const double x : {-19.0, 0.0, 19.0})
+            {
+                b.box(Vec3(x, 26.0, z), Vec3(6.0, 4.4, 0.28), 0.2, Cream);
+                b.box(Vec3(x, 26.0, z * 1.012), Vec3(5.2, 3.6, 0.25), 0.15, Glass);
+            }
+
+            for (const double x : {-9.5, 9.5})
+            {
+                b.box(Vec3(x, 24.0, z), Vec3(2.6, 7.0, 0.22), 0.2, Cream);
+                b.bar(Vec3(x + 1.6, 22.0, z * 1.03), Vec3(x + 1.6, 22.0, z * 1.05), 0.5, Brass);
+            }
+        }
+
+        // a curved roof, and a raised strip along it
+        b.lathe(Vec3(-33.0, 29.5, 0.0), forward, {{0.0, 12.2}, {0.8, 13.6}, {65.2, 13.6}, {66.0, 12.2}}, Red, 0.4);
+        b.box(Vec3(0.0, 36.3, 0.0), Vec3(24.0, 1.1, 3.6), 0.9, Red);
+
+        b.magnet(34.5);
+
+        model.parts[2] = TrainModel::Part{first, static_cast<int>(b.index.size()) - first};
         model.behind[2] = model.behind[1] + 33.0 + 8.0 + 33.0;
         model.axles[2] = 20.0;
+        model.axleX[2] = {20.0, -20.0};
+    }
+
+    // two wheels and their axle: rim, spokes, hub. They turn as they roll.
+    {
+        const int first = b.index.size();
+
+        for (const double z : {-10.0, 10.0})
+        {
+            const double outward = z > 0.0 ? 1.0 : -1.0;
+
+            // the steel tyre and its flange, in the groove
+            b.lathe(
+                Vec3(0.0, 0.0, z - 2.3),
+                across,
+                {{0.0, 6.4}, {0.1, 8.0}, {4.5, 8.0}, {4.6, 6.4}},
+                Steel);
+
+            // the red wheel inside it
+            for (int spoke = 0; spoke < 6; ++spoke)
+            {
+                const double a = spoke * Pi / 3.0;
+
+                b.bar(Vec3(0.0, 0.0, z), Vec3(6.6 * std::cos(a), 6.6 * std::sin(a), z), 0.8, Red);
+            }
+
+            b.lathe(Vec3(0.0, 0.0, z - 2.0), across, {{0.0, 6.4}, {0.4, 7.0}, {3.6, 7.0}, {4.0, 6.4}}, Red);
+
+            // the hub
+            b.lathe(Vec3(0.0, 0.0, z - 1.8 * outward), across.operator*(outward), {{0.0, 0.0}, {0.1, 2.3}, {3.4, 2.3}, {4.0, 1.5}, {4.2, 0.0}}, Brass);
+        }
+
+        b.bar(Vec3(0.0, 0.0, -9.0), Vec3(0.0, 0.0, 9.0), 1.3, Steel);
+
+        model.wheels = TrainModel::Part{first, static_cast<int>(b.index.size()) - first};
+    }
+
+    // the side rods, which go round with the crank pins
+    {
+        const int first = b.index.size();
+
+        for (const double z : {-14.6, 14.6})
+        {
+            b.box(Vec3(0.0, 0.0, z), Vec3(28.0, 0.95, 0.55), 0.35, Steel);
+
+            for (const double x : {-26.0, 0.0, 26.0})
+                b.lathe(Vec3(x, 0.0, z > 0.0 ? z - 2.4 : z - 1.0), across, {{0.0, 1.0}, {2.4, 1.0}, {2.5, 1.7}, {3.3, 1.7}, {3.5, 0.0}}, Brass);
+        }
+
+        model.rods = TrainModel::Part{first, static_cast<int>(b.index.size()) - first};
     }
 
     model.vertices = b.v;
@@ -1375,8 +1661,16 @@ TrainTrack buildTrainTrack(const QVector<Vec3> &curve, RopeProgress *progress)
         result.bridges.clear();
 
         QVector<bool> seen(plan.crossings, false);
+        QVector<int> numberOf(plan.crossings, 0);
 
+        // numbered in the order the train first meets them, over or under
         int number = 0;
+
+        for (const PassOnTrack &pass : plan.passes)
+        {
+            if (numberOf.at(pass.crossing) == 0)
+                numberOf[pass.crossing] = ++number;
+        }
 
         for (const PassOnTrack &pass : plan.passes)
         {
@@ -1389,13 +1683,26 @@ TrainTrack buildTrainTrack(const QVector<Vec3> &curve, RopeProgress *progress)
 
             KnotMath::CrossingInfo bridge;
 
-            bridge.number = ++number;
+            bridge.number = numberOf.at(pass.crossing);
             bridge.pointA = p;
             bridge.pointB = Vec3(p.x, GroundLevelMm, p.z);
             bridge.midpoint = p;
             bridge.aIsOver = true;
 
             result.bridges.push_back(bridge);
+        }
+
+        result.journey.clear();
+
+        for (const PassOnTrack &pass : plan.passes)
+            result.journey.push_back({pass.s * bestLength, numberOf.at(pass.crossing), pass.over});
+
+        result.alternating = true;
+
+        for (int k = 0; k < result.journey.size(); ++k)
+        {
+            if (result.journey.at(k).over == result.journey.at((k + 1) % result.journey.size()).over)
+                result.alternating = false;
         }
 
         result.valid = true;
@@ -1535,6 +1842,55 @@ QMatrix4x4 placeVehicle(
         float(forward.y), float(up.y), float(side.y), float(middle.y),
         float(forward.z), float(up.z), float(side.z), float(middle.z),
         0.0f, 0.0f, 0.0f, 1.0f);
+}
+
+QVector<TrainPiece> placeTrain(
+    const QVector<Vec3> &path,
+    double length,
+    double along)
+{
+    const TrainModel &train = trainModel();
+
+    QVector<TrainPiece> pieces;
+
+    pieces.reserve(16);
+
+    // a wheel that rolls without slipping: forward along x, it turns from
+    // +y towards +x, which is clockwise about z
+    const double turned = along / TrainModel::WheelRadius;
+
+    const float degrees = float(turned * 180.0 / Pi);
+
+    for (int k = 0; k < TrainModel::Vehicles; ++k)
+    {
+        const QMatrix4x4 place = placeVehicle(path, length, along - train.behind[k], train.axles[k]);
+
+        pieces.push_back(TrainPiece{place, train.parts[k].firstIndex, train.parts[k].indexCount});
+
+        for (const double x : train.axleX[k])
+        {
+            QMatrix4x4 wheel = place;
+
+            wheel.translate(float(x), float(TrainModel::AxleHeight), 0.0f);
+            wheel.rotate(-degrees, 0.0f, 0.0f, 1.0f);
+
+            pieces.push_back(TrainPiece{wheel, train.wheels.firstIndex, train.wheels.indexCount});
+        }
+
+        if (k == 0)
+        {
+            QMatrix4x4 rods = place;
+
+            rods.translate(
+                float(TrainModel::CrankRadius * std::cos(-turned)),
+                float(TrainModel::AxleHeight + TrainModel::CrankRadius * std::sin(-turned)),
+                0.0f);
+
+            pieces.push_back(TrainPiece{rods, train.rods.firstIndex, train.rods.indexCount});
+        }
+    }
+
+    return pieces;
 }
 
 } // namespace Photo

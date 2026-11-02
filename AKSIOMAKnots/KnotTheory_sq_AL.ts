@@ -68,8 +68,8 @@
         <translation>MËNYRA FOTO</translation>
     </message>
     <message>
-        <source>The places and surfaces of Photo mode come from &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; and are free for any use (CC0): the HDRIs Chinese Garden (Andreas Mischok) and Meadow 2 (Sergej Majboroda), the textures Wood Table Large and Wood Floor Worn (Dimitrios Savva). The rope is a Cosserat rod solved directly (C. Deul, T. Kugelstadt, M. Weiler and J. Bender, 2018) by position based dynamics (XPBD: M. Macklin, M. Müller and N. Chentanez, 2016).</source>
-        <translation>Vendet dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): HDRI-të Chinese Garden (Andreas Mischok) dhe Meadow 2 (Sergej Majboroda), teksturat Wood Table Large dhe Wood Floor Worn (Dimitrios Savva). Litari është një shufër Cosserat e zgjidhur drejtpërdrejt (C. Deul, T. Kugelstadt, M. Weiler dhe J. Bender, 2018) me dinamikë të bazuar në pozicione (XPBD: M. Macklin, M. Müller dhe N. Chentanez, 2016).</translation>
+        <source>The places and surfaces of Photo mode come from &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; and are free for any use (CC0): the HDRIs Chinese Garden (Andreas Mischok), Meadow 2 (Sergej Majboroda) and Evening Museum Courtyard (Grzegorz Wronkowski), the textures Wood Table Large and Wood Floor Worn (Dimitrios Savva). The rope is a Cosserat rod solved directly (C. Deul, T. Kugelstadt, M. Weiler and J. Bender, 2018) by position based dynamics (XPBD: M. Macklin, M. Müller and N. Chentanez, 2016).</source>
+        <translation>Vendet dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): HDRI-të Chinese Garden (Andreas Mischok), Meadow 2 (Sergej Majboroda) dhe Evening Museum Courtyard (Grzegorz Wronkowski), teksturat Wood Table Large dhe Wood Floor Worn (Dimitrios Savva). Litari është një shufër Cosserat e zgjidhur drejtpërdrejt (C. Deul, T. Kugelstadt, M. Weiler dhe J. Bender, 2018) me dinamikë të bazuar në pozicione (XPBD: M. Macklin, M. Müller dhe N. Chentanez, 2016).</translation>
     </message>
     <message>
         <source>About Qt</source>
@@ -553,6 +553,22 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Idle</source>
         <translation>Në pushim</translation>
+    </message>
+    <message>
+        <source>Over bridge %1</source>
+        <translation>Mbi urën %1</translation>
+    </message>
+    <message>
+        <source>Under bridge %1</source>
+        <translation>Nën urën %1</translation>
+    </message>
+    <message>
+        <source>Next: over bridge %1</source>
+        <translation>Më pas: mbi urën %1</translation>
+    </message>
+    <message>
+        <source>Next: under bridge %1</source>
+        <translation>Më pas: nën urën %1</translation>
     </message>
     <message>
         <source>KNOT DIAGRAM</source>
@@ -1579,10 +1595,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Lidhëse këpucësh mbi dërrasa në livadh, në diell</translation>
     </message>
     <message>
-        <source>Toy train on a track shaped like the knot</source>
-        <translation>Tren lodër mbi shina në formën e nyjës</translation>
-    </message>
-    <message>
         <source>Stop the train</source>
         <translation>Ndale trenin</translation>
     </message>
@@ -2386,10 +2398,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Nyja është një lak i mbyllur</translation>
     </message>
     <message>
-        <source>The train goes round and round and never reaches an end. Every bridge is a crossing, and the train passes it twice: once over and once under. Bridges on this track: %1.</source>
-        <translation>Treni shkon rreth e rrotull dhe nuk arrin kurrë në një fund. Çdo urë është një kryqëzim, dhe treni e kalon dy herë: një herë sipër dhe një herë poshtë. Ura në këto shina: %1.</translation>
-    </message>
-    <message>
         <source>Cancelled. Turn on Photo to build the track again.</source>
         <translation>U anulua. Ndizni Foto për t&apos;i ndërtuar shinat përsëri.</translation>
     </message>
@@ -2575,6 +2583,18 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Ruaj nyjën</translation>
     </message>
     <message>
+        <source>Cinema</source>
+        <translation>Kinema</translation>
+    </message>
+    <message>
+        <source>The camera follows the train by itself, in film shots. Click the view, turn the mouse wheel or press this again to stop.</source>
+        <translation>Kamera e ndjek trenin vetë, me pamje si në film. Rrotulloni Scroll-in, klikoni në pamje ose shtypni përsëri këtë buton për ta ndalur.</translation>
+    </message>
+    <message>
+        <source>Sound</source>
+        <translation>Zëri</translation>
+    </message>
+    <message>
         <source>The toy train needs one closed loop, and this knot is made of several strands.</source>
         <translation>Treni lodër ka nevojë për një lak të vetëm të mbyllur, ndërsa kjo nyjë përbëhet nga disa fije.</translation>
     </message>
@@ -2585,6 +2605,18 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>This knot has too many crossings for the toy train: its track would hide the train. The toy train takes knots of up to %1 crossings.</source>
         <translation>Kjo nyjë ka shumë kryqëzime për trenin lodër: shinat e saj do ta fshihnin trenin. Treni lodër merr nyje me deri në %1 kryqëzime.</translation>
+    </message>
+    <message>
+        <source>The train never reaches an end. Every bridge is a crossing, passed twice: once over and once under. This track has %1 bridges, and the row of numbers is the knot&apos;s Gauss code, the way knot theory writes a knot down. %2</source>
+        <translation>Treni nuk arrin kurrë në një fund. Çdo urë është një kryqëzim dhe kalohet dy herë: një herë sipër dhe një herë poshtë. Këto shina kanë %1 ura, ndërsa rreshti i numrave është kodi i Gaussit i nyjës, mënyra si teoria e nyjeve e shkruan një nyjë. %2</translation>
+    </message>
+    <message>
+        <source>Over and under take turns all the way round, so this drawing is alternating.</source>
+        <translation>Sipër dhe poshtë ndërrohen gjatë gjithë rrugës, prandaj ky vizatim është i alternuar.</translation>
+    </message>
+    <message>
+        <source>Somewhere the train goes over twice in a row, so this drawing is not alternating.</source>
+        <translation>Diku treni kalon sipër dy herë radhazi, prandaj ky vizatim nuk është i alternuar.</translation>
     </message>
     <message>
         <source>AKSIOMA knot file (*.aknot)</source>
@@ -2865,6 +2897,18 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Grab the rope</source>
         <translation>Kap litarin</translation>
+    </message>
+    <message>
+        <source>Toy train on a track shaped like the knot, at dusk</source>
+        <translation>Tren lodër mbi shina në formën e nyjës, në muzg</translation>
+    </message>
+    <message>
+        <source>Toy train on a track shaped like the knot, by day</source>
+        <translation>Tren lodër mbi shina në formën e nyjës, ditën</translation>
+    </message>
+    <message>
+        <source>The sound of the train, made by the program as it runs: steam, wheels, the whistle, and crickets at dusk.</source>
+        <translation>Zëri i trenit, i krijuar nga programi gjatë lëvizjes: avulli, rrotat, bilbili dhe bulkthat në muzg.</translation>
     </message>
     <message>
         <source>Fewer options</source>

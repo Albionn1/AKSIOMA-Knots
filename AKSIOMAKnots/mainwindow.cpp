@@ -1,3 +1,4 @@
+#include "trainsound.h"
 #include "mainwindow.h"
 
 #include "aboutdialog.h"
@@ -662,8 +663,12 @@ MainWindow::MainWindow(
         static_cast<int>(Photo::Scene::BallroomFloor));
 
     photoSceneCombo_->addItem(
-        tr("Toy train on a track shaped like the knot"),
+        tr("Toy train on a track shaped like the knot, at dusk"),
         static_cast<int>(Photo::Scene::TrainTrack));
+
+    photoSceneCombo_->addItem(
+        tr("Toy train on a track shaped like the knot, by day"),
+        static_cast<int>(Photo::Scene::TrainDay));
 
     photoSceneCombo_->setToolTip(tr("Where the knot is photographed."));
     photoSceneCombo_->setAccessibleName(tr("Where the knot is photographed."));
@@ -732,7 +737,65 @@ MainWindow::MainWindow(
             glWidget_->setTrainRunning(!stopped);
         });
 
+    cinemaButton_ = new QPushButton(tr("Cinema"), viewBar);
+
+    cinemaButton_->setObjectName(QStringLiteral("BrushButton"));
+    cinemaButton_->setCheckable(true);
+    cinemaButton_->setToolTip(tr("The camera follows the train by itself, in film shots. Click the view, turn the mouse wheel or press this again to stop."));
+    cinemaButton_->setVisible(false);
+
+    connect(
+        cinemaButton_,
+        &QPushButton::toggled,
+        this,
+        [this](bool on)
+        {
+            glWidget_->setCinema(on);
+
+            // back to the view of the whole knot
+            if (!on)
+                resetCamera();
+        });
+
+    connect(
+        glWidget_,
+        &KnotGLWidget::cinemaChanged,
+        this,
+        [this](bool on)
+        {
+            const QSignalBlocker blocker(cinemaButton_);
+
+            cinemaButton_->setChecked(on);
+        });
+
+    soundButton_ = new QPushButton(tr("Sound"), viewBar);
+
+    soundButton_->setObjectName(QStringLiteral("BrushButton"));
+    soundButton_->setCheckable(true);
+    soundButton_->setChecked(AppSettings::trainSound());
+    soundButton_->setToolTip(tr("The sound of the train, made by the program as it runs: steam, wheels, the whistle, and crickets at dusk."));
+    soundButton_->setVisible(false);
+
+    connect(
+        soundButton_,
+        &QPushButton::toggled,
+        this,
+        [this](bool on)
+        {
+            AppSettings::setTrainSound(on);
+
+            updateTrainSound();
+        });
+
+    soundTimer_ = new QTimer(this);
+
+    soundTimer_->setInterval(80);
+
+    connect(soundTimer_, &QTimer::timeout, this, &MainWindow::updateTrainSound);
+
     viewBarLayout->addWidget(navigationHint, 1);
+    viewBarLayout->addWidget(soundButton_);
+    viewBarLayout->addWidget(cinemaButton_);
     viewBarLayout->addWidget(trainButton_);
     viewBarLayout->addWidget(photoSceneCombo_);
     viewBarLayout->addWidget(photoButton_);
@@ -6059,16 +6122,56 @@ void MainWindow::updateTrainChoice()
     showNotice(refusal, Notice::Info);
 }
 
-void MainWindow::showTrainCaption(int bridges)
+void MainWindow::updateTrainSound()
+{
+    const bool wanted =
+        soundButton_->isChecked() && !soundButton_->isHidden() && !isMinimized();
+
+    if (!wanted)
+    {
+        soundTimer_->stop();
+
+        delete trainSound_;
+
+        trainSound_ = nullptr;
+
+        return;
+    }
+
+    if (trainSound_ == nullptr)
+    {
+        trainSound_ = new TrainSound(this);
+
+        soundTimer_->start();
+    }
+
+    double speed = 0.0;
+    float gain = 0.0f;
+    float pan = 0.0f;
+
+    glWidget_->trainSoundScene(&speed, &gain, &pan);
+
+    const auto scene = static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
+
+    trainSound_->setScene(speed, Photo::sceneInfo(scene).evening, gain, pan);
+}
+
+void MainWindow::showTrainCaption(int bridges, bool alternating)
 {
     trainCaption_ = true;
 
     glWidget_->setCaption(
         tr("A knot is one closed loop"),
-        tr("The train goes round and round and never reaches an end. Every "
-           "bridge is a crossing, and the train passes it twice: once over and "
-           "once under. Bridges on this track: %1.")
-            .arg(bridges));
+        tr("The train never reaches an end. Every bridge is a crossing, passed "
+           "twice: once over and once under. This track has %1 bridges, and the "
+           "row of numbers is the knot's Gauss code, the way knot theory writes "
+           "a knot down. %2")
+            .arg(bridges)
+            .arg(alternating
+                     ? tr("Over and under take turns all the way round, so this "
+                          "drawing is alternating.")
+                     : tr("Somewhere the train goes over twice in a row, so this "
+                          "drawing is not alternating.")));
 }
 
 void MainWindow::hideTrainCaption()
@@ -6232,6 +6335,7 @@ bool MainWindow::showRestingRope(double radius)
 
         glWidget_->setCrossings(restingTrack_->bridges);
         glWidget_->setTrainPath(restingTrack_->path, restingTrack_->length);
+        glWidget_->setTrainJourney(restingTrack_->journey);
         glWidget_->setRestingRope(restingTrack_->mesh, restingRope_.pose);
         glWidget_->setMeshColor(meshColor_);
 
@@ -6241,7 +6345,7 @@ bool MainWindow::showRestingRope(double radius)
             showCrossingNumbersCheck_ != nullptr &&
             showCrossingNumbersCheck_->isChecked());
 
-        showTrainCaption(restingTrack_->bridges.size());
+        showTrainCaption(restingTrack_->bridges.size(), restingTrack_->alternating);
 
         updateGrabCurve();
 
@@ -6530,6 +6634,13 @@ void MainWindow::applyPhotoMode()
         const bool train = on && Photo::sceneInfo(chosen).train;
 
         trainButton_->setVisible(train);
+        cinemaButton_->setVisible(train);
+        soundButton_->setVisible(train);
+
+        if (!train)
+            glWidget_->setCinema(false);
+
+        updateTrainSound();
 
         if (!train)
             glWidget_->setTrainPath({}, 0.0);
@@ -6607,6 +6718,10 @@ void MainWindow::applyPhotoMode()
 
         photoSceneCombo_->setVisible(false);
         trainButton_->setVisible(false);
+        cinemaButton_->setVisible(false);
+        soundButton_->setVisible(false);
+
+        updateTrainSound();
 
         showNotice(
             tr("The photographed place could not be loaded. Installing "

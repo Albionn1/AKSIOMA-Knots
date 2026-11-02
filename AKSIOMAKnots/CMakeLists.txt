@@ -13,7 +13,7 @@ set(CMAKE_AUTOUIC ON)
 # Qt 6 with the OpenGL widget module. GuiPrivate is only used for one Windows
 # setting in main.cpp (pop-ups in full screen), so its warning is turned off.
 set(QT_NO_PRIVATE_MODULE_WARNING ON)
-find_package(Qt6 REQUIRED COMPONENTS Gui GuiPrivate Widgets OpenGL OpenGLWidgets Svg LinguistTools)
+find_package(Qt6 REQUIRED COMPONENTS Gui GuiPrivate Widgets OpenGL OpenGLWidgets Svg Multimedia LinguistTools)
 
 qt_standard_project_setup()
 
@@ -56,6 +56,10 @@ qt_add_executable(AKSIOMAKnots
     ropephysics.cpp
     traintrack.h
     traintrack.cpp
+    trainsynth.h
+    trainsynth.cpp
+    trainsound.h
+    trainsound.cpp
     timelineslider.h
     timelineslider.cpp
     knottable.h
@@ -98,8 +102,8 @@ qt_add_resources(AKSIOMAKnots "knottable"
     FILES data/knottable.dat
 )
 
-# Photo mode: two sunlit rooms (unclipped 4k HDRIs) and two wood surfaces
-# from Poly Haven, CC0 (data/photo/CREDITS.txt). About 75 MB, linked in as
+# Photo mode: three places (unclipped 4k HDRIs) and two wood surfaces
+# from Poly Haven, CC0 (data/photo/CREDITS.txt). About 100 MB, linked in as
 # binary data too.
 qt_add_resources(AKSIOMAKnots "photo"
     PREFIX "/"
@@ -107,6 +111,7 @@ qt_add_resources(AKSIOMAKnots "photo"
     FILES
         data/photo/chinese_garden_4k.hdr
         data/photo/meadow_2_4k.hdr
+        data/photo/evening_museum_courtyard_4k.hdr
         data/photo/wood_table_large_diff.jpg
         data/photo/wood_table_large_nor_gl.jpg
         data/photo/wood_table_large_rough.jpg
@@ -126,6 +131,8 @@ target_link_libraries(AKSIOMAKnots PRIVATE
     Qt6::OpenGLWidgets
     # SVG export of knot diagrams
     Qt6::Svg
+    # the toy train's sound
+    Qt6::Multimedia
 )
 
 if(MSVC)
@@ -138,7 +145,7 @@ else()
     # it is in the hand, so these are optimised in Debug builds too (about
     # ten times faster). The same for spreading a drawing apart and for
     # relaxing a Seifert surface into its film.
-    set_source_files_properties(knotrelax.cpp ropephysics.cpp knotmath.cpp knotglwidget.cpp knotdiagram.cpp knotfilm.cpp traintrack.cpp PROPERTIES
+    set_source_files_properties(knotrelax.cpp ropephysics.cpp knotmath.cpp knotglwidget.cpp knotdiagram.cpp knotfilm.cpp traintrack.cpp trainsynth.cpp PROPERTIES
         COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
 endif()
 

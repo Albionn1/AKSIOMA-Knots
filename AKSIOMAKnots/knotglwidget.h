@@ -4,6 +4,7 @@
 #include "knotmath.h"
 #include "lighting.h"
 #include "photoscene.h"
+#include "traintrack.h"
 
 #include <QOpenGLTimerQuery>
 
@@ -206,9 +207,28 @@ public:
     // millimetres, and its length; empty: no train), whether it is running,
     // and how far along the track the locomotive is (millimetres).
     void setTrainPath(const QVector<KnotMath::Vec3> &path, double length);
+
+    // the bridges in the order the train meets them, shown as it goes
+    void setTrainJourney(const QVector<Photo::TrainTrack::Pass> &journey);
+
+    // what the train's sound needs to know: its speed (mm/s, 0: standing),
+    // how loud from where the camera is, where it is across the picture
+    void trainSoundScene(double *speed, float *gain, float *pan) const;
+
+    // Cinema: the camera follows the train by itself, in shots cut one after
+    // the other, between the black bars of a wide film. The mouse takes the
+    // camera back.
+    void setCinema(bool on);
+    void playCinema(float seconds);
+    bool cinema() const;
+
     void setTrainRunning(bool running);
     bool trainRunning() const;
     void setTrainAlong(double millimetres);
+
+    // steam as if the train had been running this long, then held still
+    // (for a still picture)
+    void runSteam(float seconds);
     double trainAlong() const;
 
     void setAutoRotation(bool enabled);
@@ -293,6 +313,8 @@ public:
     QSize sizeHint() const override;
 
 signals:
+    void cinemaChanged(bool on);
+
     void cameraChanged(double yaw, double pitch, double distance);
 
     void ropeGrabbed(const QVector3D &point);
@@ -457,6 +479,7 @@ private:
     void drawFlashes(QPainter &painter);
     void drawDiagramInset(QPainter &painter);
     void drawCaption(QPainter &painter);
+    void drawJourney(QPainter &painter);
 
     void countFrame();
     void drawFrameRate(QPainter &painter);
@@ -545,6 +568,20 @@ private:
     void drawTrainVehicles(QOpenGLShaderProgram &program, const char *matrix, const QMatrix4x4 &viewProjection);
 
     void drawTrain(const QMatrix4x4 &viewProjection);
+
+    void aimCamera(const QVector3D &eye, const QVector3D &target);
+    void directCinema(float seconds);
+
+    // dusk, when the train's lamps are lit
+    bool nightShown() const;
+
+    // the lights of this frame, in the view's units
+    void updateLamps();
+
+    // the puffs rise and spread; while `blowing`, the funnel adds new ones
+    void stepSteam(float seconds, bool blowing);
+
+    void drawSteam(const QMatrix4x4 &viewProjection, const QMatrix4x4 &view);
 
     // height of the floor in Photo mode: right under the knot
     float photoFloorLevel() const;
@@ -921,7 +958,38 @@ private:
     double trainAlong_ = 0.0;
     bool trainRunning_ = true;
     QElapsedTimer trainClock_;
-    QMatrix4x4 trainPlace_[3];
+    QVector<Photo::TrainPiece> trainPieces_;
+
+    // the steam: where each puff is (mm), how old, and which way it drifts
+    struct SteamPuff
+    {
+        QVector3D place;
+        QVector3D drift;
+        float age = 0.0f;
+        float seed = 0.0f;
+    };
+
+    QVector<Photo::TrainTrack::Pass> trainJourney_;
+    int journeyBridge_ = 0;
+
+    bool cinema_ = false;
+    float cinemaTime_ = 0.0f;
+    int cinemaShot_ = -1;
+    QVector3D cinemaSpot_;
+    QVector3D cinemaSide_;
+
+    QVector<QVector3D> lampPlaces_;
+    QVector<QVector3D> lampColors_;
+    float lampReach_ = 1.0f;
+    QVector3D headPlace_;
+    QVector3D headWay_;
+
+    std::unique_ptr<QOpenGLShaderProgram> steamProgram_;
+    QVector<SteamPuff> steam_;
+    QElapsedTimer steamClock_;
+    float steamWait_ = 0.0f;
+    float steamSeed_ = 0.0f;
+    bool steamFrozen_ = false;
 };
 
 #endif // KNOTGLWIDGET_H

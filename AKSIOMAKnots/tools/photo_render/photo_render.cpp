@@ -127,6 +127,8 @@ int main(int argc, char **argv)
 
         view.setTrainRunning(false);
 
+        view.runSteam(3.0f);
+
         clock.restart();
 
         constexpr int Frames = 300;
@@ -354,13 +356,27 @@ int main(int argc, char **argv)
         if (train)
         {
             view.setTrainPath(track.path, track.length);
+            view.setTrainJourney(track.journey);
             view.setTrainRunning(false);
             view.setTrainAlong(qEnvironmentVariable("PHOTO_TRAIN", "0.1").toDouble() * track.length);
+            view.runSteam(3.0f);
         }
 
         view.setRestingRope(mesh, rope.pose);
         view.fitNewKnot(45.0f);
         view.resetCamera(45.0f, false);
+
+        // PHOTO_SHOT=n [t]: a shot of Cinema mode, t of the way through it
+        if (train && qEnvironmentVariableIsSet("PHOTO_SHOT"))
+        {
+            view.grabFramebuffer();
+
+            view.setCinema(true);
+
+            const QStringList shot = qEnvironmentVariable("PHOTO_SHOT").split(' ');
+
+            view.playCinema((shot.value(0).toFloat() + shot.value(1, "0.5").toFloat()) * 9.0f);
+        }
 
         if (qEnvironmentVariableIsSet("PHOTO_CAM"))
         {

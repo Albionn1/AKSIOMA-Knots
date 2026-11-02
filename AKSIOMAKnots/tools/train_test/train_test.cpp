@@ -10,6 +10,7 @@
 #include "knotdiagram.h"
 #include "knotmath.h"
 #include "knottable.h"
+#include "trainsynth.h"
 #include "traintrack.h"
 
 #include <QCoreApplication>
@@ -147,7 +148,31 @@ void build(const QString &name, const QVector<Vec3> &curve, int crossings, const
 
     const bool bridges = track.bridges.size() >= crossings;
 
-    const bool ok = same && fits && bridges;
+    // every bridge on the journey exactly twice, once over and once under
+    QVector<int> overs(track.bridges.size() + 1, 0);
+    QVector<int> unders(track.bridges.size() + 1, 0);
+
+    bool journey = track.journey.size() == 2 * track.bridges.size();
+
+    for (const Photo::TrainTrack::Pass &pass : track.journey)
+    {
+        if (pass.bridge < 1 || pass.bridge > track.bridges.size())
+        {
+            journey = false;
+
+            continue;
+        }
+
+        ++(pass.over ? overs : unders)[pass.bridge];
+    }
+
+    for (int k = 1; k <= track.bridges.size(); ++k)
+        journey = journey && overs.at(k) == 1 && unders.at(k) == 1;
+
+    if (!journey)
+        std::printf("%-8s the journey does not pass every bridge once each way\n", qPrintable(name));
+
+    const bool ok = same && fits && bridges && journey;
 
     if (!ok)
         ++failures;
@@ -260,6 +285,135 @@ int main(int argc, char **argv)
               argc >= 4 ? QString(argv[3]) : QString());
 
         return failures == 0 ? 0 : 1;
+    }
+
+    /*
+     * train_test sound [file.wav]: nobody can listen in a test, so the sound
+     * is measured. By day and by night, running and standing: no sample out
+     * of range or not a number, the steam in time with the wheels, a knock at
+     * every joint, the whistle, crickets only at night.
+     */
+    if (argc >= 2 && QString(argv[1]) == QStringLiteral("sound"))
+    {
+        auto energy = [](TrainSynth &synth, double seconds, float *peak, QVector<float> *keep)
+        {
+            const int frames = static_cast<int>(seconds * TrainSynth::SampleRate);
+
+            QVector<float> samples(2 * frames);
+
+            synth.render(samples.data(), frames);
+
+            double sum = 0.0;
+
+            for (const float x : samples)
+            {
+                if (std::isnan(x) || std::abs(x) > 1.0f)
+                    *peak = 99.0f;
+
+                *peak = std::max(*peak, std::abs(x));
+
+                sum += double(x) * x;
+            }
+
+            if (keep != nullptr)
+                *keep += samples;
+
+            return std::sqrt(sum / samples.size());
+        };
+
+        constexpr double Speed = 220.0;
+        constexpr double Seconds = 30.0;
+
+        float peak = 0.0f;
+        QVector<float> kept;
+
+        TrainSynth night;
+
+        night.setScene(Speed, true, 1.0f, 0.3f);
+
+        const double loud = energy(night, Seconds, &peak, &kept);
+
+        const double chuffsWanted = Speed * Seconds / (2.0 * 3.14159265 * 8.0) * 2.0;
+        const double knocksWanted = Speed * Seconds / 144.0 * 2.0;
+
+        std::printf("running at night: rms %.3f, peak %.3f, %d steam bursts (about %.0f), %d knocks (about %.0f), %d whistles\n",
+                    loud, peak, night.chuffs(), chuffsWanted, night.knocks(), knocksWanted, night.whistles());
+
+        night.setScene(0.0, true, 1.0f, 0.0f);
+
+        float ignored = 0.0f;
+
+        energy(night, 3.0, &ignored, nullptr);
+
+        const int chuffsBefore = night.chuffs();
+
+        const double standing = energy(night, 5.0, &peak, nullptr);
+
+        std::printf("standing at night: rms %.4f, %d steam bursts (none)\n", standing, night.chuffs() - chuffsBefore);
+
+        TrainSynth day;
+
+        day.setScene(0.0, false, 1.0f, 0.0f);
+
+        energy(day, 3.0, &ignored, nullptr);
+
+        const double quiet = energy(day, 5.0, &peak, nullptr);
+
+        std::printf("standing by day: rms %.5f (silence)\n", quiet);
+
+        TrainSynth off;
+
+        off.setScene(Speed, true, 0.0f, 0.0f);
+
+        const double muted = energy(off, 5.0, &peak, nullptr);
+
+        std::printf("no gain: rms %.6f (silence)\n", muted);
+
+        const bool ok =
+            peak <= 1.0f && loud > 0.02 && std::abs(night.chuffs() - chuffsBefore) == 0 &&
+            std::abs(chuffsBefore - chuffsWanted) < 4.0 && std::abs(night.knocks() - knocksWanted) < 4.0 &&
+            night.whistles() >= 1 && standing > 0.0005 && quiet < 0.0005 && muted < 0.00001;
+
+        if (argc >= 3)
+        {
+            QFile wav(QString::fromLocal8Bit(argv[2]));
+
+            if (wav.open(QIODevice::WriteOnly))
+            {
+                const quint32 bytes = static_cast<quint32>(kept.size() * 2);
+
+                QByteArray head;
+
+                auto put32 = [&head](quint32 v) { head.append(reinterpret_cast<const char *>(&v), 4); };
+                auto put16 = [&head](quint16 v) { head.append(reinterpret_cast<const char *>(&v), 2); };
+
+                head += "RIFF";
+                put32(36 + bytes);
+                head += "WAVEfmt ";
+                put32(16);
+                put16(1);
+                put16(2);
+                put32(TrainSynth::SampleRate);
+                put32(TrainSynth::SampleRate * 4);
+                put16(4);
+                put16(16);
+                head += "data";
+                put32(bytes);
+
+                wav.write(head);
+
+                for (const float x : kept)
+                {
+                    const qint16 v = static_cast<qint16>(x * 32767.0f);
+
+                    wav.write(reinterpret_cast<const char *>(&v), 2);
+                }
+            }
+        }
+
+        std::printf("%s\n", ok ? "sound ok" : "SOUND FAILED");
+
+        return ok ? 0 : 1;
     }
 
     /*

@@ -48,6 +48,8 @@ class TimelineSlider;
 class UnknotSummaryDialog;
 class QSplitter;
 
+class TrainSound;
+
 class MainWindow final
     : public QMainWindow
 {
@@ -170,7 +172,7 @@ private slots:
     void updateTrainChoice();
 
     // what the track shows, written on the picture, and taken off again
-    void showTrainCaption(int bridges);
+    void showTrainCaption(int bridges, bool alternating);
     void hideTrainCaption();
 
     void updateLearnSection();
@@ -835,6 +837,22 @@ private:
     // the Toy train scene: the train stopped and started
     QPushButton *trainButton_ =
         nullptr;
+
+    QPushButton *cinemaButton_ =
+        nullptr;
+
+    // the train's sound: there while it is wanted, told what happens a few
+    // times a second
+    QPushButton *soundButton_ =
+        nullptr;
+
+    TrainSound *trainSound_ =
+        nullptr;
+
+    QTimer *soundTimer_ =
+        nullptr;
+
+    void updateTrainSound();
 
     // the scene shown now: where the list goes back to when the toy train
     // cannot run on this knot
