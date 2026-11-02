@@ -20,11 +20,11 @@ constexpr double Pi = 3.14159265358979;
 
 // the steepest a ramp may get (a smooth ramp is steepest in its middle,
 // half as steep again as its mean) and how long that makes it
-constexpr double SteepestSlope = 0.33;
+constexpr double SteepestSlope = 0.15;
 const double RampLength = 1.5 * (BridgeLevelMm - GroundLevelMm) / SteepestSlope;
 
 // the tightest bend of the track's middle line
-constexpr double TightestBendMm = 95.0;
+constexpr double TightestBendMm = 110.0;
 
 // No track goes on for longer than this: a layout that needs more is spoilt
 // by one tight place, and another layout will do better. If none does, a long
@@ -33,15 +33,16 @@ constexpr double LongestTrackMm = 60000.0;
 constexpr double LongestLastResortMm = 200000.0;
 
 // two pieces of track side by side, middle to middle
-constexpr double SideBySideMm = TrackWidthMm + 12.0;
+constexpr double SideBySideMm = BedWidthMm + 10.0;
 
 // points of the track
 constexpr double PointSpacingMm = 6.0;
 
-// the blocks under a bridge: the two kinds of wood-and-paint toy block
-constexpr double BlockAlongMm = 26.0;
-constexpr double BlockAcrossMm = 48.0;
-constexpr double BlockHeightMm = 22.0;
+// a stone pier under a bridge
+constexpr double BlockAlongMm = 24.0;
+constexpr double BlockAcrossMm = 56.0;
+
+Vec3 pathAt(const QVector<Vec3> &path, double length, double along);
 
 struct PassOnTrack
 {
@@ -112,7 +113,7 @@ Plan makePlan(const KnotMath::KnotDiagram &diagram)
          * one's track, whichever way they meet.
          */
         const double hold =
-            (0.5 * TrackWidthMm + 4.0 + 0.5 * TrackWidthMm * dot) / std::max(cross, 0.25) + 10.0;
+            (0.5 * BedWidthMm + 4.0 + 0.5 * BedWidthMm * dot) / std::max(cross, 0.25) + 10.0;
 
         PassOnTrack pass;
 
@@ -585,87 +586,96 @@ void addBlock(
     }
 }
 
-// The across-the-track outline of the track: one face after another, each
-// with the normals of its two ends. The edges are rounded over, as they are
-// on a toy made for hands: that is where the light gathers. `part`: 0 the top
-// and the round edges, 0.1 the floor of a groove, 0.2 a groove's wall, 0.3 the
-// sides, 0.4 the underside.
+/*
+ * The railway seen across the track, one thing at a time. A face is a stretch
+ * of the outline with a normal of its own; `part` tells the shader what it is:
+ * 0 the ballast's top, 0.1 its sloping side, 0.2 a sleeper, 0.3 the top of a
+ * rail, 0.35 a rail's side, 0.4 what lies underneath, 0.5 the steel of a
+ * bridge.
+ */
 struct Face
 {
-    double x0, y0, nx0, ny0;
-    double x1, y1, nx1, ny1;
+    double x0, y0, x1, y1;
     float open;
     float part;
 };
 
-QVector<Face> trackProfile()
+/*
+ * The bed under the rails. On the ground and on the low part of a ramp it is
+ * a bank of ballast, its foot on the floor (`rise`: how far above the floor
+ * the sleepers are; the foot spreads with it). Higher up it is the deck of a
+ * bridge: a steel trough of ballast between two plate girders. Both have the
+ * same number of faces, so that one runs into the other.
+ */
+QVector<Face> bedProfile(bool bank, double rise)
 {
-    const double w = 0.5 * TrackWidthMm;
-    const double t = TrackThicknessMm;
-
-    constexpr double Edge = 2.6;
-    constexpr double Lip = 0.9;
-    constexpr double Corner = 0.8;
-    constexpr double Groove = 3.2;
-    constexpr double GrooveWide = 3.0;
-    constexpr double GrooveAt = 10.0;
-
-    constexpr float Inside = 0.62f;
-    constexpr float Walls = 0.7f;
-
-    const double in = GrooveAt - GrooveWide;
-    const double out = GrooveAt + GrooveWide;
+    constexpr double Crest = 21.0;
+    constexpr double Top = -3.8;
 
     QVector<Face> right;
 
-    auto flat = [&right](double x0, double y0, double x1, double y1, double nx, double ny, float open, float part)
+    if (bank)
     {
-        right.push_back({x0, y0, nx, ny, x1, y1, nx, ny, open, part});
-    };
+        const double foot = 0.5 * BedWidthMm + 0.32 * rise;
 
-    // a quarter round: from angle a to b about (cx, cy), `sign` 1 where the
-    // surface looks away from the centre, -1 where it looks towards it
-    auto round = [&right](double cx, double cy, double r, double a, double b, int steps, double sign, float open, float part)
+        // (the foot's height is set to the floor when the ring is placed)
+        right.push_back({foot, -rise, 0.5 * BedWidthMm - 2.0, Top - 0.8, 0.7f, 0.1f});
+        right.push_back({0.5 * BedWidthMm - 2.0, Top - 0.8, Crest + 2.0, Top - 0.3, 0.9f, 0.1f});
+        right.push_back({Crest + 2.0, Top - 0.3, Crest, Top, 0.95f, 0.1f});
+    }
+    else
     {
-        for (int k = 0; k < steps; ++k)
-        {
-            const double p = a + (b - a) * k / steps;
-            const double q = a + (b - a) * (k + 1) / steps;
+        const double wall = Crest + 3.0;
 
-            right.push_back({cx + r * std::cos(p), cy + r * std::sin(p), sign * std::cos(p), sign * std::sin(p),
-                             cx + r * std::cos(q), cy + r * std::sin(q), sign * std::cos(q), sign * std::sin(q), open, part});
-        }
-    };
-
-    const double half = 0.5 * Pi;
-
-    // from the bottom of the right side, up and in to the middle
-    flat(w, -t, w, -Edge, 1.0, 0.0, 0.85f, 0.3f);
-    round(w - Edge, -Edge, Edge, 0.0, half, 4, 1.0, 1.0f, 0.0f);
-    flat(w - Edge, 0.0, out + Lip, 0.0, 0.0, 1.0, 1.0f, 0.0f);
-    round(out + Lip, -Lip, Lip, half, 2.0 * half, 2, 1.0, 0.9f, 0.0f);
-    flat(out, -Lip, out, -Groove + Corner, -1.0, 0.0, Walls, 0.2f);
-    round(out - Corner, -Groove + Corner, Corner, 0.0, -half, 2, -1.0, Inside, 0.1f);
-    flat(out - Corner, -Groove, in + Corner, -Groove, 0.0, 1.0, Inside, 0.1f);
-    round(in + Corner, -Groove + Corner, Corner, -half, -2.0 * half, 2, -1.0, Inside, 0.1f);
-    flat(in, -Groove + Corner, in, -Lip, 1.0, 0.0, Walls, 0.2f);
-    round(in - Lip, -Lip, Lip, 0.0, half, 2, 1.0, 0.9f, 0.0f);
+        right.push_back({wall, -DeckDepthMm, wall, -1.2, 0.85f, 0.5f});
+        right.push_back({wall, -1.2, Crest + 1.0, -1.2, 1.0f, 0.5f});
+        right.push_back({Crest + 1.0, -1.2, Crest, Top, 0.6f, 0.5f});
+    }
 
     QVector<Face> faces;
 
-    faces.push_back({-w, -t, 0.0, -1.0, w, -t, 0.0, -1.0, 0.25f, 0.4f});
+    const double under = bank ? rise : DeckDepthMm;
+    const double wide = right.first().x0;
+
+    faces.push_back({-wide, -under, wide, -under, 0.25f, 0.4f});
 
     faces += right;
 
-    faces.push_back({in - Lip, 0.0, 0.0, 1.0, -(in - Lip), 0.0, 0.0, 1.0, 1.0f, 0.0f});
+    faces.push_back({Crest, Top, -Crest, Top, 1.0f, 0.0f});
 
-    // the left half, the other way round
     for (int k = right.size() - 1; k >= 0; --k)
     {
         const Face &f = right.at(k);
 
-        faces.push_back({-f.x1, f.y1, -f.nx1, f.ny1, -f.x0, f.y0, -f.nx0, f.ny0, f.open, f.part});
+        faces.push_back({-f.x1, f.y1, -f.x0, f.y0, f.open, f.part});
     }
+
+    return faces;
+}
+
+// one rail, as a section of real rail: foot, thin web, head
+QVector<Face> railProfile(double x)
+{
+    const double h = 1.05;
+    const double w = 0.45;
+    const double f = 1.9;
+
+    const double top = 0.0;
+    const double under = -1.05;
+    const double foot = -3.0;
+
+    const QVector<QPair<double, double>> right = {
+        {f, foot - 0.3}, {f, foot}, {w, foot + 0.55}, {w, under - 0.2}, {h, under}, {h, top - 0.15}, {h - 0.15, top}};
+
+    QVector<Face> faces;
+
+    for (int k = 0; k + 1 < right.size(); ++k)
+        faces.push_back({x + right.at(k).first, right.at(k).second, x + right.at(k + 1).first, right.at(k + 1).second, 0.85f, 0.35f});
+
+    faces.push_back({x + h - 0.15, top, x - h + 0.15, top, 1.0f, 0.3f});
+
+    for (int k = right.size() - 2; k >= 0; --k)
+        faces.push_back({x - right.at(k + 1).first, right.at(k + 1).second, x - right.at(k).first, right.at(k).second, 0.85f, 0.35f});
 
     return faces;
 }
@@ -740,8 +750,8 @@ void addPiers(Builder &out, TrainTrack &track, const QVector<Vec3> &path, double
 
     const int neighbours = static_cast<int>(Pi * SideBySideMm / spacing) + 1;
 
-    // half the diagonal of a block, and half the track's width beside it
-    const double keep = 0.5 * std::hypot(BlockAlongMm, BlockAcrossMm) + 0.5 * TrackWidthMm + 3.0;
+    // half the diagonal of a pier, and half the bed's width beside it
+    const double keep = 0.5 * std::hypot(BlockAlongMm, BlockAcrossMm) + 0.5 * BedWidthMm + 3.0;
 
     auto clear = [&](int i)
     {
@@ -759,13 +769,10 @@ void addPiers(Builder &out, TrainTrack &track, const QVector<Vec3> &path, double
         return true;
     };
 
-    const double lowest = GroundLevelMm + 0.7 * BlockHeightMm;
-
-    auto tall = [&](int i) { return path.at(i).y - TrackThicknessMm >= lowest - TrackThicknessMm + 4.0; };
+    // (lower, the track stands on its bank)
+    auto tall = [&](int i) { return path.at(i).y - GroundLevelMm >= BankHeightMm + 2.0; };
 
     QVector<bool> placed(n, false);
-
-    int stack = 0;
 
     auto build = [&](int i)
     {
@@ -774,31 +781,20 @@ void addPiers(Builder &out, TrainTrack &track, const QVector<Vec3> &path, double
         // straight along the ground, whatever the slope above
         const Vec3 flat = Vec3(frame.along.x, 0.0, frame.along.z).normalized();
 
-        const double top = path.at(i).y - TrackThicknessMm + 3.0;
+        const double top = path.at(i).y - DeckDepthMm + 1.0;
 
-        const int blocks = std::max(1, static_cast<int>(top / BlockHeightMm + 0.5));
+        // a plinth, the pier, and a cap for the girders to rest on
+        addBlock(out, Vec3(path.at(i).x, 2.0, path.at(i).z), flat, Vec3(0.0, 1.0, 0.0),
+                 Vec3(0.5 * BlockAlongMm + 2.5, 2.0, 0.5 * BlockAcrossMm + 2.5), 0.5, 0, i);
 
-        const double each = top / blocks;
+        addBlock(out, Vec3(path.at(i).x, 0.5 * top, path.at(i).z), flat, Vec3(0.0, 1.0, 0.0),
+                 Vec3(0.5 * BlockAlongMm, 0.5 * top, 0.5 * BlockAcrossMm), 0.6, 0, i);
 
-        for (int k = 0; k < blocks; ++k)
-        {
-            const Vec3 centre(path.at(i).x, (k + 0.5) * each, path.at(i).z);
+        addBlock(out, Vec3(path.at(i).x, top - 1.2, path.at(i).z), flat, Vec3(0.0, 1.0, 0.0),
+                 Vec3(0.5 * BlockAlongMm + 1.8, 1.4, 0.5 * BlockAcrossMm + 1.8), 0.5, 0, i);
 
-            addBlock(
-                out,
-                centre,
-                flat,
-                Vec3(0.0, 1.0, 0.0),
-                Vec3(0.5 * BlockAlongMm, 0.5 * each - 0.2, 0.5 * BlockAcrossMm),
-                2.6,
-                (stack + k) % 4,
-                i);
-
-            ++track.blocks;
-        }
-
+        ++track.blocks;
         ++track.piers;
-        ++stack;
 
         placed[i] = true;
     };
@@ -898,63 +894,157 @@ void buildMesh(TrainTrack &track)
     const int n = path.size();
     const double spacing = track.length / n;
 
-    const QVector<Face> faces = trackProfile();
     const QVector<float> open = ringOpenness(path, spacing);
 
     Builder out;
 
-    const int faceCount = faces.size();
-
-    // the pieces of track, each with its own wood
+    // the rail joints (the shader marks them), every 144 mm
     constexpr double PieceMm = 144.0;
 
     const int pieces = std::max(1, static_cast<int>(track.length / PieceMm + 0.5));
     const double piece = track.length / pieces;
 
-    for (int i = 0; i < n; ++i)
+    // every ring: bank or bridge, by how high it is
+    auto onBank = [&path](int i) { return path.at(i).y - GroundLevelMm < BankHeightMm; };
+
+    int strips = 0;
+
+    auto addStrip = [&](auto profileOf)
     {
-        const Frame frame = frameAt(path, i);
+        const int first = out.vertexCount();
 
-        const double along = i * spacing;
+        const int faceCount = profileOf(0).size();
 
-        for (const Face &face : faces)
+        for (int i = 0; i < n; ++i)
         {
-            for (int end = 0; end < 2; ++end)
-            {
-                const double x = end == 0 ? face.x0 : face.x1;
-                const double y = end == 0 ? face.y0 : face.y1;
-                const double nx = end == 0 ? face.nx0 : face.nx1;
-                const double ny = end == 0 ? face.ny0 : face.ny1;
+            const Frame frame = frameAt(path, i);
 
-                out.vertex(
-                    path.at(i) + frame.side * x + frame.up * y,
-                    (frame.side * nx + frame.up * ny).normalized(),
-                    float(along),
-                    float(x + y),
-                    float(piece),
-                    face.part,
-                    face.open * open.at(i),
-                    i);
+            const double along = i * spacing;
+
+            for (const Face &face : profileOf(i))
+            {
+                const double dx = face.x1 - face.x0;
+                const double dy = face.y1 - face.y0;
+                const double l = std::max(std::hypot(dx, dy), 1.0e-6);
+
+                const Vec3 normal = (frame.side * (dy / l) + frame.up * (-dx / l)).normalized();
+
+                for (int end = 0; end < 2; ++end)
+                {
+                    const double x = end == 0 ? face.x0 : face.x1;
+                    const double y = end == 0 ? face.y0 : face.y1;
+
+                    Vec3 place = path.at(i) + frame.side * x + frame.up * y;
+
+                    // a bank stands on the floor, whatever the slope above it
+                    if (onBank(i) && y < -path.at(i).y + 0.01)
+                        place.y = 0.0;
+
+                    out.vertex(place, normal, float(along), float(x + 0.5 * y), float(piece), face.part, face.open * open.at(i), i);
+                }
             }
         }
-    }
 
-    for (int i = 0; i < n; ++i)
-    {
-        const int next = (i + 1) % n;
-
-        for (int f = 0; f < faceCount; ++f)
+        for (int i = 0; i < n; ++i)
         {
-            const int a = i * 2 * faceCount + 2 * f;
-            const int b = a + 1;
-            const int c = next * 2 * faceCount + 2 * f + 1;
-            const int d = next * 2 * faceCount + 2 * f;
+            const int next = (i + 1) % n;
 
-            out.quad(a, b, c, d);
+            for (int f = 0; f < faceCount; ++f)
+            {
+                const int a = first + i * 2 * faceCount + 2 * f;
+                const int b = a + 1;
+                const int c = first + next * 2 * faceCount + 2 * f + 1;
+                const int d = first + next * 2 * faceCount + 2 * f;
+
+                out.quad(a, b, c, d);
+            }
+        }
+
+        ++strips;
+    };
+
+    addStrip([&](int i) { return bedProfile(onBank(i), path.at(i).y); });
+    addStrip([](int) { return railProfile(-RailApartMm * 0.5); });
+    addStrip([](int) { return railProfile(RailApartMm * 0.5); });
+
+    // the sleepers, each one a beam of timber lying in the ballast
+    {
+        constexpr double Pitch = 10.5;
+        constexpr double Wide = 5.4;
+        constexpr double Top = -3.0;
+        constexpr double Under = -5.6;
+
+        const double half = 0.5 * TrackWidthMm - 1.0;
+
+        const int count = static_cast<int>(track.length / Pitch);
+
+        for (int s = 0; s < count; ++s)
+        {
+            const double along = track.length * s / count;
+
+            const int i = std::min(static_cast<int>(along / spacing), n - 1);
+
+            const Frame frame = frameAt(path, i);
+
+            const Vec3 middle = pathAt(path, track.length, along);
+
+            // a little out of true, as real ones lie
+            const double skew = 0.09 * std::sin(s * 12.9898);
+
+            const Vec3 across = (frame.side + frame.along * skew).normalized();
+            const Vec3 along2 = frame.along * (0.5 * Wide);
+
+            const Vec3 a = middle - across * half;
+            const Vec3 b = middle + across * half;
+
+            auto corner = [&](const Vec3 &end, double sign, double y) { return end + along2 * sign + frame.up * y; };
+
+            auto face = [&](const Vec3 &p, const Vec3 &q, const Vec3 &r, const Vec3 &t, const Vec3 &normal)
+            {
+                const int base = out.vertexCount();
+
+                const double seed = 3.0 * s;
+
+                out.vertex(p, normal, float(p.x + p.z), float(seed), float(s), 0.2f, 0.9f, i);
+                out.vertex(q, normal, float(q.x + q.z), float(seed + 1.0), float(s), 0.2f, 0.9f, i);
+                out.vertex(r, normal, float(r.x + r.z), float(seed + 1.0), float(s), 0.2f, 0.9f, i);
+                out.vertex(t, normal, float(t.x + t.z), float(seed), float(s), 0.2f, 0.9f, i);
+
+                out.quad(base, base + 1, base + 2, base + 3);
+            };
+
+            face(corner(a, -1.0, Top), corner(b, -1.0, Top), corner(b, 1.0, Top), corner(a, 1.0, Top), frame.up);
+            face(corner(a, 1.0, Under), corner(b, 1.0, Under), corner(b, 1.0, Top), corner(a, 1.0, Top), frame.along);
+            face(corner(a, -1.0, Top), corner(b, -1.0, Top), corner(b, -1.0, Under), corner(a, -1.0, Under), frame.along * -1.0);
+            face(corner(b, -1.0, Under), corner(b, 1.0, Under), corner(b, 1.0, Top), corner(b, -1.0, Top), across);
+            face(corner(a, -1.0, Top), corner(a, 1.0, Top), corner(a, 1.0, Under), corner(a, -1.0, Under), across * -1.0);
         }
     }
 
     addPiers(out, track, path, spacing);
+
+    // stone abutments, where a bank ends and a bridge begins
+    for (int i = 0; i < n; ++i)
+    {
+        if (onBank(i) == onBank((i + 1) % n))
+            continue;
+
+        const Frame frame = frameAt(path, i);
+
+        const Vec3 flat = Vec3(frame.along.x, 0.0, frame.along.z).normalized();
+
+        const double top = path.at(i).y - 4.0;
+
+        addBlock(
+            out,
+            Vec3(path.at(i).x, 0.5 * top, path.at(i).z),
+            flat,
+            Vec3(0.0, 1.0, 0.0),
+            Vec3(11.0, 0.5 * top, 0.5 * BedWidthMm + 4.0),
+            0.8,
+            0,
+            i);
+    }
 
     const float units = float(track.unitsPerMm);
 
@@ -992,7 +1082,7 @@ void buildMesh(TrainTrack &track)
     mesh.strandLength << float(track.length) * units;
     mesh.strandClosed << true;
     mesh.ringCount = n;
-    mesh.ringSegments = 2 * faceCount;
+    mesh.ringSegments = strips;
 
     track.mesh = mesh;
 }
@@ -1485,36 +1575,38 @@ TrainModel makeTrain()
         model.axleX[2] = {20.0, -20.0};
     }
 
-    // two wheels and their axle: rim, spokes, hub. They turn as they roll.
+    // two wheels and their axle: tyre with its flange inside the rail, spokes,
+    // hub. They turn as they roll.
     {
         const int first = b.index.size();
 
+        const double r = TrainModel::WheelRadius;
+
         for (const double z : {-10.0, 10.0})
         {
-            const double outward = z > 0.0 ? 1.0 : -1.0;
+            const double inward = z > 0.0 ? -1.0 : 1.0;
 
-            // the steel tyre and its flange, in the groove
+            // from the flange on the inner side to the outer face
             b.lathe(
-                Vec3(0.0, 0.0, z - 2.3),
-                across,
-                {{0.0, 6.4}, {0.1, 8.0}, {4.5, 8.0}, {4.6, 6.4}},
+                Vec3(0.0, 0.0, z + 2.4 * inward),
+                across * -inward,
+                {{0.0, r - 1.4}, {0.1, r + 1.0}, {0.9, r + 1.0}, {1.2, r}, {4.6, r - 0.15}, {4.8, r - 1.4}},
                 Steel);
 
-            // the red wheel inside it
-            for (int spoke = 0; spoke < 6; ++spoke)
+            for (int spoke = 0; spoke < 8; ++spoke)
             {
-                const double a = spoke * Pi / 3.0;
+                const double a = spoke * Pi / 4.0;
 
-                b.bar(Vec3(0.0, 0.0, z), Vec3(6.6 * std::cos(a), 6.6 * std::sin(a), z), 0.8, Red);
+                b.bar(Vec3(0.0, 0.0, z), Vec3((r - 1.3) * std::cos(a), (r - 1.3) * std::sin(a), z), 0.55, Black);
             }
 
-            b.lathe(Vec3(0.0, 0.0, z - 2.0), across, {{0.0, 6.4}, {0.4, 7.0}, {3.6, 7.0}, {4.0, 6.4}}, Red);
+            b.lathe(Vec3(0.0, 0.0, z - 1.8), across, {{0.0, r - 1.7}, {0.3, r - 1.1}, {3.3, r - 1.1}, {3.6, r - 1.7}}, Black);
 
             // the hub
-            b.lathe(Vec3(0.0, 0.0, z - 1.8 * outward), across.operator*(outward), {{0.0, 0.0}, {0.1, 2.3}, {3.4, 2.3}, {4.0, 1.5}, {4.2, 0.0}}, Brass);
+            b.lathe(Vec3(0.0, 0.0, z + 1.8 * inward), across * -inward, {{0.0, 0.0}, {0.1, 1.8}, {3.4, 1.8}, {4.0, 1.2}, {4.2, 0.0}}, Steel);
         }
 
-        b.bar(Vec3(0.0, 0.0, -9.0), Vec3(0.0, 0.0, 9.0), 1.3, Steel);
+        b.bar(Vec3(0.0, 0.0, -9.0), Vec3(0.0, 0.0, 9.0), 1.1, Steel);
 
         model.wheels = TrainModel::Part{first, static_cast<int>(b.index.size()) - first};
     }

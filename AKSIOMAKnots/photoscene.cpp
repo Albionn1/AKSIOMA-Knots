@@ -780,15 +780,15 @@ SceneInfo sceneInfo(Scene scene)
 
         if (evening)
         {
-            // a museum's courtyard at dusk: a deep blue sky, wide paving, and
-            // the lit windows along one side, low and warm
+            // a museum's courtyard after dark: a deep blue sky, wide paving,
+            // and the lit windows along one side, low and warm
             info.environment = QStringLiteral(":/data/photo/evening_museum_courtyard_4k.hdr");
             info.roomRadiusM = 22.0;
-            info.exposure = 1.6f;
+            info.exposure = 0.8f;
 
             info.evening = true;
             info.sideLightDirection = QVector3D(-0.87f, 0.27f, -0.48f).normalized();
-            info.sideLight = QVector3D(24.0f, 13.5f, 5.8f);
+            info.sideLight = QVector3D(30.0f, 19.0f, 10.5f);
             info.stoneLight = 3.2f;
             info.sideLightWidth = 0.045f;
         }

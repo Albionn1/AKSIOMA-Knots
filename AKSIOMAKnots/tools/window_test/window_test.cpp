@@ -875,6 +875,62 @@ void toyTrain(MainWindow &w)
 
     check(w.glWidget_->cinema() && w.glWidget_->captionTitle_.size() > 0, "Cinema takes the camera");
 
+    // three shots in four hold the whole knot, between the film's bars
+    {
+        KnotGLWidget *view = w.glWidget_;
+
+        const int barShare = std::max(0, (view->height() - static_cast<int>(view->width() / 2.39f)) / 2);
+
+        const double filmEdge = 1.0 - 2.0 * double(barShare) / view->height();
+
+        double furthest = 0.0;
+
+        for (int shot : {0, 1, 3})
+        {
+            for (double t : {0.02, 0.5, 0.97})
+            {
+                view->playCinema((shot + t) * 9.0f);
+
+                run(120);
+
+                const float mm = view->worldPerMm();
+
+                for (const KnotMath::Vec3 &p : view->trainPath_)
+                {
+                    const QVector4D clip =
+                        view->lastViewProjection_ *
+                        QVector4D(QVector3D(float(p.x), float(p.y), float(p.z)) * mm, 1.0f);
+
+                    furthest = std::max(furthest, double(std::abs(clip.x() / clip.w())));
+                    furthest = std::max(furthest, double(std::abs(clip.y() / clip.w())) / filmEdge);
+                }
+            }
+        }
+
+        std::printf("    the knot reaches %.2f of the film's picture\n", furthest);
+
+        check(furthest > 0.45 && furthest < 1.0, "the wide shots hold the whole knot, and fill the picture");
+
+        // the close shot looks at a bridge, not at the train
+        view->playCinema(2.5f * 9.0f);
+
+        run(120);
+
+        const QVector3D spot = view->cinemaSpot_;
+
+        bool onBridge = false;
+
+        for (const auto &pass : view->trainJourney_)
+        {
+            const QMatrix4x4 place = Photo::placeVehicle(view->trainPath_, view->trainLength_, pass.along, 26.0);
+
+            if (pass.over && (place.map(QVector3D()) * view->worldPerMm() - spot).length() < 0.01f)
+                onBridge = true;
+        }
+
+        check(onBridge, "the close shot is of a bridge");
+    }
+
     w.cinemaButton_->setChecked(false);
 
     run(100);

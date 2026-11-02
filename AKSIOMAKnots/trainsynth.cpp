@@ -8,9 +8,9 @@ namespace
 
 constexpr float TwoPi = 6.2831853f;
 
-// the toy's own measures (traintrack.cpp): the wheels' radius, where the
+// the model's own measures (traintrack.cpp): the wheels' radius, where the
 // pieces of track meet, how far apart the axles are
-constexpr double WheelRadiusMm = 8.0;
+constexpr double WheelRadiusMm = 7.0;
 constexpr double PieceMm = 144.0;
 constexpr double AxleSpacingMm = 52.0;
 
@@ -73,7 +73,7 @@ void TrainSynth::render(float *out, int frames)
 
     const float chuffFall = std::exp(-1.0f / (0.034f * Rate));
     const float thumpFall = std::exp(-1.0f / (0.016f * Rate));
-    const float knockFall = std::exp(-1.0f / (0.0085f * Rate));
+    const float knockFall = std::exp(-1.0f / (0.011f * Rate));
 
     for (int f = 0; f < frames; ++f)
     {
@@ -142,8 +142,9 @@ void TrainSynth::render(float *out, int frames)
 
         knockLevel_ *= knockFall;
 
-        knockPhaseA_ += TwoPi * 880.0f / Rate;
-        knockPhaseB_ += TwoPi * 1960.0f / Rate;
+        // (steel on steel: higher and more ringing than wood)
+        knockPhaseA_ += TwoPi * 1420.0f / Rate;
+        knockPhaseB_ += TwoPi * 3170.0f / Rate;
 
         const float knock = knockLevel_ * (0.2f * std::sin(knockPhaseA_) + 0.1f * std::sin(knockPhaseB_) + 0.05f * raw);
 

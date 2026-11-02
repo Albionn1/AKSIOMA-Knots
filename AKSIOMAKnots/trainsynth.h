@@ -4,15 +4,15 @@
 #include <cstdint>
 
 /*
- * The sound of the toy train, made from nothing: no recordings. Everything
+ * The sound of the model train, made from nothing: no recordings. Everything
  * is noise and sine waves shaped as the real thing is:
  *
  *   the steam: bursts of filtered noise, two for every turn of the wheels, so
  *   that they are in time with what is seen;
  *
- *   the track: a short wooden knock where each axle meets a joint;
+ *   the track: a short clack of steel where each axle meets a rail joint;
  *
- *   the wheels: a low rumble that grows with the speed;
+ *   the wheels: a low rumble on the rails that grows with the speed;
  *
  *   the whistle: two pipes a fifth apart, with breath in them, now and then;
  *

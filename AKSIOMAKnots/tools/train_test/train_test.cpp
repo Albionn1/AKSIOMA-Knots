@@ -144,7 +144,7 @@ void build(const QString &name, const QVector<Vec3> &curve, int crossings, const
     }
 
     const bool fits =
-        track.steepest < 0.36 && track.tightestBend >= 92.0 && track.closestStrands >= 50.0;
+        track.steepest < 0.165 && track.tightestBend >= 106.0 && track.closestStrands >= 62.0;
 
     const bool bridges = track.bridges.size() >= crossings;
 
@@ -333,7 +333,7 @@ int main(int argc, char **argv)
 
         const double loud = energy(night, Seconds, &peak, &kept);
 
-        const double chuffsWanted = Speed * Seconds / (2.0 * 3.14159265 * 8.0) * 2.0;
+        const double chuffsWanted = Speed * Seconds / (2.0 * 3.14159265 * 7.0) * 2.0;
         const double knocksWanted = Speed * Seconds / 144.0 * 2.0;
 
         std::printf("running at night: rms %.3f, peak %.3f, %d steam bursts (about %.0f), %d knocks (about %.0f), %d whistles\n",

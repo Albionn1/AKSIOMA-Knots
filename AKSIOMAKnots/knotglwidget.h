@@ -572,6 +572,15 @@ private:
     void aimCamera(const QVector3D &eye, const QVector3D &target);
     void directCinema(float seconds);
 
+    // how far back, and looking at what, the whole track is in the film's
+    // picture; toEye is the way to the camera, of length 1
+    float wholeKnotDistance(const QVector3D &toEye, QVector3D *target) const;
+
+    // the next bridge the train will go over, a little way off yet
+    void chooseCinemaBridge(float shotSeconds);
+
+    double trainSpeed() const;
+
     // dusk, when the train's lamps are lit
     bool nightShown() const;
 
@@ -976,6 +985,7 @@ private:
     float cinemaTime_ = 0.0f;
     int cinemaShot_ = -1;
     QVector3D cinemaSpot_;
+    QVector3D cinemaAhead_;
     QVector3D cinemaSide_;
 
     QVector<QVector3D> lampPlaces_;

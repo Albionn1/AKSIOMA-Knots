@@ -65,6 +65,9 @@ namespace
 
 constexpr float FieldOfView = 45.0f;
 
+// Cinema at night opens the lens a little: the knot is what must be seen
+constexpr float FilmNightLift = 1.5f;
+
 // Photo mode's calm stage (setPhotoStage): the room behind the knot a
 // little darker and softer, its colours kept
 constexpr float CalmStage = 0.7f;
@@ -1355,97 +1358,183 @@ void main()
         s.sheen = vec3(0.0);
     }
 
-    else if (uMaterial == 7 && vTexcoord.w < 0.5)
+    else if (uMaterial == 7 && vTexcoord.w < 0.6)
     {
         /*
-         * The wooden track (Photo::buildTrainTrack): vTexcoord holds the place
-         * along it and across it (mm), how long a piece of track is, and what
-         * part of the outline this is. Each piece is its own length of beech:
-         * pale, with fine straight grain, soft bands of growth wandering down
-         * it and the short dark flecks that are the mark of beech, oiled and
-         * lacquered, and worn smooth where the wheels run.
+         * The railway (Photo::buildTrainTrack): vTexcoord holds the place along
+         * it and across it (mm), and which rail length or sleeper this is;
+         * its last number says what the surface is.
          */
         float along = vTexcoord.x;
         float across = vTexcoord.y;
-        float piece = vTexcoord.z;
         float part = vTexcoord.w;
 
-        float id = floor(along / piece);
-        float local = along - id * piece;
+        float footprint = max(fwidth(across), fwidth(along) * 0.3);
+        float fine = 1.0 - smoothstep(0.45, 1.6, footprint);
 
-        float tone = hash12(vec2(id, 1.7));
-        float seed = hash12(vec2(id, 7.3)) * 40.0;
+        s.coat = 0.0;
 
-        // finer than a pixel, the detail fades into its mean
-        float footprint = max(fwidth(across), fwidth(along) * 0.1);
-        float fine = 1.0 - smoothstep(0.35, 1.4, footprint);
-
-        // the board's grain wanders slowly
-        float wander = 7.0 * noise2(vec2(along * 0.008 + seed, seed)) + 2.2 * noise2(vec2(along * 0.035, across * 0.1 + seed));
-        float place = across + wander;
-
-        float bands = 0.5 + 0.5 * sin(place * 0.62 + 4.0 * noise2(vec2(place * 0.05, seed)));
-        float broad = 0.5 + 0.5 * sin(place * 0.17 + seed);
-
-        float streak = noise2(vec2(along * 0.05 + seed, place * 2.3));
-        float pore = noise2(vec2(along * 0.45 + seed, place * 8.5));
-        float fleck = smoothstep(0.66, 0.78, noise2(vec2(along * 0.26 + seed, place * 3.1))) * fine;
-
-        vec3 pale = vec3(0.80, 0.54, 0.29);
-        vec3 deep = vec3(0.58, 0.33, 0.15);
-
-        albedo = mix(pale, deep, 0.34 * bands * mix(0.5, 1.0, fine) + 0.24 * broad + 0.22 * tone);
-        albedo *= mix(1.0, 0.86 + 0.28 * streak, fine);
-        albedo *= mix(1.0, 0.92 + 0.14 * pore, fine);
-        albedo = mix(albedo, albedo * vec3(0.60, 0.42, 0.32), 0.6 * fleck);
-
-        float joint = 1.0 - smoothstep(0.2, 0.9, min(local, piece - local));
-
-        albedo *= 1.0 - 0.8 * joint;
-
-        rough = 0.42 + 0.1 * streak;
-        s.coat = 0.75 * (1.0 - joint);
-
-        float bump = 0.05 * (pore - 0.5) * fine + 0.05 * (streak - 0.5) * fine - 0.3 * joint;
-
-        // the grooves: darker in their corners, burnished down their middle
-        if (part > 0.05 && part < 0.15)
+        if (part < 0.15)
         {
-            albedo *= vec3(0.74, 0.70, 0.66);
-            rough = 0.3;
-            s.coat = 0.3;
-        }
-        else if (part > 0.15 && part < 0.25)
-        {
-            albedo *= vec3(0.66, 0.62, 0.58);
-            s.coat = 0.2;
-        }
+            /*
+             * Ballast: broken stone, a couple of millimetres across at this
+             * scale, grey with a little brown, dark between the stones, dusty
+             * and rust-stained near the rails. Far off, it is its mean colour.
+             */
+            vec2 p = vec2(along, across) / 1.35;
+            vec2 cell = floor(p);
 
-        n = bumped(n, bump * uRopeRadius / 20.0);
+            float nearest = 8.0;
+            float second = 8.0;
+            float id = 0.0;
+
+            for (int y = -1; y <= 1; ++y)
+            {
+                for (int x = -1; x <= 1; ++x)
+                {
+                    vec2 c = cell + vec2(float(x), float(y));
+
+                    float seed = hash12(c);
+
+                    vec2 o = c + 0.5 + 0.8 * (vec2(seed, hash12(c + 7.3)) - 0.5);
+
+                    float d = length(p - o);
+
+                    if (d < nearest)
+                    {
+                        second = nearest;
+                        nearest = d;
+                        id = seed;
+                    }
+                    else if (d < second)
+                    {
+                        second = d;
+                    }
+                }
+            }
+
+            float gap = smoothstep(0.0, 0.22, second - nearest);
+
+            vec3 stone = mix(vec3(0.30, 0.29, 0.27), vec3(0.50, 0.47, 0.43), id);
+
+            stone = mix(stone, vec3(0.30, 0.20, 0.13), smoothstep(0.62, 0.95, hash12(vec2(id, 4.1))));
+
+            float rusty = 1.0 - smoothstep(3.0, 9.0, abs(abs(across) - 10.0));
+
+            stone = mix(stone, stone * vec3(0.72, 0.5, 0.36), 0.55 * rusty);
+
+            vec3 mean = vec3(0.33, 0.31, 0.285) * mix(1.0, 0.8, rusty);
+
+            albedo = mix(mean, stone * mix(0.28, 1.0, gap), fine);
+
+            rough = 0.82;
+
+            n = bumped(n, fine * (0.2 * gap * (1.0 - 0.5 * nearest) + 0.12 * id) * uRopeRadius / 20.0);
+        }
+        else if (part < 0.25)
+        {
+            // a sleeper: creosoted timber, nearly black, split and weathered
+            float id = vTexcoord.z;
+
+            float grainPlace = across * 9.0 + 2.0 * noise2(vec2(along * 0.4, id));
+
+            float grain = noise2(vec2(along * 0.32 + id * 3.1, grainPlace));
+            float split = smoothstep(0.7, 0.78, noise2(vec2(along * 0.09 + id, grainPlace * 0.6)));
+
+            vec3 timber = mix(vec3(0.075, 0.055, 0.042), vec3(0.17, 0.13, 0.095), 0.6 * hash12(vec2(id, 2.2)) + 0.4 * grain);
+
+            albedo = timber * mix(1.0, 0.45, split * fine);
+
+            rough = 0.72;
+
+            n = bumped(n, fine * (0.12 * (grain - 0.5) - 0.2 * split) * uRopeRadius / 20.0);
+        }
+        else if (part < 0.32)
+        {
+            // the top of a rail: bright steel polished by wheels
+            float scratch = noise2(vec2(along * 0.5, across * 16.0));
+
+            float length144 = vTexcoord.z;
+            float local = mod(along, length144);
+
+            float joint = 1.0 - smoothstep(0.15, 0.5, min(local, length144 - local));
+
+            albedo = mix(vec3(0.62, 0.61, 0.60), vec3(0.03), joint);
+            metal = 1.0 - joint;
+            rough = 0.2 + 0.1 * scratch + 0.5 * joint;
+        }
+        else if (part < 0.38)
+        {
+            // a rail's side: rust, darker and redder in patches
+            float patchy = noise2(vec2(along * 0.06, across * 0.8)) * 0.6 + noise2(vec2(along * 0.31, across * 3.1)) * 0.4;
+
+            albedo = mix(vec3(0.20, 0.095, 0.05), vec3(0.33, 0.17, 0.08), patchy);
+
+            rough = 0.85;
+        }
+        else if (part < 0.45)
+        {
+            albedo = vec3(0.055, 0.05, 0.048);
+            rough = 0.9;
+        }
+        else
+        {
+            /*
+             * The steel of a bridge: plate girders painted a dull grey-green
+             * long ago, with rows of rivets and rust running down from them.
+             */
+            float h = vWorldPosition.y / uRopeRadius * 20.0;
+
+            float cellU = mod(along, 7.0) - 3.5;
+            float rowA = mod(h, 4.6) - 2.3;
+
+            float rivet = 1.0 - smoothstep(0.55, 0.95, length(vec2(cellU, rowA)));
+
+            float rust = noise2(vec2(along * 0.09, h * 0.14)) * 0.65 + noise2(vec2(along * 0.5, h * 0.5)) * 0.35;
+
+            albedo = mix(vec3(0.075, 0.095, 0.085), vec3(0.17, 0.09, 0.05), smoothstep(0.52, 0.8, rust));
+
+            rough = 0.6;
+
+            n = bumped(n, fine * 0.35 * rivet * uRopeRadius / 20.0);
+        }
     }
     else if (uMaterial == 7)
     {
         /*
-         * The toy blocks under the bridges: beech stained, not painted over,
-         * so the grain shows through the colour, under clear lacquer.
-         * vTexcoord: the place on the face (mm), its colour, and 1.
+         * The piers and abutments: blocks of grey-gold stone in courses, each
+         * block its own shade, with weathered mortar between them. vTexcoord
+         * is the place on the face (mm).
          */
-        vec3 paint = vTexcoord.z < 0.5 ? vec3(0.56, 0.030, 0.028) :
-                     vTexcoord.z < 1.5 ? vec3(0.86, 0.50, 0.04) :
-                     vTexcoord.z < 2.5 ? vec3(0.018, 0.10, 0.36) : vec3(0.03, 0.24, 0.10);
+        float h = vWorldPosition.y / uRopeRadius * 20.0;
 
-        float u = vTexcoord.x;
-        float w = vTexcoord.y + 3.0 * noise2(vec2(vTexcoord.x * 0.03, vTexcoord.y * 0.05));
+        float wide = vTexcoord.x + vTexcoord.y;
 
-        float bands = 0.5 + 0.5 * sin(w * 0.22 + 4.0 * noise2(vec2(w * 0.04, u * 0.012)));
-        float fibre = noise2(vec2(u * 0.05, w * 3.4));
+        float course = floor(h / 6.4);
 
-        albedo = paint * (0.88 + 0.16 * bands) * (0.94 + 0.12 * fibre);
+        float shifted = wide + 5.5 * mod(course, 2.0);
 
-        rough = 0.4;
-        s.coat = 0.8;
+        float block = floor(shifted / 11.0);
 
-        n = bumped(n, 0.006 * (fibre - 0.5) * uRopeRadius / 20.0);
+        float inH = abs(fract(h / 6.4) - 0.5) * 6.4;
+        float inW = abs(fract(shifted / 11.0) - 0.5) * 11.0;
+
+        float joint = max(smoothstep(2.65, 3.1, inH), smoothstep(5.05, 5.45, inW));
+
+        float id = hash12(vec2(block, course));
+
+        float dressed = noise2(vec2(wide * 0.6 + id * 9.0, h * 0.8));
+        float lichen = smoothstep(0.58, 0.78, noise2(vec2(wide * 0.07, h * 0.09)));
+
+        vec3 stone = mix(vec3(0.27, 0.235, 0.19), vec3(0.42, 0.37, 0.30), id);
+
+        stone = mix(stone, vec3(0.12, 0.13, 0.09), 0.5 * lichen);
+
+        albedo = mix(stone * (0.86 + 0.28 * dressed), vec3(0.07, 0.065, 0.06), joint);
+
+        rough = 0.86;
+
+        n = bumped(n, (0.09 * (dressed - 0.5) - 0.5 * joint) * uRopeRadius / 20.0);
     }
 
     // Where the normal turns quickly across a pixel (thin or far tubes) a
@@ -2841,19 +2930,19 @@ void main()
     vec3 albedo;
 
     // the rough surface under the lacquer, how much lacquer lies on it
-    float rough = 0.45;
-    float coat = 1.0;
+    float rough = 0.5;
+    float coat = 0.45;
     float metal = 0.0;
     vec3 glow = vec3(0.0);
 
     if (vMaterial == 0)
-        albedo = vec3(0.52, 0.018, 0.022);
+        albedo = vec3(0.21, 0.012, 0.016);
     else if (vMaterial == 1)
-        albedo = vec3(0.012, 0.075, 0.30);
+        albedo = vec3(0.012, 0.032, 0.085);
     else if (vMaterial == 2)
-        albedo = vec3(0.86, 0.66, 0.30);
+        albedo = vec3(0.34, 0.255, 0.16);
     else if (vMaterial == 6)
-        albedo = vec3(0.018, 0.17, 0.075);
+        albedo = vec3(0.012, 0.075, 0.042);
     else if (vMaterial == 3)
     {
         // plain beech, oiled: darker bands, and a little lacquer
@@ -2901,8 +2990,19 @@ void main()
             glow = vec3(1.7, 0.95, 0.34) * (0.7 + 0.5 * noise2(vMm.xy * 0.2));
     }
 
-    if (vMaterial != 3 && vMaterial != 5 && vMaterial != 8)
-        albedo *= 0.94 + 0.12 * grain;
+    // road dirt, thickest low down, and soot from the funnel along the top
+    if (vMaterial != 5 && vMaterial != 7 && vMaterial != 9)
+    {
+        float grime = noise2(vec2(vMm.x * 0.12, vMm.y * 0.5 + vMm.z * 0.2)) * 0.6 + grain * 0.4;
+
+        float low = 1.0 - smoothstep(6.0, 24.0, vMm.y + 12.0 * (grime - 0.5));
+
+        albedo = mix(albedo, vec3(0.05, 0.042, 0.034), 0.65 * low);
+        albedo *= 0.8 + 0.3 * grime;
+
+        rough = mix(rough, 0.82, 0.8 * low);
+        coat *= 1.0 - 0.8 * low;
+    }
 
     float nv = max(dot(n, v), 1.0e-3);
 
@@ -7715,6 +7815,11 @@ double KnotGLWidget::trainAlong() const
     return trainAlong_;
 }
 
+double KnotGLWidget::trainSpeed() const
+{
+    return std::max(220.0, trainLength_ / 70.0);
+}
+
 void KnotGLWidget::advanceTrain()
 {
     if (!showTrain())
@@ -7733,9 +7838,7 @@ void KnotGLWidget::advanceTrain()
          */
         const double seconds = lapSeconds(trainClock_);
 
-        const double speed = std::max(220.0, trainLength_ / 70.0);
-
-        trainAlong_ = std::fmod(trainAlong_ + speed * seconds, trainLength_);
+        trainAlong_ = std::fmod(trainAlong_ + trainSpeed() * seconds, trainLength_);
 
         if (seconds > 0.0)
         {
@@ -7785,7 +7888,7 @@ void KnotGLWidget::trainSoundScene(double *speed, float *gain, float *pan) const
 {
     const bool running = showTrain() && trainRunning();
 
-    *speed = running ? std::max(220.0, trainLength_ / 70.0) : 0.0;
+    *speed = running ? trainSpeed() : 0.0;
 
     // nearer is louder; to the left of the picture, to the left of the room
     const float near = std::clamp(9.0f / std::max(distance_, 1.0f), 0.22f, 1.0f);
@@ -7830,16 +7933,142 @@ void KnotGLWidget::aimCamera(const QVector3D &eye, const QVector3D &target)
     panOffset_ = target;
 }
 
+float KnotGLWidget::wholeKnotDistance(const QVector3D &toEye, QVector3D *target) const
+{
+    // the picture a film shows, between its bars (paintGL)
+    constexpr float FilmShape = 2.39f;
+
+    constexpr float Margin = 1.07f;
+
+    const float mm = worldPerMm();
+
+    const float halfHigh = std::tan(qDegreesToRadians(0.5f * FieldOfView));
+    const float halfWide = halfHigh * static_cast<float>(width()) / static_cast<float>(std::max(height(), 1));
+    const float halfFilm = std::min(halfHigh, halfWide / FilmShape);
+
+    const QVector3D forward = -toEye;
+    const QVector3D right = QVector3D::crossProduct(forward, QVector3D(0.0f, 1.0f, 0.0f)).normalized();
+    const QVector3D up = QVector3D::crossProduct(right, forward);
+
+    // the track, and the feet of what carries it: the piers count at a low angle
+    const int step = std::max(1, static_cast<int>(trainPath_.size()) / 240);
+
+    QVector<QVector3D> points;
+    points.reserve(2 * trainPath_.size() / step + 2);
+
+    QVector3D middle;
+
+    for (int k = 0; k < trainPath_.size(); k += step)
+    {
+        const KnotMath::Vec3 &p = trainPath_.at(k);
+
+        const QVector3D top = QVector3D(static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z)) * mm;
+
+        points.push_back(top);
+        points.push_back(QVector3D(top.x(), photoFloorLevel(), top.z()));
+
+        middle += top;
+    }
+
+    middle /= static_cast<float>(std::max(static_cast<int>(points.size()) / 2, 1));
+
+    // a point at x across and f beyond the middle shows at x / (d + f)
+    auto backFrom = [&](const QVector3D &from)
+    {
+        float distance = 0.0f;
+
+        for (const QVector3D &point : points)
+        {
+            const QVector3D p = point - from;
+
+            const float beyond = QVector3D::dotProduct(p, forward);
+
+            distance = std::max(distance, std::abs(QVector3D::dotProduct(p, right)) * Margin / halfWide - beyond);
+            distance = std::max(distance, std::abs(QVector3D::dotProduct(p, up)) * Margin / halfFilm - beyond);
+        }
+
+        return distance;
+    };
+
+    // what is near looks larger, so the middle of the picture is found by looking
+    for (int round = 0; round < 3; ++round)
+    {
+        const float distance = backFrom(middle);
+
+        float left = std::numeric_limits<float>::max();
+        float farRight = std::numeric_limits<float>::lowest();
+        float bottom = left;
+        float top = farRight;
+
+        for (const QVector3D &point : points)
+        {
+            const QVector3D p = point - middle;
+
+            const float along = std::max(distance + QVector3D::dotProduct(p, forward), 1.0e-3f);
+
+            const float x = QVector3D::dotProduct(p, right) / along;
+            const float y = QVector3D::dotProduct(p, up) / along;
+
+            left = std::min(left, x);
+            farRight = std::max(farRight, x);
+            bottom = std::min(bottom, y);
+            top = std::max(top, y);
+        }
+
+        middle += (right * (0.5f * (left + farRight)) + up * (0.5f * (bottom + top))) * distance;
+    }
+
+    *target = middle;
+
+    return backFrom(middle);
+}
+
+void KnotGLWidget::chooseCinemaBridge(float shotSeconds)
+{
+    // (the train comes over it some way into the shot, not at the cut)
+    const double soonest = trainAlong_ + 0.3 * trainSpeed() * shotSeconds;
+
+    double along = soonest;
+    double shortest = std::numeric_limits<double>::max();
+
+    for (const Photo::TrainTrack::Pass &pass : trainJourney_)
+    {
+        if (!pass.over)
+            continue;
+
+        double wait = std::fmod(pass.along - soonest, trainLength_);
+
+        if (wait < 0.0)
+            wait += trainLength_;
+
+        if (wait < shortest)
+        {
+            shortest = wait;
+            along = pass.along;
+        }
+    }
+
+    const QMatrix4x4 there = Photo::placeVehicle(trainPath_, trainLength_, along, 26.0);
+
+    cinemaSpot_ = there.map(QVector3D(0.0f, 0.0f, 0.0f)) * worldPerMm();
+    cinemaAhead_ = there.mapVector(QVector3D(1.0f, 0.0f, 0.0f));
+    cinemaAhead_.setY(0.0f);
+    cinemaAhead_.normalize();
+    cinemaSide_ = there.mapVector(QVector3D(0.0f, 0.0f, 1.0f)).normalized();
+}
+
 void KnotGLWidget::directCinema(float seconds)
 {
     if (!cinema() || trainPieces_.isEmpty())
         return;
 
     /*
-     * Four shots, cut one after the other, each a move a film crew would
-     * make: alongside the train, low, as if on a dolly; from the track ahead
-     * as it comes on and goes by; from the ground looking up past it at the
-     * lights; and a slow rise until the whole knot is in the picture.
+     * The film is about the knot; the train only travels on it. Four shots,
+     * cut one after the other. Three hold the whole knot in the picture, so
+     * that its shape is what is seen: from a slow circle above it; rising
+     * until it lies open as a drawing in a book; and low, where its bridges
+     * stand up against each other. The other goes close to one bridge, the
+     * one thing that makes a knot a knot, as the train comes over it.
      */
     constexpr float ShotLength = 9.0f;
     constexpr int Shots = 4;
@@ -7850,94 +8079,57 @@ void KnotGLWidget::directCinema(float seconds)
 
     const float t = std::fmod(cinemaTime_, ShotLength) / ShotLength;
 
-    const float mm = worldPerMm();
+    const float e = t * t * (3.0f - 2.0f * t);
 
-    const QMatrix4x4 &locomotive = trainPieces_.first().place;
-
-    const QVector3D engine = locomotive.map(QVector3D(0.0f, 24.0f, 0.0f)) * mm;
-    const QVector3D ahead = locomotive.mapVector(QVector3D(1.0f, 0.0f, 0.0f)).normalized();
-    const QVector3D side = locomotive.mapVector(QVector3D(0.0f, 0.0f, 1.0f)).normalized();
-
-    // a place along the track, a little ahead, is chosen at the cut and stays
     if (shot != cinemaShot_)
     {
         cinemaShot_ = shot;
 
-        const double lead = shot == 2 ? 420.0 : 900.0;
-
-        const float speed = static_cast<float>(std::max(220.0, trainLength_ / 70.0));
-
-        const double aheadOfIt = lead + 0.35 * speed * ShotLength;
-
-        const QMatrix4x4 there = Photo::placeVehicle(trainPath_, trainLength_, trainAlong_ + aheadOfIt, 26.0);
-
-        cinemaSpot_ = there.map(QVector3D(0.0f, 0.0f, 0.0f)) * mm;
-        cinemaSide_ = there.mapVector(QVector3D(0.0f, 0.0f, 1.0f)).normalized();
+        if (shot == 2)
+            chooseCinemaBridge(ShotLength);
     }
 
-    const float floor = photoFloorLevel() + 14.0f * mm;
+    // the circle goes on through the cuts: the knot is seen from every side
+    const float turn = qDegreesToRadians(40.0f + cinemaTime_ * 3.5f);
 
-    const QVector3D middle(0.5f * (meshMin_.x() + meshMax_.x()), floor, 0.5f * (meshMin_.z() + meshMax_.z()));
-
-    const float wide = std::max(meshMax_.x() - meshMin_.x(), meshMax_.z() - meshMin_.z());
-
-    QVector3D eye;
-    QVector3D target = engine;
-
-    switch (shot)
+    auto wholeKnot = [&](float elevation, float back)
     {
-    case 0:
+        const float up = qDegreesToRadians(elevation);
+
+        const QVector3D toEye(std::sin(turn) * std::cos(up), std::sin(up), std::cos(turn) * std::cos(up));
+
+        QVector3D target;
+
+        const float distance = wholeKnotDistance(toEye, &target);
+
+        aimCamera(target + toEye * (distance * back), target);
+    };
+
+    if (shot == 2 && !trainJourney_.isEmpty())
     {
-        // beside the train, drifting from the wagons up to the engine
-        eye = engine - ahead * ((150.0f - 190.0f * t) * mm) + side * (135.0f * mm) +
-              QVector3D(0.0f, 8.0f * mm, 0.0f);
+        // slowly round the bridge, never looking along either track
+        const float mm = worldPerMm();
 
-        target = engine - ahead * ((70.0f - 90.0f * t) * mm);
+        const float round = qDegreesToRadians(28.0f + 34.0f * e);
 
-        break;
+        const QVector3D way = cinemaSide_ * std::cos(round) + cinemaAhead_ * std::sin(round);
+
+        const QVector3D target = cinemaSpot_ - QVector3D(0.0f, 34.0f * mm, 0.0f);
+
+        aimCamera(target + way * ((560.0f - 60.0f * e) * mm) + QVector3D(0.0f, 300.0f * mm, 0.0f), target);
     }
-
-    case 1:
+    else if (shot == 1)
     {
-        // from beside the track ahead: it comes on, and goes by
-        eye = cinemaSpot_ + cinemaSide_ * (120.0f * mm) + QVector3D(0.0f, 34.0f * mm, 0.0f);
-
-        break;
+        wholeKnot(36.0f + 38.0f * e, 1.0f);
     }
-
-    case 2:
+    else if (shot == 3)
     {
-        // from the floor, looking up past it at the string lights
-        eye = cinemaSpot_ + cinemaSide_ * (230.0f * mm);
-
-        eye.setY(floor);
-
-        target = engine * 0.5f + cinemaSpot_ * 0.5f;
-        target.setY(photoFloorLevel() + (95.0f + 45.0f * t) * mm);
-
-        break;
+        wholeKnot(13.0f + 5.0f * e, 1.1f - 0.1f * e);
     }
-
-    default:
+    else
     {
-        // rising and turning, until the knot lies open below
-        const float e = t * t * (3.0f - 2.0f * t);
-
-        const float a = qDegreesToRadians(cinemaTime_ * 3.0f);
-
-        const float away = wide * (0.72f + 0.42f * e);
-
-        eye = middle + QVector3D(std::sin(a) * away, wide * (0.1f + 0.62f * e), std::cos(a) * away);
-
-        target = middle * e + engine * (1.0f - e);
-
-        break;
+        wholeKnot(32.0f - 5.0f * e, 1.12f - 0.12f * e);
     }
-    }
-
-    eye.setY(std::max(eye.y(), floor));
-
-    aimCamera(eye, target);
 
     ++photoVersion_;
 }
@@ -8800,7 +8992,7 @@ void KnotGLWidget::developPhotoFrame(const QMatrix4x4 &view, const QMatrix4x4 &p
     developProgram_->setUniformValue("uHalfFieldTan", std::tan(qDegreesToRadians(0.5f * FieldOfView)));
     developProgram_->setUniformValue(
         "uExposure",
-        photoExposure_ * static_cast<float>(lighting_.brightness) / 100.0f);
+        photoExposure_ * (cinema() && nightShown() ? FilmNightLift : 1.0f) * static_cast<float>(lighting_.brightness) / 100.0f);
 
     backgroundVao_.bind();
 

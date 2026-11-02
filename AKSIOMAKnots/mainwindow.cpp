@@ -663,11 +663,11 @@ MainWindow::MainWindow(
         static_cast<int>(Photo::Scene::BallroomFloor));
 
     photoSceneCombo_->addItem(
-        tr("Toy train on a track shaped like the knot, at dusk"),
+        tr("Model train on a track shaped like the knot, at night"),
         static_cast<int>(Photo::Scene::TrainTrack));
 
     photoSceneCombo_->addItem(
-        tr("Toy train on a track shaped like the knot, by day"),
+        tr("Model train on a track shaped like the knot, by day"),
         static_cast<int>(Photo::Scene::TrainDay));
 
     photoSceneCombo_->setToolTip(tr("Where the knot is photographed."));
@@ -741,7 +741,7 @@ MainWindow::MainWindow(
 
     cinemaButton_->setObjectName(QStringLiteral("BrushButton"));
     cinemaButton_->setCheckable(true);
-    cinemaButton_->setToolTip(tr("The camera follows the train by itself, in film shots. Click the view, turn the mouse wheel or press this again to stop."));
+    cinemaButton_->setToolTip(tr("The camera shows the knot by itself, in film shots: all of it from around, from above and from low down, and one bridge up close. Click the view, turn the mouse wheel or press this again to stop."));
     cinemaButton_->setVisible(false);
 
     connect(
@@ -773,7 +773,7 @@ MainWindow::MainWindow(
     soundButton_->setObjectName(QStringLiteral("BrushButton"));
     soundButton_->setCheckable(true);
     soundButton_->setChecked(AppSettings::trainSound());
-    soundButton_->setToolTip(tr("The sound of the train, made by the program as it runs: steam, wheels, the whistle, and crickets at dusk."));
+    soundButton_->setToolTip(tr("The sound of the train, made by the program as it runs: steam, wheels, the whistle, and crickets at night."));
     soundButton_->setVisible(false);
 
     connect(
@@ -6071,10 +6071,10 @@ QString MainWindow::trainRefusal() const
         return QString();
 
     if (currentData_.multiStrand)
-        return tr("The toy train needs one closed loop, and this knot is made of several strands.");
+        return tr("The train needs one closed loop, and this knot is made of several strands.");
 
     if (!currentData_.closed || currentData_.points.size() < 4)
-        return tr("The toy train needs one closed loop, and this curve has loose ends.");
+        return tr("The train needs one closed loop, and this curve has loose ends.");
 
     constexpr int MostCrossings = 13;
 
@@ -6088,8 +6088,8 @@ QString MainWindow::trainRefusal() const
 
     if (tooLarge)
     {
-        return tr("This knot has too many crossings for the toy train: its track would "
-                  "hide the train. The toy train takes knots of up to %1 crossings.")
+        return tr("This knot has too many crossings for the train: its track would "
+                  "hide it. The train takes knots of up to %1 crossings.")
             .arg(MostCrossings);
     }
 

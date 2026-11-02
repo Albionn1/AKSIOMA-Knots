@@ -1595,6 +1595,14 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Lidhëse këpucësh mbi dërrasa në livadh, në diell</translation>
     </message>
     <message>
+        <source>Model train on a track shaped like the knot, at night</source>
+        <translation>Tren model mbi shina në formën e nyjës, natën</translation>
+    </message>
+    <message>
+        <source>Model train on a track shaped like the knot, by day</source>
+        <translation>Tren model mbi shina në formën e nyjës, ditën</translation>
+    </message>
+    <message>
         <source>Stop the train</source>
         <translation>Ndale trenin</translation>
     </message>
@@ -1605,6 +1613,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Start the train</source>
         <translation>Nise trenin</translation>
+    </message>
+    <message>
+        <source>The sound of the train, made by the program as it runs: steam, wheels, the whistle, and crickets at night.</source>
+        <translation>Zëri i trenit, i krijuar nga programi gjatë lëvizjes: avulli, rrotat, bilbili dhe bulkthat natën.</translation>
     </message>
     <message>
         <source>Nothing to go back to: the knot has not been moved.</source>
@@ -2394,6 +2406,18 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Informacioni diagnostikues u kopjua.</translation>
     </message>
     <message>
+        <source>The train needs one closed loop, and this knot is made of several strands.</source>
+        <translation>Treni ka nevojë për një lak të vetëm të mbyllur, ndërsa kjo nyjë përbëhet nga disa fije.</translation>
+    </message>
+    <message>
+        <source>The train needs one closed loop, and this curve has loose ends.</source>
+        <translation>Treni ka nevojë për një lak të vetëm të mbyllur, ndërsa kjo kurbë ka skaje të lira.</translation>
+    </message>
+    <message>
+        <source>This knot has too many crossings for the train: its track would hide it. The train takes knots of up to %1 crossings.</source>
+        <translation>Kjo nyjë ka shumë kryqëzime për trenin: shinat e saj do ta fshihnin atë. Treni merr nyje me deri në %1 kryqëzime.</translation>
+    </message>
+    <message>
         <source>A knot is one closed loop</source>
         <translation>Nyja është një lak i mbyllur</translation>
     </message>
@@ -2587,24 +2611,12 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Kinema</translation>
     </message>
     <message>
-        <source>The camera follows the train by itself, in film shots. Click the view, turn the mouse wheel or press this again to stop.</source>
-        <translation>Kamera e ndjek trenin vetë, me pamje si në film. Rrotulloni Scroll-in, klikoni në pamje ose shtypni përsëri këtë buton për ta ndalur.</translation>
+        <source>The camera shows the knot by itself, in film shots: all of it from around, from above and from low down, and one bridge up close. Click the view, turn the mouse wheel or press this again to stop.</source>
+        <translation>Kamera e tregon nyjën vetë, me pamje si në film: të tërën nga përreth, nga lart dhe nga poshtë, si dhe një urë nga afër. Rrotulloni Scroll-in, klikoni në pamje ose shtypni përsëri këtë buton për ta ndalur.</translation>
     </message>
     <message>
         <source>Sound</source>
         <translation>Zëri</translation>
-    </message>
-    <message>
-        <source>The toy train needs one closed loop, and this knot is made of several strands.</source>
-        <translation>Treni lodër ka nevojë për një lak të vetëm të mbyllur, ndërsa kjo nyjë përbëhet nga disa fije.</translation>
-    </message>
-    <message>
-        <source>The toy train needs one closed loop, and this curve has loose ends.</source>
-        <translation>Treni lodër ka nevojë për një lak të vetëm të mbyllur, ndërsa kjo kurbë ka skaje të lira.</translation>
-    </message>
-    <message>
-        <source>This knot has too many crossings for the toy train: its track would hide the train. The toy train takes knots of up to %1 crossings.</source>
-        <translation>Kjo nyjë ka shumë kryqëzime për trenin lodër: shinat e saj do ta fshihnin trenin. Treni lodër merr nyje me deri në %1 kryqëzime.</translation>
     </message>
     <message>
         <source>The train never reaches an end. Every bridge is a crossing, passed twice: once over and once under. This track has %1 bridges, and the row of numbers is the knot&apos;s Gauss code, the way knot theory writes a knot down. %2</source>
@@ -2897,18 +2909,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Grab the rope</source>
         <translation>Kap litarin</translation>
-    </message>
-    <message>
-        <source>Toy train on a track shaped like the knot, at dusk</source>
-        <translation>Tren lodër mbi shina në formën e nyjës, në muzg</translation>
-    </message>
-    <message>
-        <source>Toy train on a track shaped like the knot, by day</source>
-        <translation>Tren lodër mbi shina në formën e nyjës, ditën</translation>
-    </message>
-    <message>
-        <source>The sound of the train, made by the program as it runs: steam, wheels, the whistle, and crickets at dusk.</source>
-        <translation>Zëri i trenit, i krijuar nga programi gjatë lëvizjes: avulli, rrotat, bilbili dhe bulkthat në muzg.</translation>
     </message>
     <message>
         <source>Fewer options</source>

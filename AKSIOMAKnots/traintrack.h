@@ -26,14 +26,22 @@
 namespace Photo
 {
 
-// Sizes of the toy, in millimetres. The track is the usual 40 mm wide; the
-// level of the rails over the floor on the ground and on a bridge.
+// Sizes of the model railway, in millimetres. The sleepers are 40 long and the
+// rails 20 apart; the bed of ballast is wider. The level of the tops of the
+// rails over the floor, on the ground and on a bridge, and how deep a bridge's
+// deck is under its rails.
 constexpr double TrackWidthMm = 40.0;
-constexpr double TrackThicknessMm = 10.0;
+constexpr double BedWidthMm = 54.0;
+constexpr double RailApartMm = 20.0;
 constexpr double TrainWidthMm = 34.0;
 constexpr double TrainHeightMm = 40.0;
-constexpr double GroundLevelMm = TrackThicknessMm;
-constexpr double BridgeLevelMm = GroundLevelMm + TrainHeightMm + 4.0 + TrackThicknessMm;
+constexpr double DeckDepthMm = 15.0;
+constexpr double GroundLevelMm = 12.0;
+constexpr double BridgeLevelMm = GroundLevelMm + TrainHeightMm + 4.0 + DeckDepthMm;
+
+// a ramp stands on a bank of ballast until it is this far above the ground
+// track; higher, it is a bridge on piers
+constexpr double BankHeightMm = 26.0;
 
 struct TrainTrack
 {
@@ -98,8 +106,8 @@ TrainTrack buildTrainTrack(
     RopeProgress *progress = nullptr);
 
 /*
- * The train: a locomotive and two wagons, made here from the shapes a wooden
- * toy is made of. Per vertex: position (mm; x forward, y up, the top of the
+ * The train: a locomotive and two wagons, a scale model made here from turned
+ * and cut shapes. Per vertex: position (mm; x forward, y up, the top of the
  * track at y = 0), normal, occlusion (1 = open), material (0 red, 1 blue,
  * 2 cream, 3 plain wood, 4 black, 5 brass, 6 green, 7 window, 8 steel,
  * 9 the lit lamp). Bodies stand still on their frames; the wheels turn on
@@ -111,9 +119,9 @@ struct TrainModel
     static constexpr int Vehicles = 3;
 
     // the axle's height over the track, and the wheels' radius
-    static constexpr double AxleHeight = 5.8;
-    static constexpr double WheelRadius = 8.0;
-    static constexpr double CrankRadius = 4.5;
+    static constexpr double AxleHeight = 7.0;
+    static constexpr double WheelRadius = 7.0;
+    static constexpr double CrankRadius = 3.6;
 
     struct Part
     {
