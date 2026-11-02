@@ -68,8 +68,8 @@
         <translation>MËNYRA FOTO</translation>
     </message>
     <message>
-        <source>The places and surfaces of Photo mode come from &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; and are free for any use (CC0): the HDRIs Chinese Garden (Andreas Mischok) and Meadow 2 (Sergej Majboroda), the textures Wood Table Large and Wood Floor Worn (Dimitrios Savva). The rope is a Cosserat rod solved directly (C. Deul, T. Kugelstadt, M. Weiler and J. Bender, 2018) by position based dynamics (XPBD: M. Macklin, M. Müller and N. Chentanez, 2016). The sneaker was made for AKSIOMA in Blender.</source>
-        <translation>Vendet dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): HDRI-të Chinese Garden (Andreas Mischok) dhe Meadow 2 (Sergej Majboroda), teksturat Wood Table Large dhe Wood Floor Worn (Dimitrios Savva). Litari është një shufër Cosserat e zgjidhur drejtpërdrejt (C. Deul, T. Kugelstadt, M. Weiler dhe J. Bender, 2018) me dinamikë të bazuar në pozicione (XPBD: M. Macklin, M. Müller dhe N. Chentanez, 2016). Patikja u bë për AKSIOMA në Blender.</translation>
+        <source>The places and surfaces of Photo mode come from &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; and are free for any use (CC0): the HDRIs Chinese Garden (Andreas Mischok) and Meadow 2 (Sergej Majboroda), the textures Wood Table Large and Wood Floor Worn (Dimitrios Savva). The rope is a Cosserat rod solved directly (C. Deul, T. Kugelstadt, M. Weiler and J. Bender, 2018) by position based dynamics (XPBD: M. Macklin, M. Müller and N. Chentanez, 2016).</source>
+        <translation>Vendet dhe sipërfaqet e mënyrës Foto vijnë nga &lt;a href=&apos;https://polyhaven.com&apos; style=&apos;color:#D99B42;&apos;&gt;Poly Haven&lt;/a&gt; dhe janë të lira për çdo përdorim (CC0): HDRI-të Chinese Garden (Andreas Mischok) dhe Meadow 2 (Sergej Majboroda), teksturat Wood Table Large dhe Wood Floor Worn (Dimitrios Savva). Litari është një shufër Cosserat e zgjidhur drejtpërdrejt (C. Deul, T. Kugelstadt, M. Weiler dhe J. Bender, 2018) me dinamikë të bazuar në pozicione (XPBD: M. Macklin, M. Müller dhe N. Chentanez, 2016).</translation>
     </message>
     <message>
         <source>About Qt</source>
@@ -546,6 +546,14 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
 </context>
 <context>
     <name>KnotGLWidget</name>
+    <message>
+        <source>%1 FPS  %2 ms</source>
+        <translation>%1 FPS  %2 ms</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>Në pushim</translation>
+    </message>
     <message>
         <source>KNOT DIAGRAM</source>
         <translation>DIAGRAMI I NYJËS</translation>
@@ -1433,10 +1441,6 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Foto</translation>
     </message>
     <message>
-        <source>Tied on a sneaker</source>
-        <translation>Lidhur në një patike</translation>
-    </message>
-    <message>
         <source>Where the knot is photographed.</source>
         <translation>Ku fotografohet nyja.</translation>
     </message>
@@ -1573,6 +1577,22 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Shoelace on boards in a meadow, in the sun</source>
         <translation>Lidhëse këpucësh mbi dërrasa në livadh, në diell</translation>
+    </message>
+    <message>
+        <source>Toy train on a track shaped like the knot</source>
+        <translation>Tren lodër mbi shina në formën e nyjës</translation>
+    </message>
+    <message>
+        <source>Stop the train</source>
+        <translation>Ndale trenin</translation>
+    </message>
+    <message>
+        <source>Stop the train for a sharp picture, or send it on its way again.</source>
+        <translation>Ndale trenin për një fotografi të qartë, ose nise përsëri.</translation>
+    </message>
+    <message>
+        <source>Start the train</source>
+        <translation>Nise trenin</translation>
     </message>
     <message>
         <source>Nothing to go back to: the knot has not been moved.</source>
@@ -1798,6 +1818,14 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>For a computer whose 3D view stays black: slower, without Photo mode. It starts with the next start of AKSIOMA.</source>
         <translation>Për një kompjuter ku pamja 3D mbetet e zezë: më e ngadaltë, pa mënyrën Foto. Fillon me hapjen tjetër të AKSIOMA-s.</translation>
+    </message>
+    <message>
+        <source>Show frame rate</source>
+        <translation>Shfaq shpejtësinë e kuadrove</translation>
+    </message>
+    <message>
+        <source>Shows the frames per second and the time of a frame in a corner of the 3D view. A view at rest draws nothing and says Idle.</source>
+        <translation>Shfaq kuadrot në sekondë dhe kohën e një kuadri në një kënd të pamjes 3D. Një pamje e qetë nuk vizaton asgjë dhe shkruan Në pushim.</translation>
     </message>
     <message>
         <source>Restore defaults</source>
@@ -2262,6 +2290,10 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Shfaq dosjen</translation>
     </message>
     <message>
+        <source>Building the track</source>
+        <translation>Po ndërtohen shinat</translation>
+    </message>
+    <message>
         <source>The entire tube uses the selected base color.</source>
         <translation>I gjithë tubi përdor ngjyrën bazë të zgjedhur.</translation>
     </message>
@@ -2350,12 +2382,24 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
         <translation>Informacioni diagnostikues u kopjua.</translation>
     </message>
     <message>
-        <source>The curve on screen could not be confirmed: computed directly, its polynomials differ from these products.</source>
-        <translation>Kurba në ekran nuk mund të konfirmohej: e llogaritur drejtpërdrejt, polinomet e saj ndryshojnë nga këto prodhime.</translation>
+        <source>A knot is one closed loop</source>
+        <translation>Nyja është një lak i mbyllur</translation>
     </message>
     <message>
-        <source>Only knots with up to 7 crossings can be tied on the sneaker: larger knots do not fit on a shoe.</source>
-        <translation>Në patike mund të lidhen vetëm nyjet me deri në 7 kryqëzime: nyjet më të mëdha nuk zënë vend në një këpucë.</translation>
+        <source>The train goes round and round and never reaches an end. Every bridge is a crossing, and the train passes it twice: once over and once under. Bridges on this track: %1.</source>
+        <translation>Treni shkon rreth e rrotull dhe nuk arrin kurrë në një fund. Çdo urë është një kryqëzim, dhe treni e kalon dy herë: një herë sipër dhe një herë poshtë. Ura në këto shina: %1.</translation>
+    </message>
+    <message>
+        <source>Cancelled. Turn on Photo to build the track again.</source>
+        <translation>U anulua. Ndizni Foto për t&apos;i ndërtuar shinat përsëri.</translation>
+    </message>
+    <message>
+        <source>No track could be laid for this knot, so it stays a smooth tube.</source>
+        <translation>Për këtë nyjë nuk mund të ndërtohen shina, prandaj mbetet një tub i lëmuar.</translation>
+    </message>
+    <message>
+        <source>The curve on screen could not be confirmed: computed directly, its polynomials differ from these products.</source>
+        <translation>Kurba në ekran nuk mund të konfirmohej: e llogaritur drejtpërdrejt, polinomet e saj ndryshojnë nga këto prodhime.</translation>
     </message>
     <message>
         <source>Choose Tube Color</source>
@@ -2529,6 +2573,18 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Save knot</source>
         <translation>Ruaj nyjën</translation>
+    </message>
+    <message>
+        <source>The toy train needs one closed loop, and this knot is made of several strands.</source>
+        <translation>Treni lodër ka nevojë për një lak të vetëm të mbyllur, ndërsa kjo nyjë përbëhet nga disa fije.</translation>
+    </message>
+    <message>
+        <source>The toy train needs one closed loop, and this curve has loose ends.</source>
+        <translation>Treni lodër ka nevojë për një lak të vetëm të mbyllur, ndërsa kjo kurbë ka skaje të lira.</translation>
+    </message>
+    <message>
+        <source>This knot has too many crossings for the toy train: its track would hide the train. The toy train takes knots of up to %1 crossings.</source>
+        <translation>Kjo nyjë ka shumë kryqëzime për trenin lodër: shinat e saj do ta fshihnin trenin. Treni lodër merr nyje me deri në %1 kryqëzime.</translation>
     </message>
     <message>
         <source>AKSIOMA knot file (*.aknot)</source>
@@ -3109,6 +3165,13 @@ Bëjeni të kryqëzohet me vetveten për të lidhur një nyjë.</translation>
     <message>
         <source>Jones polynomial: the product of those of the two knots (this diagram is too large to compute it directly).</source>
         <translation>Polinomi i Jonesit: prodhimi i atyre të dy nyjeve (ky diagram është shumë i madh për ta llogaritur drejtpërdrejt).</translation>
+    </message>
+</context>
+<context>
+    <name>Photo</name>
+    <message>
+        <source>No track could be laid for this knot.</source>
+        <translation>Për këtë nyjë nuk mund të ndërtohen shina.</translation>
     </message>
 </context>
 <context>

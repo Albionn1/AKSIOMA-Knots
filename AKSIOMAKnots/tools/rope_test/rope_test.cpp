@@ -136,7 +136,7 @@ int main(int argc, char **argv)
 
             // (the Jones polynomial is computed up to 18 crossings: a big knot
             // lying on the table can show more, and is then left out, as in
-            // hand_test and sneaker_test; it has not changed for that)
+            // hand_test; it has not changed for that)
             const bool same =
                 a.valid && alexander.valid && a.text == alexander.text &&
                 (!jones.valid || !j.valid || j.text == jones.text);

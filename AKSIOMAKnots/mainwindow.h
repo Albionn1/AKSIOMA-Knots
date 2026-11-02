@@ -9,7 +9,7 @@
 #include "knotrelax.h"
 #include "knotseifert.h"
 #include "ropephysics.h"
-#include "sneaker.h"
+#include "traintrack.h"
 
 #include <QColor>
 #include <QComboBox>
@@ -156,13 +156,22 @@ private slots:
     // the rope's material frames (on the table) in the knot's coordinates
     QVector<KnotMath::Vec3> photoRopeFrames(const QVector<KnotMath::Vec3> &table) const;
 
-    // The Sneaker scene takes knots of up to 7 crossings (one closed
-    // strand): larger knots do not fit on a shoe.
-    bool knotFitsSneaker() const;
+    // Why the toy train cannot run on this knot, for the window to say (empty:
+    // it can). It takes one closed strand of up to 13 crossings, the whole
+    // knot table. A curve whose crossing number is not known is given a try,
+    // unless it crosses itself far too often: the number in view is no
+    // measure.
+    QString trainRefusal() const;
 
-    // the Sneaker scene greyed out for other knots (and left for the
-    // shoelace on the floor if it was chosen)
-    void updateSneakerChoice();
+    bool knotFitsTrain() const;
+
+    // a new knot the toy train cannot run on: the shoelace takes over, and
+    // the window says why
+    void updateTrainChoice();
+
+    // what the track shows, written on the picture, and taken off again
+    void showTrainCaption(int bridges);
+    void hideTrainCaption();
 
     void updateLearnSection();
 
@@ -689,6 +698,9 @@ private:
     QCheckBox *rememberWindowCheck_ =
         nullptr;
 
+    QCheckBox *frameRateCheck_ =
+        nullptr;
+
     QCheckBox *reduceMotionCheck_ =
         nullptr;
 
@@ -820,6 +832,16 @@ private:
     QComboBox *photoSceneCombo_ =
         nullptr;
 
+    // the Toy train scene: the train stopped and started
+    QPushButton *trainButton_ =
+        nullptr;
+
+    // the scene shown now: where the list goes back to when the toy train
+    // cannot run on this knot
+    int shownSceneIndex_ = 0;
+
+    bool trainCaption_ = false;
+
     // the last knot laid on the table, and what it was laid down from
     // (the same curve, thickness and scene are not simulated again)
     Photo::RestingRope restingRope_;
@@ -827,8 +849,8 @@ private:
     double restingRadius_ = 0.0;
     int restingScene_ = -1;
 
-    // the Sneaker scene: where the knot lies in the whole lace
-    Photo::TiedLace restingTied_;
+    // the Toy train scene: the track that was built
+    std::shared_ptr<const Photo::TrainTrack> restingTrack_;
 
     // a rope being laid down on a worker thread (layRestingRope): which
     // job is the newest, and what it was asked for

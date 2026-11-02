@@ -105,9 +105,8 @@ struct Settling
 /*
  * The simulation of layOnTable on its own: the rope `x` (points about half
  * a radius apart, in units of the radius, y up) falls onto `ground` and
- * comes to rest. Pinned points never move (a part of the rope held fast,
- * such as a lace through the eyelets of a shoe); the free parts rest on
- * them as on any other part of the rope.
+ * comes to rest. Pinned points never move (a part of the rope held fast);
+ * the free parts rest on them as on any other part of the rope.
  */
 Settling settleRope(
     QVector<KnotMath::Vec3> &x,

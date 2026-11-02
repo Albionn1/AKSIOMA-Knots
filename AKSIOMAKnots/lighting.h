@@ -83,7 +83,7 @@ struct PhotoLevel
     int shadowTaps = 16;    // samples of a soft shadow's edge
     int shadeTaps = 14;     // samples of the near shade (0: none)
     int lensTaps = 48;      // samples of the lens blur
-    bool mirror = true;     // the rope and the shoe seen in the surface
+    bool mirror = true;     // the rope and the train seen in the surface
 };
 
 PhotoLevel photoLevel(

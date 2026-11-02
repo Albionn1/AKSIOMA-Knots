@@ -122,8 +122,7 @@ AboutDialog::AboutDialog(QWidget *parent)
                     "Large and Wood Floor Worn (Dimitrios Savva). The rope is a Cosserat "
                     "rod solved directly (C. Deul, T. Kugelstadt, M. Weiler and J. "
                     "Bender, 2018) by position based dynamics (XPBD: M. Macklin, M. "
-                    "Müller and N. Chentanez, 2016). The sneaker was made for AKSIOMA "
-                    "in Blender."))));
+                    "Müller and N. Chentanez, 2016)."))));
 
     layout->addWidget(text, 1);
 

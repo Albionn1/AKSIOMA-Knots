@@ -23,7 +23,7 @@ add_executable(window_test window_test.cpp
     ${SRC}/knotjoin.h ${SRC}/knotjoin.cpp
     ${SRC}/photoscene.h ${SRC}/photoscene.cpp
     ${SRC}/ropephysics.h ${SRC}/ropephysics.cpp
-    ${SRC}/sneaker.h ${SRC}/sneaker.cpp
+    ${SRC}/traintrack.h ${SRC}/traintrack.cpp
     ${SRC}/timelineslider.h ${SRC}/timelineslider.cpp
     ${SRC}/knottable.h ${SRC}/knottable.cpp
     ${SRC}/knotbrowser.h ${SRC}/knotbrowser.cpp
@@ -42,7 +42,6 @@ qt_add_resources(window_test "photo" PREFIX "/" BIG_RESOURCES BASE ${SRC} FILES
     ${SRC}/data/photo/chinese_garden_4k.hdr ${SRC}/data/photo/meadow_2_4k.hdr
     ${SRC}/data/photo/wood_table_large_diff.jpg ${SRC}/data/photo/wood_table_large_nor_gl.jpg
     ${SRC}/data/photo/wood_table_large_rough.jpg ${SRC}/data/photo/wood_floor_worn_diff.jpg
-    ${SRC}/data/photo/wood_floor_worn_nor_gl.jpg ${SRC}/data/photo/wood_floor_worn_rough.jpg
-    ${SRC}/data/photo/sneaker.bin ${SRC}/data/photo/sneaker.json ${SRC}/data/photo/sneaker_floor.png)
+    ${SRC}/data/photo/wood_floor_worn_nor_gl.jpg ${SRC}/data/photo/wood_floor_worn_rough.jpg)
 qt_add_translations(window_test TS_FILES ${SRC}/KnotTheory_sq_AL.ts RESOURCE_PREFIX /i18n)
 target_link_libraries(window_test PRIVATE Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Svg shell32 dxgi)

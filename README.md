@@ -56,8 +56,8 @@ Formati i skedarit `.aknot` (PDF): [Shqip](Manual/AKSIOMA_aknot_File_Format_SQ.p
 - **Sipërfaqet e Seifertit**, të ndërtuara hap pas hapi, me matricën e
   Seifertit dhe lakoret pas çdo elementi të saj.
 - **Mënyra Foto**: nyja si litar i vërtetë me fizikën e vet, mbi një tavolinë
-  në diell ose e lidhur në një patike. Kapeni me miun, priteni dhe lidhni një
-  nyjë tjetër.
+  në diell, ose si shina të një treni lodër që kalon mbi çdo kryqëzim me urë.
+  Kapeni me miun, priteni dhe lidhni një nyjë tjetër.
 - **Ushtrime**: trengjyrësimi dhe shenjat e kryqëzimeve mbi diagramin e
   nyjës.
 - **Skedarë**: ruani dhe hapni skedarë `.aknot`, ruani figura, diagrame

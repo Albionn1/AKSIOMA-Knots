@@ -755,36 +755,28 @@ SceneInfo sceneInfo(Scene scene)
 
     switch (scene)
     {
-    case Scene::Sneaker:
-        // boards in a sunny meadow, a navy canvas sneaker on them
-        info.environment = QStringLiteral(":/data/photo/meadow_2_4k.hdr");
+    case Scene::TrainTrack:
+        // the garden's stone paving, wide enough for a long track
+        info.environment = QStringLiteral(":/data/photo/chinese_garden_4k.hdr");
         info.cameraHeightM = 1.6;
-        info.roomRadiusM = 12.0;
-        info.exposure = 2.6f;
+        info.roomRadiusM = 16.0;
+        info.exposure = 3.0f;
         info.calmStage = 0.1f;
 
-        info.surfaceColor = QStringLiteral(":/data/photo/wood_floor_worn_diff.jpg");
-        info.surfaceNormal = QStringLiteral(":/data/photo/wood_floor_worn_nor_gl.jpg");
-        info.surfaceRoughness = QStringLiteral(":/data/photo/wood_floor_worn_rough.jpg");
-        info.surfaceTileMm = 2000.0;
+        info.surfaceColor = QStringLiteral(":/data/photo/wood_table_large_diff.jpg");
+        info.surfaceNormal = QStringLiteral(":/data/photo/wood_table_large_nor_gl.jpg");
+        info.surfaceRoughness = QStringLiteral(":/data/photo/wood_table_large_rough.jpg");
+        info.surfaceTileMm = 1550.0;
 
-        // a white braided cotton lace, 4.5 mm (it fits the eyelets); it
-        // holds on the canvas a little better than on the floor
-        info.rope.construction = 2;
-        info.rope.diameterMm = 4.5;
-        info.rope.bendingLengthMm = 20.0;
-        info.rope.tiedSet = 0.3;
-        info.rope.twistStiffness = 0.5;
-        info.rope.setRadiusMm = 14.0;
-        info.rope.setRate = 0.3;
-        info.rope.curlRadiusMm = 70.0;
-        info.rope.frictionSurface = 0.6;
-        info.rope.frictionSelf = 0.5;
-        info.rope.color = QColor(240, 238, 232);
-        info.rope.roughness = 0.8f;
+        info.stoneFloor = true;
 
-        info.sneaker = true;
-        info.canvas = QColor(37, 50, 84);
+        // the scale of the scene: the track is 40 mm wide, as toy track is
+        info.rope.construction = 3;
+        info.rope.diameterMm = 40.0;
+        info.rope.color = QColor(214, 170, 120);
+        info.rope.roughness = 0.5f;
+
+        info.train = true;
         break;
 
     case Scene::BallroomFloor:

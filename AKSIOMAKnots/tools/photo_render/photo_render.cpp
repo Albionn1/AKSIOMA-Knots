@@ -13,7 +13,7 @@
 #include "knotmath.h"
 #include "knottable.h"
 #include "ropephysics.h"
-#include "sneaker.h"
+#include "traintrack.h"
 
 #include <QApplication>
 #include <QDir>
@@ -67,6 +67,78 @@ int main(int argc, char **argv)
                         e.sunIrradiance.x(), e.sunIrradiance.y(), e.sunIrradiance.z(),
                         e.sunRadius * 57.2958, up.x(), up.y(), up.z(), qPrintable(e.error));
         }
+
+        return 0;
+    }
+
+    /*
+     * photo_render trainbench <knot> [width height]: frames of the toy train
+     * running on the knot's track, as they are in the window (each one
+     * starts the picture again, and the shadow map with it).
+     */
+    if (argc >= 3 && QString(argv[1]) == QStringLiteral("trainbench"))
+    {
+        const KnotTable &knots = KnotTable::instance();
+        const int index = knots.indexOf(QString(argv[2]));
+        const int width = argc >= 5 ? QString(argv[3]).toInt() : 1920;
+        const int height = argc >= 5 ? QString(argv[4]).toInt() : 1080;
+
+        if (index < 0)
+            return 1;
+
+        QElapsedTimer clock;
+
+        clock.start();
+
+        const Photo::TrainTrack track = Photo::buildTrainTrack(knots.curve(index));
+
+        std::printf("track: %lld ms, %.1f m, %d vertices\n", clock.restart(), track.length / 1000.0,
+                    static_cast<int>(track.mesh.positions.size() / 3));
+
+        KnotGLWidget view;
+
+        view.setAttribute(Qt::WA_DontShowOnScreen);
+        view.resize(width, height);
+        view.show();
+
+        {
+            Lighting::Options options = view.lighting();
+
+            options.photoQuality = qEnvironmentVariableIntValue("PHOTO_QUALITY");
+
+            view.setLighting(options);
+        }
+
+        QObject::connect(&view, &KnotGLWidget::photoLevelChanged, [](int level, bool automatic)
+                         {
+                             std::printf("level %d (%s)\n", level, automatic ? "automatic" : "chosen");
+                             std::fflush(stdout);
+                         });
+
+        if (!view.setPhotoMode(true, Photo::Scene::TrainTrack))
+            return 1;
+
+        view.setTrainPath(track.path, track.length);
+        view.setRestingRope(track.mesh, QMatrix4x4());
+        view.fitNewKnot(45.0f);
+        view.resetCamera(45.0f, false);
+
+        view.grabFramebuffer();
+
+        view.setTrainRunning(false);
+
+        clock.restart();
+
+        constexpr int Frames = 300;
+
+        for (int frame = 0; frame < Frames; ++frame)
+        {
+            view.setTrainAlong(frame * 4.0);
+            view.grabFramebuffer();
+        }
+
+        std::printf("moving: %.2f ms a frame (with reading it back)\n",
+                    static_cast<double>(clock.nsecsElapsed()) / 1.0e6 / Frames);
 
         return 0;
     }
@@ -257,14 +329,15 @@ int main(int argc, char **argv)
         QElapsedTimer clock;
         clock.start();
 
-        // tied in the sneaker's lace, or dropped on the table
-        const Photo::RestingRope rope =
-            Photo::sceneInfo(scene).sneaker
-                ? Photo::tieOnSneaker(curve, radius, material).rope
-                : Photo::layOnTable(curve, true, radius, material);
+        // the track of the toy train, or dropped on the table
+        const bool train = Photo::sceneInfo(scene).train;
+
+        const Photo::TrainTrack track = train ? Photo::buildTrainTrack(curve) : Photo::TrainTrack();
+
+        const Photo::RestingRope rope = train ? track.rope : Photo::layOnTable(curve, true, radius, material);
         const qint64 physics = clock.restart();
 
-        const Mesh mesh = Photo::buildRopeMesh(rope.points, true, radius, material);
+        const Mesh mesh = train ? track.mesh : Photo::buildRopeMesh(rope.points, true, radius, material);
         const qint64 building = clock.restart();
 
         // as while the rope is in the hand (built for every frame)
@@ -275,6 +348,14 @@ int main(int argc, char **argv)
         {
             std::printf("the room could not be loaded\n");
             return 1;
+        }
+
+        // PHOTO_TRAIN=share: the train stands still this share along the track
+        if (train)
+        {
+            view.setTrainPath(track.path, track.length);
+            view.setTrainRunning(false);
+            view.setTrainAlong(qEnvironmentVariable("PHOTO_TRAIN", "0.1").toDouble() * track.length);
         }
 
         view.setRestingRope(mesh, rope.pose);

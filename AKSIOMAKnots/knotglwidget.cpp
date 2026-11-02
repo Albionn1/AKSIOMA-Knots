@@ -1,6 +1,6 @@
 #include "knotglwidget.h"
 
-#include "sneaker.h"
+#include "traintrack.h"
 #include "theme.h"
 
 #include <QApplication>
@@ -423,9 +423,8 @@ KnotGLWidget::KnotGLWidget(QWidget *parent)
       particleBuffer_(QOpenGLBuffer::VertexBuffer),
       rng_(std::random_device{}()),
       surfaceBuffer_(QOpenGLBuffer::VertexBuffer),
-      shoeBuffer_(QOpenGLBuffer::VertexBuffer),
-      shoeIndexBuffer_(QOpenGLBuffer::IndexBuffer),
-      shoeShadeBuffer_(QOpenGLBuffer::VertexBuffer)
+      trainBuffer_(QOpenGLBuffer::VertexBuffer),
+      trainIndexBuffer_(QOpenGLBuffer::IndexBuffer)
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -511,7 +510,7 @@ KnotGLWidget::~KnotGLWidget()
         prefilterProgram_.reset();
         developProgram_.reset();
         occlusionProgram_.reset();
-        shoeProgram_.reset();
+        trainProgram_.reset();
         photoTimer_.reset();
         shadeProgram_.reset();
         shadeSmoothProgram_.reset();
@@ -639,7 +638,8 @@ uniform int uUseVertexColors;
 uniform float uMetallic;
 uniform float uRoughness;
 uniform int uMaterial;      // 0 glossy, 1 satin, 2 metal, 3 rope, 4 lace,
-                            // 5 and 6 the real rope and lace of Photo mode
+                            // 5 and 6 the real rope and lace of Photo mode,
+                            // 7 the wooden track of the toy train
 uniform int uDarkTheme;
 uniform float uRopeRadius;  // Photo mode: the rope's radius (view units)
 uniform float uMirrorLevel; // Photo mode: height of the surface it lies on
@@ -1256,6 +1256,53 @@ void main()
         through = 0.8;
 
         s.sheen = vec3(0.0);
+    }
+
+    else if (uMaterial == 7 && vTexcoord.w < 0.5)
+    {
+        /*
+         * The wooden track (Photo::buildTrainTrack): vTexcoord holds the
+         * place along it and across it (mm), and how long a piece of track
+         * is. Each piece was cut from its own board of beech, oiled, and
+         * they meet in a thin dark line.
+         */
+        float along = vTexcoord.x;
+        float across = vTexcoord.y;
+        float piece = vTexcoord.z;
+
+        float id = floor(along / piece);
+        float local = along - id * piece;
+
+        float tone = hash12(vec2(id, 1.7));
+
+        float rings = noise2(vec2(along * 0.012 + id * 3.1, across * 0.2 + id));
+        float fine = noise2(vec2(along * 0.09, across * 1.7 + id * 5.0));
+        float pore = noise2(vec2(along * 0.4, across * 5.0 + id));
+
+        albedo = mix(vec3(0.76, 0.50, 0.26), vec3(0.62, 0.39, 0.19), tone) *
+                 (0.8 + 0.3 * rings) * (0.92 + 0.14 * fine) * (0.95 + 0.08 * pore);
+
+        float joint = 1.0 - smoothstep(0.25, 0.75, min(local, piece - local));
+
+        albedo *= 1.0 - 0.7 * joint;
+
+        rough = 0.46 + 0.1 * rings;
+    }
+    else if (uMaterial == 7)
+    {
+        /*
+         * The toy blocks under the bridges: painted beech, vTexcoord the
+         * place on the face (mm), its colour, and 1.
+         */
+        vec3 paint = vTexcoord.z < 0.5 ? vec3(0.60, 0.05, 0.04) :
+                     vTexcoord.z < 1.5 ? vec3(0.86, 0.52, 0.05) :
+                     vTexcoord.z < 2.5 ? vec3(0.04, 0.15, 0.44) : vec3(0.07, 0.32, 0.14);
+
+        float grain = noise2(vec2(vTexcoord.x * 0.9, vTexcoord.y * 0.09));
+
+        albedo = paint * (0.92 + 0.16 * grain);
+
+        rough = 0.36;
     }
 
     // Where the normal turns quickly across a pixel (thin or far tubes) a
@@ -1973,13 +2020,7 @@ uniform float uReflections;
 // the stage of the unknotting for a floor), so the light rope stands out
 uniform float uStage;
 
-// the share of the room the sneaker leaves the floor (baked in Blender),
-// over the rectangle uShoeArea (x0, z0, x1, z1)
-uniform sampler2D uShoeShade;
-uniform vec4 uShoeArea;
-uniform int uUseShoeShade;
-
-// the rope and the shoe seen in the surface (premultiplied, half size), and
+// the rope and the train seen in the surface (premultiplied, half size), and
 // how high above it they are; how many pixels of the frame one view unit
 // covers at a distance of one
 uniform sampler2D uMirror;
@@ -2022,7 +2063,7 @@ float crystal(vec2 p)
 }
 
 /*
- * What the surface reflects of the rope and the shoe. In the mirror image
+ * What the surface reflects of the rope and the train. In the mirror image
  * the point of contact is sharp and what stands higher blurs, the more the
  * rougher the surface: a pixel gathers from a circle as wide as the height
  * times the spread of the reflection, which is what ties a thing to the
@@ -2131,19 +2172,6 @@ void main()
     // what the rope hides is replaced by the rope itself, lit by the room
     vec3 seen = vec3(1.0 - hidden) + hidden * 0.5 * uRopeAlbedo;
 
-    if (uUseShoeShade != 0)
-    {
-        vec2 s = (vWorld.xz - uShoeArea.xy) / (uShoeArea.zw - uShoeArea.xy);
-
-        if (s.x > 0.0 && s.x < 1.0 && s.y > 0.0 && s.y < 1.0 && geometric.y > 0.5)
-        {
-            float open = texture(uShoeShade, s).r;
-
-            seen *= open;
-            hidden = 1.0 - (1.0 - hidden) * open;
-        }
-    }
-
     float sunLit = keyShadow(vWorld, geometric);
 
     float near = shadeHere();
@@ -2161,7 +2189,7 @@ void main()
     vec3 reflected = roomSpecular(r, rough) * (1.0 - hidden) * near *
                      mix(1.0, sunLit, pow(max(dot(r, uKeyDir), 0.0), 4.0));
 
-    // in front of the room stand the rope and the shoe, in the mirror
+    // in front of the room stand the rope and the train, in the mirror
     if (uUseMirror != 0 && geometric.y > 0.5)
     {
         vec4 seenInIt = mirrorHere(n, geometric, rough * rough, length(uCameraPosition - vWorld));
@@ -2571,23 +2599,23 @@ void main()
 
     /*
      * ---------------------------------------------------------
-     * The sneaker: woven canvas, rubber, metal eyelets and the lining,
-     * lit like the table (the sun with its shadows, the room less what
-     * the shoe itself and the lace hide from each point, the room's
-     * reflections). Positions in millimetres, scaled into the view.
+     * The toy train: painted and plain wood, brass and dark windows, lit
+     * like the table (the sun with its shadows, the room less what the
+     * train hides from itself, the room's reflections). Positions in
+     * millimetres, each vehicle turned onto the track by uVehicle.
      * ---------------------------------------------------------
      */
 
-    const char *shoeVertexShader = R"(
+    const char *trainVertexShader = R"(
 #version 330 core
 
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in float aOcclusion;
 layout(location = 3) in float aMaterial;
-layout(location = 4) in float aShade;
 
 uniform mat4 uViewProjection;
+uniform mat4 uVehicle;
 uniform float uScale;          // view units per millimetre
 
 out vec3 vWorld;
@@ -2599,18 +2627,16 @@ flat out int vMaterial;
 void main()
 {
     vMm = aPosition;
-    vWorld = aPosition * uScale;
-    vNormal = aNormal;
-
-    // the room seen past the shoe (baked) and past the lace
-    vOpen = aOcclusion * (1.0 - aShade);
+    vWorld = (uVehicle * vec4(aPosition, 1.0)).xyz * uScale;
+    vNormal = mat3(uVehicle) * aNormal;
+    vOpen = aOcclusion;
     vMaterial = int(aMaterial + 0.5);
 
     gl_Position = uViewProjection * vec4(vWorld, 1.0);
 }
 )";
 
-    const char *shoeFragmentShader = R"(
+    const char *trainFragmentShader = R"(
 in vec3 vWorld;
 in vec3 vMm;
 in vec3 vNormal;
@@ -2618,7 +2644,6 @@ in float vOpen;
 flat in int vMaterial;
 
 uniform vec3 uCameraPosition;
-uniform vec3 uCanvas;          // the canvas's colour (linear)
 uniform float uReflections;
 uniform float uMirrorLevel;
 
@@ -2640,46 +2665,6 @@ float smith(float nv, float nl, float a)
     return 0.25 / ((nv * (1.0 - k) + k) * (nl * (1.0 - k) + k));
 }
 
-// the canvas's threads (0.5 mm apart each way, over and under), seen
-// across the face; faded out where a pixel covers several of them
-float weave(vec3 p, vec3 n, out vec2 slope)
-{
-    vec3 w = abs(n);
-    vec2 uv = w.x > w.y && w.x > w.z ? p.zy : (w.y > w.z ? p.xz : p.xy);
-
-    vec2 t = uv / 0.5;
-    vec2 f = fract(t) - 0.5;
-
-    // the thread on top in this cell: warp or weft
-    bool warp = mod(floor(t.x) + floor(t.y), 2.0) < 1.0;
-
-    float across = warp ? f.x : f.y;
-    float h = cos(3.14159 * across);
-
-    float fade = 1.0 - smoothstep(0.08, 0.3, length(fwidth(uv)));
-
-    slope = (warp ? vec2(-sin(3.14159 * f.x), 0.0) : vec2(0.0, -sin(3.14159 * f.y))) * 0.35 * fade;
-
-    return mix(1.0, 0.86 + 0.14 * h, fade);
-}
-
-// the normal of a surface raised by `height` (millimetres), as on the rope
-vec3 raised(vec3 n, float height)
-{
-    vec3 dpdx = dFdx(vMm);
-    vec3 dpdy = dFdy(vMm);
-
-    vec3 r1 = cross(dpdy, n);
-    vec3 r2 = cross(n, dpdx);
-
-    float det = dot(dpdx, r1);
-
-    vec3 b = abs(det) * n - sign(det) * (dFdx(height) * r1 + dFdy(height) * r2);
-    float l = length(b);
-
-    return l > 1.0e-30 && !isnan(l) && !isinf(l) ? b / l : n;
-}
-
 void main()
 {
     mirrorData = vec2(1.0, vWorld.y - uMirrorLevel);
@@ -2689,118 +2674,52 @@ void main()
 
     vec3 v = normalize(uCameraPosition - vWorld);
 
-    // seen from inside (the lining in the opening), the face looks back
     if (dot(n, v) < 0.0)
         n = -n;
 
+    // the grain runs along the toy; under the paint it is only just there
+    float grain = 0.6 * noise2(vec2(vMm.x * 0.05, (vMm.y + vMm.z) * 0.9)) +
+                  0.4 * noise2(vec2(vMm.x * 0.3, (vMm.y + vMm.z) * 2.3));
+
     vec3 albedo;
-    float rough;
+    float rough = 0.34;
     float metal = 0.0;
-    float sheen = 0.0;
 
-    // slow changes of the cloth's colour, a few millimetres across
-    float cloth = noise2(vMm.xz * 0.35 + vMm.y * 0.2) * 0.6 + noise2(vMm.xy * 1.3) * 0.4;
-
-    if (vMaterial == 0 || vMaterial == 5)
-    {
-        vec2 slope;
-        float threads = weave(vMm, geometric, slope);
-
-        /*
-         * Cotton duck. Its threads are not even: thicker lengths (slubs) run
-         * along warp and weft for a centimetre or two and stay visible long
-         * after the threads themselves are too fine to see. The cloth has
-         * been worn: it creases where the foot bends behind the toe, it
-         * drapes softly over the rest, and the dye has rubbed paler on what
-         * stands out.
-         */
-        vec3 w = abs(geometric);
-        vec2 face = w.x > w.y && w.x > w.z ? vMm.zy : (w.y > w.z ? vMm.xz : vMm.xy);
-
-        float slub = 0.5 * noise2(vec2(face.x * 2.1, face.y * 0.09)) +
-                     0.5 * noise2(vec2(face.x * 0.09 + 40.0, face.y * 2.1));
-
-        float flex = smoothstep(196.0, 214.0, vMm.x) * (1.0 - smoothstep(244.0, 252.0, vMm.x));
-
-        float wave = noise2(vec2(vMm.x * 0.2 + 6.0 * noise2(vMm.xz * 0.025), vMm.z * 0.03));
-        float crease = 1.0 - abs(wave * 2.0 - 1.0);
-
-        float drape = noise2(vMm.xz * 0.11 + vMm.y * 0.13) * 0.65 + noise2(vMm.zy * 0.27) * 0.35;
-
-        n = raised(n, 0.55 * flex * crease * crease + 1.1 * drape + 0.05 * slub);
-
-        n = normalize(n + (abs(n.y) < 0.9 ? normalize(cross(vec3(0.0, 1.0, 0.0), n)) : vec3(1.0, 0.0, 0.0)) * slope.x);
-
-        float rubbed = smoothstep(0.55, 0.85, drape) * 0.1 + flex * crease * crease * crease * 0.28;
-
-        albedo = uCanvas * threads * (0.84 + 0.2 * cloth) * (0.76 + 0.48 * slub);
-        albedo = mix(albedo, uCanvas * vec3(1.9, 2.0, 2.1) + vec3(0.012), rubbed);
-
-        rough = 0.96;
-        sheen = 0.6;
-    }
-    else if (vMaterial == 6)
-    {
-        // waxed cotton thread, twisted
-        float twist = sin((vMm.x + vMm.z) * 11.0 + vMm.y * 5.0);
-
-        albedo = vec3(0.70, 0.69, 0.64) * (0.86 + 0.14 * twist) * (0.85 + 0.15 * cloth);
-        rough = 0.72;
-        sheen = 0.35;
-    }
+    if (vMaterial == 0)
+        albedo = vec3(0.60, 0.045, 0.04);
     else if (vMaterial == 1)
-    {
-        // the rubber sole, with a stripe of the canvas's colour round it
-        // and a thin one above; its underside worn grey
-        albedo = vec3(0.74, 0.72, 0.665);
-        rough = 0.55 + 0.2 * cloth;
-
-        // moulded with a fine stipple; ribbed around the toe
-        float stipple = noise2(vec2(vMm.x + vMm.z, vMm.y) * 2.3);
-        float ribs = vMm.x > 232.0 && vMm.y < 26.0 ? sin(vMm.y * 2.2) * smoothstep(232.0, 244.0, vMm.x) : 0.0;
-
-        n = raised(n, 0.05 * stipple + 0.16 * ribs);
-
-        float side = 1.0 - smoothstep(0.3, 0.6, abs(geometric.y));
-
-        if (vMm.y > 13.0 && vMm.y < 16.0 && side > 0.5)
-            albedo = uCanvas * 1.3;
-        else if (vMm.y > 17.2 && vMm.y < 18.0 && side > 0.5)
-            albedo = vec3(0.45, 0.06, 0.05);
-
-        if (geometric.y < -0.5)
-            albedo = vec3(0.35, 0.34, 0.32);
-
-        // walked in: grey along the ground, scuffed here and there
-        float ground = 1.0 - smoothstep(0.0, 12.0, vMm.y + 3.0 * noise2(vMm.xz * 0.05));
-        float scuff = smoothstep(0.6, 0.72, noise2(vec2((vMm.x + vMm.z) * 0.32, vMm.y * 2.4)));
-
-        albedo *= (0.94 + 0.06 * cloth) * mix(1.0, 0.62, ground) * mix(1.0, 0.8, scuff * 0.7);
-    }
+        albedo = vec3(0.035, 0.13, 0.42);
     else if (vMaterial == 2)
+        albedo = vec3(0.86, 0.52, 0.05);
+    else if (vMaterial == 6)
+        albedo = vec3(0.06, 0.30, 0.13);
+    else if (vMaterial == 3)
     {
-        // nickel-plated brass
-        albedo = vec3(0.86, 0.85, 0.82);
-        rough = 0.28;
-        metal = 1.0;
+        // plain beech, oiled
+        albedo = vec3(0.72, 0.51, 0.31) * (0.78 + 0.4 * grain);
+        rough = 0.55;
     }
     else if (vMaterial == 4)
     {
-        // the rubber toe cap: a little yellowed and scuffed where it meets things
-        float scuff = smoothstep(0.66, 0.82, noise2(vMm.xz * vec2(0.42, 1.3))) * smoothstep(268.0, 286.0, vMm.x);
-
-        n = raised(n, 0.04 * noise2(vMm.xz * 2.7) + 0.12 * noise2(vMm.xz * 0.08));
-
-        albedo = vec3(0.76, 0.74, 0.685) * (0.95 + 0.05 * cloth) * mix(1.0, 0.86, scuff);
-        rough = 0.42 + 0.18 * cloth + 0.25 * scuff;
+        albedo = vec3(0.025, 0.025, 0.028);
+        rough = 0.3;
+    }
+    else if (vMaterial == 5)
+    {
+        // polished brass
+        albedo = vec3(0.91, 0.74, 0.42);
+        rough = 0.26;
+        metal = 1.0;
     }
     else
     {
-        // the lining
-        albedo = vec3(0.42, 0.40, 0.37) * (0.9 + 0.2 * cloth);
-        rough = 0.9;
-        sheen = 0.15;
+        // a painted window: dark, and shiny
+        albedo = vec3(0.012, 0.018, 0.03);
+        rough = 0.12;
     }
+
+    if (vMaterial != 3 && vMaterial != 5)
+        albedo *= 0.92 + 0.16 * grain;
 
     float nv = max(dot(n, v), 1.0e-3);
 
@@ -2809,8 +2728,7 @@ void main()
 
     float sunLit = keyShadow(vWorld, geometric);
 
-    // (a cloth reflects little: its light goes in among the threads)
-    vec3 f0 = mix(vec3(sheen > 0.5 ? 0.018 : 0.04), albedo, metal);
+    vec3 f0 = mix(vec3(0.04), albedo, metal);
     vec3 diffuse = albedo * (1.0 - metal);
 
     // the sun
@@ -2828,32 +2746,27 @@ void main()
     // the room
     color += diffuse * roomIrradiance(n) * open / PhotoPi;
 
-    // What the shoe's baked shade counts as hidden is, on its way down, the
-    // sunlit floor: it sends its light back up the sides.
-    color += diffuse * uFloorBounce * (0.5 - 0.5 * n.y) * (1.0 - vOpen) * shadeHere() * 0.7 / PhotoPi;
+    // what lies under it is lit too: the sunny floor sends light back up
+    color += diffuse * uFloorBounce * (0.5 - 0.5 * n.y) * shadeHere() * 0.5 / PhotoPi;
 
     vec3 r = reflect(-v, n);
 
     color += roomSpecular(r, rough) * roomReflectance(f0, rough, nv) * open * uReflections;
 
-    // the soft glow of cloth at grazing angles
-    color += sheen * pow(1.0 - nv, 3.0) * roomIrradiance(n) * open * sqrt(albedo) * 0.35 / PhotoPi;
-
     fragColor = vec4(cleanLight(color), 1.0);
 }
 )";
 
-    shoeProgram_ = std::make_unique<QOpenGLShaderProgram>();
+    trainProgram_ = std::make_unique<QOpenGLShaderProgram>();
 
-    if (shoeProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Vertex, shoeVertexShader) &&
-        shoeProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Fragment, withPhoto(shoeFragmentShader)))
+    if (trainProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Vertex, trainVertexShader) &&
+        trainProgram_->addCacheableShaderFromSourceCode(QOpenGLShader::Fragment, withPhoto(trainFragmentShader)))
     {
-        shoeProgram_->bindAttributeLocation("aPosition", 0);
-        shoeProgram_->bindAttributeLocation("aNormal", 1);
-        shoeProgram_->bindAttributeLocation("aOcclusion", 2);
-        shoeProgram_->bindAttributeLocation("aMaterial", 3);
-        shoeProgram_->bindAttributeLocation("aShade", 4);
-        shoeProgram_->link();
+        trainProgram_->bindAttributeLocation("aPosition", 0);
+        trainProgram_->bindAttributeLocation("aNormal", 1);
+        trainProgram_->bindAttributeLocation("aOcclusion", 2);
+        trainProgram_->bindAttributeLocation("aMaterial", 3);
+        trainProgram_->link();
     }
 }
 
@@ -3036,16 +2949,16 @@ void KnotGLWidget::drawShadowMap()
         shadowDepthBias_ = 3.0f * shadowTexel_ / (farPlane - nearPlane);
     }
 
-    // What the map holds depends only on the light, the mesh and the shoe. A
-    // knot that stands still keeps its shadow, and the frame this pass cost.
-    const bool shoe = showShoe();
+    // What the map holds depends only on the light, the mesh and the train.
+    // A knot that stands still keeps its shadow, and the frame this pass cost.
+    const bool train = showTrain();
 
-    if (!shadowDirty_ && shadowDrawnLight_ == lightViewProjection && shadowDrawnShoe_ == shoe)
+    if (!shadowDirty_ && shadowDrawnLight_ == lightViewProjection && shadowDrawnTrain_ == train)
         return;
 
     shadowDirty_ = false;
     shadowDrawnLight_ = lightViewProjection;
-    shadowDrawnShoe_ = shoe;
+    shadowDrawnTrain_ = train;
 
     // not bound for reading while it is drawn into
     glActiveTexture(GL_TEXTURE1);
@@ -3076,21 +2989,9 @@ void KnotGLWidget::drawShadowMap()
 
     meshVao_.release();
 
-    // the sneaker casts its shadow too (on the floor and on the lace)
-    if (shoe)
-    {
-        QMatrix4x4 scale;
-
-        scale.scale(worldPerMm());
-
-        depthProgram_->setUniformValue("uLightViewProjection", lightViewProjection * scale);
-
-        shoeVao_.bind();
-
-        glDrawElements(GL_TRIANGLES, shoeIndexCount_, GL_UNSIGNED_INT, nullptr);
-
-        shoeVao_.release();
-    }
+    // the train casts its shadow too (on the floor and on the track)
+    if (train)
+        drawTrainVehicles(*depthProgram_, "uLightViewProjection", lightViewProjection);
 
     depthProgram_->release();
 
@@ -3337,20 +3238,9 @@ void KnotGLWidget::computeMeshBounds()
         maximum.setZ(std::max(maximum.z(), z));
     }
 
-    // the sneaker under the lace (its sole on the floor)
-    if (showShoe())
-    {
-        const Photo::Sneaker &shoe = Photo::sneaker();
-        const float mm = worldPerMm();
-
-        for (const QVector3D &corner : {shoe.minimum * mm, shoe.maximum * mm})
-        {
-            minimum = QVector3D(std::min(minimum.x(), corner.x()), std::min(minimum.y(), corner.y()),
-                                std::min(minimum.z(), corner.z()));
-            maximum = QVector3D(std::max(maximum.x(), corner.x()), std::max(maximum.y(), corner.y()),
-                                std::max(maximum.z(), corner.z()));
-        }
-    }
+    // the train on the highest bridge
+    if (showTrain())
+        maximum.setY(maximum.y() + static_cast<float>(Photo::TrainHeightMm) * worldPerMm());
 
     meshMin_ = minimum;
     meshMax_ = maximum;
@@ -3673,6 +3563,84 @@ void KnotGLWidget::flyWithSunBehind(const QVector3D &centre, float radius, float
     const float yaw = qRadiansToDegrees(std::atan2(sun.x(), sun.z())) + aside;
 
     flyCameraTo(yaw, pitch, sphereDistance(radius), posed(centre));
+}
+
+void KnotGLWidget::setShowFrameRate(bool shown)
+{
+    showFrameRate_ = shown;
+}
+
+double KnotGLWidget::frameRate() const
+{
+    return frameRate_;
+}
+
+void KnotGLWidget::countFrame()
+{
+    if (!frameRateClock_.isValid())
+    {
+        frameRateClock_.start();
+        frameRateFrames_ = 0;
+
+        return;
+    }
+
+    ++frameRateFrames_;
+
+    // twice a second: often enough to follow, and steady enough to read
+    const qint64 elapsed = frameRateClock_.elapsed();
+
+    if (elapsed < 500)
+        return;
+
+    const double rate = 1000.0 * frameRateFrames_ / static_cast<double>(elapsed);
+
+    // The view draws only when something changes: a frame now and then is a
+    // view at rest, not a slow computer.
+    frameRate_ = rate < 4.0 ? 0.0 : rate;
+
+    frameRateFrames_ = 0;
+
+    frameRateClock_.restart();
+}
+
+void KnotGLWidget::drawFrameRate(QPainter &painter)
+{
+    if (frameRate_ < 0.0)
+        return;
+
+    const QString text =
+        frameRate_ > 0.0
+            ? tr("%1 FPS  %2 ms").arg(qRound(frameRate_)).arg(1000.0 / frameRate_, 0, 'f', 1)
+            : tr("Idle");
+
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+
+    QFont font = painter.font();
+
+    font.setBold(true);
+    font.setPointSize(9);
+
+    painter.setFont(font);
+
+    const QFontMetrics metrics(font);
+
+    constexpr int Margin = 12;
+    constexpr int PadX = 9;
+    constexpr int PadY = 5;
+
+    // (as wide as a long reading, so that it does not jump about)
+    const int wide = std::max(metrics.horizontalAdvance(text), metrics.horizontalAdvance(tr("%1 FPS  %2 ms").arg(888).arg(88.8, 0, 'f', 1)));
+
+    const QRectF box(width() - Margin - wide - 2 * PadX, Margin, wide + 2 * PadX, metrics.height() + 2 * PadY);
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(18, 18, 18, 205));
+    painter.drawRoundedRect(box, 6.0, 6.0);
+
+    painter.setPen(Qt::white);
+    painter.drawText(box, Qt::AlignCenter, text);
 }
 
 void KnotGLWidget::drawCaption(QPainter &painter)
@@ -4761,10 +4729,10 @@ void KnotGLWidget::drawCrossingLabels(QPainter &painter)
         painter.setPen(Qt::white);
 
         const QRectF centeredRect(
-            position.x() - textRect.width() * 0.5,
-            position.y() - textRect.height() * 0.5 - textRect.top(),
-            textRect.width(),
-            textRect.height());
+            position.x() - radius,
+            position.y() - radius,
+            2.0 * radius,
+            2.0 * radius);
 
         painter.drawText(centeredRect, Qt::AlignCenter, text);
     }
@@ -4828,6 +4796,9 @@ void KnotGLWidget::paintGL()
     };
 
     stage(-1);
+
+    // the train moves on
+    advanceTrain();
 
     // first the shadow map (its own framebuffer and viewport)
     drawShadowMap();
@@ -4941,7 +4912,7 @@ void KnotGLWidget::paintGL()
         stage(2);
         drawPhotoFloor(projection * view);
         stage(3);
-        drawShoe(projection * view * model);
+        drawTrain(projection * view * model);
         drawMesh(model, view, projection);
         stage(4);
 
@@ -4957,7 +4928,7 @@ void KnotGLWidget::paintGL()
 
         if (profiling && ++profileFrames_ == 60)
         {
-            const char *names[ProfileStages] = {"shadow map", "table, shade", "room", "table", "rope (shoe)", "camera",
+            const char *names[ProfileStages] = {"shadow map", "table, shade", "room", "table", "rope, train", "camera",
                                                 "depth, shade", "mirror"};
 
             QString line = QStringLiteral("frame %1x%2:").arg(frameWidth).arg(frameHeight);
@@ -4984,8 +4955,9 @@ void KnotGLWidget::paintGL()
             profileFrames_ = 0;
         }
 
-        // the next frame adds to this one, up to a clean picture
-        if (photoSample_ < PhotoSamples)
+        // the next frame adds to this one, up to a clean picture; a train
+        // that runs needs every frame
+        if (photoSample_ < PhotoSamples || (showTrain() && trainRunning()))
             update();
     }
     else
@@ -5010,7 +4982,10 @@ void KnotGLWidget::paintGL()
     const bool flashes = !flashPositions_.isEmpty();
     const bool caption = !captionTitle_.isEmpty();
 
-    if (labels || flashes || showInset_ || caption)
+    if (showFrameRate_)
+        countFrame();
+
+    if (labels || flashes || showInset_ || caption || showFrameRate_)
     {
         QPainter painter(this);
 
@@ -5025,6 +5000,9 @@ void KnotGLWidget::paintGL()
 
         if (caption)
             drawCaption(painter);
+
+        if (showFrameRate_)
+            drawFrameRate(painter);
     }
 }
 
@@ -5129,6 +5107,11 @@ void KnotGLWidget::onAnimationTick()
     {
         frameClock_.start();
     }
+
+    // a view at rest draws nothing, so the frame rate would never change:
+    // now and then a frame, to find out
+    if (showFrameRate_ && (!frameRateClock_.isValid() || frameRateClock_.elapsed() >= 1000))
+        update();
 
     // a dialog in front has the graphics card to itself
     const QWidget *modal = QApplication::activeModalWidget();
@@ -5554,8 +5537,8 @@ void KnotGLWidget::wheelEvent(QWheelEvent *event)
 
     distance_ *= static_cast<float>(std::pow(0.88, delta));
 
-    // the whole sneaker needs more room
-    distance_ = std::clamp(distance_, 2.2f, showShoe() ? 90.0f : 30.0f);
+    // the whole of a long track needs more room
+    distance_ = std::clamp(distance_, 2.2f, showTrain() ? 120.0f : 30.0f);
 
     emit cameraChanged(yaw_, pitch_, distance_);
 
@@ -5678,17 +5661,13 @@ void KnotGLWidget::resetCamera(float highestPitch, bool animate)
     }
 
     /*
-     * The sneaker: the knot and the lacing with the shoe around them, from
-     * above the front of its outer side (steeper than a table: the knot
-     * lies on top of the shoe).
+     * The toy train: the whole track from above one corner of it, steeper
+     * than a rope on a table, so that the plan of the knot can be read.
      */
-    if (showShoe())
+    if (showTrain())
     {
-        const Photo::Sneaker &shoe = Photo::sneaker();
-        const float mm = worldPerMm();
-
-        const float yaw = 38.0f;
-        const float pitch = 55.0f;
+        const float yaw = 25.0f;
+        const float pitch = 50.0f;
 
         const float pr = qDegreesToRadians(pitch);
         const float yr = qDegreesToRadians(yaw);
@@ -5698,7 +5677,6 @@ void KnotGLWidget::resetCamera(float highestPitch, bool animate)
         const QVector3D right = QVector3D::crossProduct(-toCamera, QVector3D(0.0f, 1.0f, 0.0f)).normalized();
         const QVector3D up = QVector3D::crossProduct(right, -toCamera);
 
-        // the lace, and the shoe within a few centimetres of it
         QVector<QVector3D> points;
 
         QVector3D low(1e30f, 1e30f, 1e30f);
@@ -5712,22 +5690,6 @@ void KnotGLWidget::resetCamera(float highestPitch, bool animate)
 
             low = QVector3D(std::min(low.x(), p.x()), std::min(low.y(), p.y()), std::min(low.z(), p.z()));
             high = QVector3D(std::max(high.x(), p.x()), std::max(high.y(), p.y()), std::max(high.z(), p.z()));
-        }
-
-        const float margin = 30.0f * mm;
-
-        const int count = shoe.vertices.size() / Photo::Sneaker::VertexFloats;
-
-        for (int i = 0; i < count; i += 23)
-        {
-            const float *v = shoe.vertices.constData() + i * Photo::Sneaker::VertexFloats;
-            const QVector3D p = QVector3D(v[0], v[1], v[2]) * mm;
-
-            if (p.x() > low.x() - margin && p.x() < high.x() + margin &&
-                p.z() > low.z() - margin && p.z() < high.z() + margin)
-            {
-                points.push_back(p);
-            }
         }
 
         QVector3D centre = 0.5f * (low + high);
@@ -5746,12 +5708,12 @@ void KnotGLWidget::resetCamera(float highestPitch, bool animate)
 
         centre += right * (0.5f * (minX + maxX)) + up * (0.5f * (minY + maxY));
 
-        constexpr float ShoeFill = 0.75f;
+        constexpr float TrackFill = 0.86f;
 
         const float aspect =
             height() > 0 ? static_cast<float>(width()) / static_cast<float>(height()) : 1.0f;
 
-        const float tanY = std::tan(qDegreesToRadians(FieldOfView * 0.5f)) * ShoeFill;
+        const float tanY = std::tan(qDegreesToRadians(FieldOfView * 0.5f)) * TrackFill;
         const float tanX = tanY * aspect;
 
         float distance = 0.0f;
@@ -5765,7 +5727,7 @@ void KnotGLWidget::resetCamera(float highestPitch, bool animate)
             distance = std::max(distance, depth + std::abs(QVector3D::dotProduct(d, up)) / tanY);
         }
 
-        flyCameraTo(yaw, pitch, std::clamp(distance, 2.2f, 90.0f), centre);
+        flyCameraTo(yaw, pitch, std::clamp(distance, 2.2f, 120.0f), centre);
 
         if (!animate)
         {
@@ -6161,7 +6123,6 @@ void KnotGLWidget::setRestingRope(KnotMath::Mesh mesh, const QMatrix4x4 &pose, b
 
     surfaceDirty_ = true;
     occlusionDirty_ = true;
-    shoeShadeDirty_ = true;
 
     refreshPose();
 
@@ -6636,9 +6597,9 @@ bool KnotGLWidget::loadPhotoScene()
         return false;
     }
 
-    // the sneaker (its scene only)
-    if (photoInfo_.sneaker)
-        uploadShoe();
+    // the train (its scene only)
+    if (photoInfo_.train)
+        uploadTrain();
 
     loadedScene_ = static_cast<int>(photoScene_);
 
@@ -6665,7 +6626,7 @@ void KnotGLWidget::destroyPhotoResources()
 
     occlusionFramebuffer_ = 0;
 
-    destroyShoe();
+    destroyTrain();
 
     loadedScene_ = -1;
     photoBytes_ = 0;
@@ -7230,277 +7191,212 @@ void KnotGLWidget::bakeSurfaceOcclusion()
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
 }
 
-bool KnotGLWidget::showShoe() const
+bool KnotGLWidget::showTrain() const
 {
-    return photo_ && photoInfo_.sneaker && restingRope_ && shoeIndexCount_ > 0;
+    return photo_ && photoInfo_.train && restingRope_ && trainIndexCount_ > 0 && trainPath_.size() >= 8;
 }
 
-void KnotGLWidget::uploadShoe()
+void KnotGLWidget::setTrainPath(const QVector<KnotMath::Vec3> &path, double length)
 {
-    destroyShoe();
+    trainPath_ = path;
+    trainLength_ = length;
+    trainAlong_ = 0.0;
+    trainClock_.invalidate();
 
-    const Photo::Sneaker &shoe = Photo::sneaker();
+    ++photoVersion_;
+    shadowDirty_ = true;
 
-    if (!shoe.valid || !shoeProgram_ || !shoeProgram_->isLinked())
-        return;
+    update();
+}
 
-    const int vertexCount = shoe.vertices.size() / Photo::Sneaker::VertexFloats;
+void KnotGLWidget::setTrainRunning(bool running)
+{
+    trainRunning_ = running;
 
-    shoeVao_.create();
-    shoeVao_.bind();
+    trainClock_.invalidate();
 
-    shoeBuffer_.create();
-    shoeBuffer_.setUsagePattern(QOpenGLBuffer::StaticDraw);
-    shoeBuffer_.bind();
-    shoeBuffer_.allocate(shoe.vertices.constData(), static_cast<int>(shoe.vertices.size() * sizeof(float)));
+    update();
+}
 
-    const int stride = static_cast<int>(Photo::Sneaker::VertexFloats * sizeof(float));
+bool KnotGLWidget::trainRunning() const
+{
+    return trainRunning_ && !reduceMotion_;
+}
 
-    shoeProgram_->bind();
+void KnotGLWidget::setTrainAlong(double millimetres)
+{
+    trainAlong_ = millimetres;
 
-    shoeProgram_->enableAttributeArray(0);
-    shoeProgram_->setAttributeBuffer(0, GL_FLOAT, 0, 3, stride);
-    shoeProgram_->enableAttributeArray(1);
-    shoeProgram_->setAttributeBuffer(1, GL_FLOAT, static_cast<int>(3 * sizeof(float)), 3, stride);
-    shoeProgram_->enableAttributeArray(2);
-    shoeProgram_->setAttributeBuffer(2, GL_FLOAT, static_cast<int>(6 * sizeof(float)), 1, stride);
-    shoeProgram_->enableAttributeArray(3);
-    shoeProgram_->setAttributeBuffer(3, GL_FLOAT, static_cast<int>(7 * sizeof(float)), 1, stride);
+    ++photoVersion_;
+    shadowDirty_ = true;
 
-    // the lace's shade: none until the lace is there
-    shoeShadeBuffer_.create();
-    shoeShadeBuffer_.setUsagePattern(QOpenGLBuffer::DynamicDraw);
-    shoeShadeBuffer_.bind();
+    update();
+}
 
-    const QVector<float> open(vertexCount, 0.0f);
+double KnotGLWidget::trainAlong() const
+{
+    return trainAlong_;
+}
 
-    shoeShadeBuffer_.allocate(open.constData(), static_cast<int>(open.size() * sizeof(float)));
-
-    shoeProgram_->enableAttributeArray(4);
-    shoeProgram_->setAttributeBuffer(4, GL_FLOAT, 0, 1, static_cast<int>(sizeof(float)));
-
-    shoeProgram_->release();
-
-    shoeIndexBuffer_.create();
-    shoeIndexBuffer_.setUsagePattern(QOpenGLBuffer::StaticDraw);
-    shoeIndexBuffer_.bind();
-    shoeIndexBuffer_.allocate(shoe.indices.constData(), static_cast<int>(shoe.indices.size() * sizeof(quint32)));
-
-    shoeVao_.release();
-
-    shoeBuffer_.release();
-    shoeShadeBuffer_.release();
-    shoeIndexBuffer_.release();
-
-    shoeIndexCount_ = shoe.indices.size();
-    shoeShadeDirty_ = true;
-
-    photoBytes_ += static_cast<qint64>(shoe.vertices.size() + vertexCount) * 4 +
-                   static_cast<qint64>(shoe.indices.size()) * 4;
-
-    // the floor's view of the room past the shoe (one channel is enough;
-    // it lies over a rectangle, not repeated)
-    shoeFloorTexture_ = loadTexture(shoe.floorShade);
-
-    if (shoeFloorTexture_ != 0)
+void KnotGLWidget::advanceTrain()
+{
+    if (!showTrain())
     {
-        glBindTexture(GL_TEXTURE_2D, shoeFloorTexture_);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glBindTexture(GL_TEXTURE_2D, 0);
+        trainClock_.invalidate();
+
+        return;
+    }
+
+    if (trainRunning())
+    {
+        /*
+         * At the pace of a toy pushed along by hand; on a very long track
+         * a little faster, so that a lap never takes much over a minute.
+         * (A frame that came late does not make it jump.)
+         */
+        const double seconds =
+            trainClock_.isValid() ? std::min(static_cast<double>(trainClock_.restart()) / 1000.0, 0.1) : 0.0;
+
+        if (!trainClock_.isValid())
+            trainClock_.start();
+
+        const double speed = std::max(220.0, trainLength_ / 70.0);
+
+        trainAlong_ = std::fmod(trainAlong_ + speed * seconds, trainLength_);
+
+        if (seconds > 0.0)
+        {
+            ++photoVersion_;
+            shadowDirty_ = true;
+        }
+    }
+
+    const Photo::TrainModel &train = Photo::trainModel();
+
+    for (int k = 0; k < Photo::TrainModel::Vehicles; ++k)
+    {
+        trainPlace_[k] = Photo::placeVehicle(trainPath_, trainLength_, trainAlong_ - train.behind[k], train.axles[k]);
     }
 }
 
-void KnotGLWidget::destroyShoe()
+void KnotGLWidget::uploadTrain()
 {
-    if (shoeVao_.isCreated())
-        shoeVao_.destroy();
+    destroyTrain();
 
-    for (QOpenGLBuffer *buffer : {&shoeBuffer_, &shoeIndexBuffer_, &shoeShadeBuffer_})
+    const Photo::TrainModel &train = Photo::trainModel();
+
+    if (!trainProgram_ || !trainProgram_->isLinked())
+        return;
+
+    trainVao_.create();
+    trainVao_.bind();
+
+    trainBuffer_.create();
+    trainBuffer_.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    trainBuffer_.bind();
+    trainBuffer_.allocate(train.vertices.constData(), static_cast<int>(train.vertices.size() * sizeof(float)));
+
+    const int stride = static_cast<int>(Photo::TrainModel::VertexFloats * sizeof(float));
+
+    trainProgram_->bind();
+
+    trainProgram_->enableAttributeArray(0);
+    trainProgram_->setAttributeBuffer(0, GL_FLOAT, 0, 3, stride);
+    trainProgram_->enableAttributeArray(1);
+    trainProgram_->setAttributeBuffer(1, GL_FLOAT, static_cast<int>(3 * sizeof(float)), 3, stride);
+    trainProgram_->enableAttributeArray(2);
+    trainProgram_->setAttributeBuffer(2, GL_FLOAT, static_cast<int>(6 * sizeof(float)), 1, stride);
+    trainProgram_->enableAttributeArray(3);
+    trainProgram_->setAttributeBuffer(3, GL_FLOAT, static_cast<int>(7 * sizeof(float)), 1, stride);
+
+    trainProgram_->release();
+
+    trainIndexBuffer_.create();
+    trainIndexBuffer_.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    trainIndexBuffer_.bind();
+    trainIndexBuffer_.allocate(train.indices.constData(), static_cast<int>(train.indices.size() * sizeof(quint32)));
+
+    trainVao_.release();
+
+    trainBuffer_.release();
+    trainIndexBuffer_.release();
+
+    trainIndexCount_ = train.indices.size();
+
+    photoBytes_ += static_cast<qint64>(train.vertices.size()) * 4 +
+                   static_cast<qint64>(train.indices.size()) * 4;
+}
+
+void KnotGLWidget::destroyTrain()
+{
+    if (trainVao_.isCreated())
+        trainVao_.destroy();
+
+    for (QOpenGLBuffer *buffer : {&trainBuffer_, &trainIndexBuffer_})
     {
         if (buffer->isCreated())
             buffer->destroy();
     }
 
-    if (shoeFloorTexture_ != 0)
-        glDeleteTextures(1, &shoeFloorTexture_);
-
-    shoeFloorTexture_ = 0;
-    shoeIndexCount_ = 0;
+    trainIndexCount_ = 0;
 }
 
-void KnotGLWidget::updateShoeShade()
+void KnotGLWidget::drawTrainVehicles(QOpenGLShaderProgram &program, const char *matrix, const QMatrix4x4 &viewProjection)
 {
-    shoeShadeDirty_ = false;
+    const Photo::TrainModel &train = Photo::trainModel();
 
-    if (!shoeShadeBuffer_.isCreated())
-        return;
+    trainVao_.bind();
 
-    const Photo::Sneaker &shoe = Photo::sneaker();
-    const int vertexCount = shoe.vertices.size() / Photo::Sneaker::VertexFloats;
-
-    QVector<float> hidden(vertexCount, 0.0f);
-
-    const int samples = mesh_.centerline.size() / 4;
-
-    if (samples >= 3 && restingRope_)
+    for (int k = 0; k < Photo::TrainModel::Vehicles; ++k)
     {
-        /*
-         * The lace's centre line in millimetres, in pieces of about 0.4
-         * radii, sorted into cubes of the reach of their shade. Each point
-         * of the shoe adds up the view factors of the pieces near it,
-         *     dF = 2 r |s x d| max(n . d, 0) ds / (pi D^2)
-         * (as for the table, bakeSurfaceOcclusion).
-         */
-        const float mm = worldPerMm();
-        const double r = 0.5 * photoInfo_.rope.diameterMm;
-
-        const float length = mesh_.strandLength.isEmpty() ? 0.0f : mesh_.strandLength.first();
-        const int wanted = std::clamp(static_cast<int>(length / (0.4f * mesh_.centerline.at(3))), 16, 8192);
-        const int stride = std::max(1, samples / wanted);
-
-        QVector<KnotMath::Vec3> line;
-
-        for (int s = 0; s < samples; s += stride)
+        if (matrix != nullptr)
         {
-            line.push_back(KnotMath::Vec3(
-                mesh_.centerline.at(4 * s) / mm,
-                mesh_.centerline.at(4 * s + 1) / mm,
-                mesh_.centerline.at(4 * s + 2) / mm));
+            QMatrix4x4 scale;
+
+            scale.scale(worldPerMm());
+
+            program.setUniformValue(matrix, viewProjection * scale * trainPlace_[k]);
+        }
+        else
+        {
+            program.setUniformValue("uVehicle", trainPlace_[k]);
         }
 
-        const int pieces = line.size();
-        const double reach = 12.0 * r;
-
-        struct Piece
-        {
-            KnotMath::Vec3 middle;
-            KnotMath::Vec3 along;
-        };
-
-        QHash<qint64, QVector<Piece>> cubes;
-
-        auto key = [reach](const KnotMath::Vec3 &p)
-        {
-            const qint64 i = static_cast<qint64>(std::floor(p.x / reach)) + 1000;
-            const qint64 j = static_cast<qint64>(std::floor(p.y / reach)) + 1000;
-            const qint64 k = static_cast<qint64>(std::floor(p.z / reach)) + 1000;
-
-            return (i * 4096 + j) * 4096 + k;
-        };
-
-        for (int i = 0; i < pieces; ++i)
-        {
-            const KnotMath::Vec3 a = line.at(i);
-            const KnotMath::Vec3 b = line.at((i + 1) % pieces);
-
-            cubes[key((a + b) * 0.5)].push_back(Piece{(a + b) * 0.5, b - a});
-        }
-
-        for (int v = 0; v < vertexCount; ++v)
-        {
-            const float *f = shoe.vertices.constData() + v * Photo::Sneaker::VertexFloats;
-
-            const KnotMath::Vec3 p(f[0], f[1], f[2]);
-            const KnotMath::Vec3 n(f[3], f[4], f[5]);
-
-            const qint64 i0 = static_cast<qint64>(std::floor(p.x / reach)) + 1000;
-            const qint64 j0 = static_cast<qint64>(std::floor(p.y / reach)) + 1000;
-            const qint64 k0 = static_cast<qint64>(std::floor(p.z / reach)) + 1000;
-
-            double sum = 0.0;
-
-            for (qint64 i = i0 - 1; i <= i0 + 1; ++i)
-            {
-                for (qint64 j = j0 - 1; j <= j0 + 1; ++j)
-                {
-                    for (qint64 k = k0 - 1; k <= k0 + 1; ++k)
-                    {
-                        const auto found = cubes.constFind((i * 4096 + j) * 4096 + k);
-
-                        if (found == cubes.constEnd())
-                            continue;
-
-                        for (const Piece &piece : *found)
-                        {
-                            KnotMath::Vec3 d = piece.middle - p;
-
-                            const double distance = d.length();
-
-                            if (distance > reach || distance < 1.0e-9)
-                                continue;
-
-                            d = d / distance;
-
-                            const double facing = KnotMath::Vec3::dot(n, d);
-
-                            if (facing <= 0.0)
-                                continue;
-
-                            const double ds = piece.along.length();
-
-                            if (ds < 1.0e-12)
-                                continue;
-
-                            const double sine = KnotMath::Vec3::cross(piece.along / ds, d).length();
-                            const double clamped = std::max(distance, 1.2 * r);
-
-                            sum += 2.0 * r * sine * facing * ds / (3.14159265 * clamped * clamped);
-                        }
-                    }
-                }
-            }
-
-            hidden[v] = float(std::min(sum, 0.9));
-        }
+        glDrawElements(
+            GL_TRIANGLES,
+            train.indexCount[k],
+            GL_UNSIGNED_INT,
+            reinterpret_cast<const void *>(static_cast<quintptr>(train.firstIndex[k]) * sizeof(quint32)));
     }
 
-    shoeShadeBuffer_.bind();
-    shoeShadeBuffer_.write(0, hidden.constData(), static_cast<int>(hidden.size() * sizeof(float)));
-    shoeShadeBuffer_.release();
+    trainVao_.release();
 }
 
-void KnotGLWidget::drawShoe(const QMatrix4x4 &viewProjection)
+void KnotGLWidget::drawTrain(const QMatrix4x4 &viewProjection)
 {
-    if (!showShoe())
+    if (!showTrain())
         return;
-
-    if (shoeShadeDirty_)
-        updateShoeShade();
 
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
 
-    // the lining is seen from inside: both sides
     glDisable(GL_CULL_FACE);
     glDisable(GL_BLEND);
 
-    shoeProgram_->bind();
+    trainProgram_->bind();
 
-    setShadowUniforms(*shoeProgram_, lighting_.knotShadows);
-    setPhotoUniforms(*shoeProgram_);
+    setShadowUniforms(*trainProgram_, lighting_.knotShadows);
+    setPhotoUniforms(*trainProgram_);
 
-    shoeProgram_->setUniformValue("uViewProjection", viewProjection);
-    shoeProgram_->setUniformValue("uScale", worldPerMm());
-    shoeProgram_->setUniformValue("uCameraPosition", photoEye());
-    shoeProgram_->setUniformValue("uMirrorLevel", photoFloorLevel());
-    shoeProgram_->setUniformValue("uReflections", lighting_.reflections ? 1.0f : 0.0f);
+    trainProgram_->setUniformValue("uViewProjection", viewProjection);
+    trainProgram_->setUniformValue("uScale", worldPerMm());
+    trainProgram_->setUniformValue("uCameraPosition", photoEye());
+    trainProgram_->setUniformValue("uMirrorLevel", photoFloorLevel());
+    trainProgram_->setUniformValue("uReflections", lighting_.reflections ? 1.0f : 0.0f);
 
-    const QColor canvas = photoInfo_.canvas;
+    drawTrainVehicles(*trainProgram_, nullptr, QMatrix4x4());
 
-    shoeProgram_->setUniformValue(
-        "uCanvas",
-        QVector3D(
-            std::pow(static_cast<float>(canvas.redF()), 2.2f),
-            std::pow(static_cast<float>(canvas.greenF()), 2.2f),
-            std::pow(static_cast<float>(canvas.blueF()), 2.2f)));
-
-    shoeVao_.bind();
-
-    glDrawElements(GL_TRIANGLES, shoeIndexCount_, GL_UNSIGNED_INT, nullptr);
-
-    shoeVao_.release();
-    shoeProgram_->release();
+    trainProgram_->release();
 }
 
 void KnotGLWidget::drawPhotoBackground(const QMatrix4x4 &viewProjection)
@@ -7575,10 +7471,13 @@ void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
 
     photoFloorProgram_->setUniformValue("uViewProjection", viewProjection);
     photoFloorProgram_->setUniformValue("uTile", static_cast<float>(photoInfo_.surfaceTileMm));
-    // the table is dark stone; a floor turns into it only on the full stage
+    // the table is dark stone, and so is a stone floor; another floor turns
+    // into it only on the full stage
     photoFloorProgram_->setUniformValue(
         "uStage",
-        photoInfo_.tableWidthMm > 0.0 ? 1.0f : std::clamp((stage_ - CalmStage) / (1.0f - CalmStage), 0.0f, 1.0f));
+        photoInfo_.tableWidthMm > 0.0 || photoInfo_.stoneFloor
+            ? 1.0f
+            : std::clamp((stage_ - CalmStage) / (1.0f - CalmStage), 0.0f, 1.0f));
     photoFloorProgram_->setUniformValue("uCameraPosition", eye);
 
     photoFloorProgram_->setUniformValue("uOcclusionArea", occlusionArea_);
@@ -7614,16 +7513,6 @@ void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
 
     photoFloorProgram_->setUniformValue("uReflections", lighting_.reflections ? 1.0f : 0.0f);
 
-    // the sneaker's shade
-    const bool shoeShade = showShoe() && shoeFloorTexture_ != 0;
-
-    glActiveTexture(GL_TEXTURE9);
-    glBindTexture(GL_TEXTURE_2D, shoeShade ? shoeFloorTexture_ : 0);
-    glActiveTexture(GL_TEXTURE0);
-
-    photoFloorProgram_->setUniformValue("uShoeShade", 9);
-    photoFloorProgram_->setUniformValue("uUseShoeShade", shoeShade ? 1 : 0);
-
     glActiveTexture(GL_TEXTURE11);
     glBindTexture(GL_TEXTURE_2D, mirrorColor_);
     glActiveTexture(GL_TEXTURE12);
@@ -7638,15 +7527,6 @@ void KnotGLWidget::drawPhotoFloor(const QMatrix4x4 &viewProjection)
         "uPixelsPerUnit",
         0.5f * static_cast<float>(photoFrameHeight_) / std::tan(qDegreesToRadians(0.5f * FieldOfView)));
     photoFloorProgram_->setUniformValue("uMirrorTurn", 2.3999632f * static_cast<float>(photoSample_));
-
-    if (shoeShade)
-    {
-        const QRectF area = Photo::sneaker().floorArea;
-
-        photoFloorProgram_->setUniformValue(
-            "uShoeArea",
-            QVector4D(float(area.left()), float(area.top()), float(area.right()), float(area.bottom())) * mm);
-    }
 
     surfaceVao_.bind();
 
@@ -7794,18 +7674,8 @@ void KnotGLWidget::drawPhotoDepth(const QMatrix4x4 &model, const QMatrix4x4 &vie
         surfaceVao_.release();
     }
 
-    if (showShoe())
-    {
-        QMatrix4x4 scale;
-
-        scale.scale(worldPerMm());
-
-        depthProgram_->setUniformValue("uLightViewProjection", viewProjection * model * scale);
-
-        shoeVao_.bind();
-        glDrawElements(GL_TRIANGLES, shoeIndexCount_, GL_UNSIGNED_INT, nullptr);
-        shoeVao_.release();
-    }
+    if (showTrain())
+        drawTrainVehicles(*depthProgram_, "uLightViewProjection", viewProjection * model);
 
     if (mesh_.isValid() && indexCount_ > 0)
     {
@@ -7905,7 +7775,7 @@ void KnotGLWidget::drawPhotoMirror(const QMatrix4x4 &model, const QMatrix4x4 &vi
 
     mirrorPass_ = true;
 
-    drawShoe(projection * view * flip * model);
+    drawTrain(projection * view * flip * model);
     drawMesh(model, view * flip, projection);
 
     mirrorPass_ = false;

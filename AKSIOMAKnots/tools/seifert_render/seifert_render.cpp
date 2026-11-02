@@ -112,7 +112,7 @@ int main(int argc, char **argv)
 
         const auto scene = static_cast<Photo::Scene>(k);
 
-        if (Photo::sceneInfo(scene).sneaker)
+        if (Photo::sceneInfo(scene).train)
             continue;
 
         if (!view.setPhotoMode(true, scene))

@@ -202,10 +202,26 @@ public:
     // back to laying the knot down by its shape
     void clearRestingPose();
 
+    // The Toy train scene: the track the train runs on (TrainTrack::path, in
+    // millimetres, and its length; empty: no train), whether it is running,
+    // and how far along the track the locomotive is (millimetres).
+    void setTrainPath(const QVector<KnotMath::Vec3> &path, double length);
+    void setTrainRunning(bool running);
+    bool trainRunning() const;
+    void setTrainAlong(double millimetres);
+    double trainAlong() const;
+
     void setAutoRotation(bool enabled);
 
     // no drifting particles and no turning, in every view
     static void setReduceMotion(bool reduced);
+
+    // the frames per second in a corner of the view
+    static void setShowFrameRate(bool shown);
+
+    // the frames per second last measured (negative: nothing measured yet,
+    // 0: the view is still and nothing is being drawn)
+    double frameRate() const;
 
     // the graphics card and its OpenGL, for a report of a problem
     QString graphicsInfo() const;
@@ -442,6 +458,9 @@ private:
     void drawDiagramInset(QPainter &painter);
     void drawCaption(QPainter &painter);
 
+    void countFrame();
+    void drawFrameRate(QPainter &painter);
+
     void configureFlatAttributes();
 
     // Photo mode
@@ -492,7 +511,7 @@ private:
     /*
      * What the colour of the frame reads, drawn before it: the depth of the
      * frame alone, from it the shade of everything near (what each point
-     * sees of the room past what lies close by), and the rope and the shoe
+     * sees of the room past what lies close by), and the rope and the train
      * seen in the surface they lie on.
      */
     void drawPhotoDepth(const QMatrix4x4 &model, const QMatrix4x4 &viewProjection);
@@ -509,20 +528,23 @@ private:
     // around the knot (view factors), drawn into occlusionTexture_.
     void bakeSurfaceOcclusion();
 
-    // The Sneaker scene (sneaker.h): the shoe stands under the lace at
-    // rest (in the frame of setRestingRope's pose, scaled from mm).
-    bool showShoe() const;
+    // The Toy train scene (traintrack.h): the train runs on the track, which
+    // is the mesh at rest.
+    bool showTrain() const;
 
-    // its surface and its shade on the floor onto the card (with the
-    // scene), and off again
-    void uploadShoe();
-    void destroyShoe();
+    // the train onto the card (with the scene), and off again
+    void uploadTrain();
+    void destroyTrain();
 
-    // How much of the room each point of the shoe sees past the lace
-    // (view factors, as for the table), into shoeShadeBuffer_.
-    void updateShoeShade();
+    // on along the track by the time since the last frame, and every
+    // vehicle in its place
+    void advanceTrain();
 
-    void drawShoe(const QMatrix4x4 &viewProjection);
+    // draws the vehicles: for the depth passes (matrix: the program's
+    // uniform, given viewProjection * scale * place) or the colour pass
+    void drawTrainVehicles(QOpenGLShaderProgram &program, const char *matrix, const QMatrix4x4 &viewProjection);
+
+    void drawTrain(const QMatrix4x4 &viewProjection);
 
     // height of the floor in Photo mode: right under the knot
     float photoFloorLevel() const;
@@ -559,7 +581,7 @@ private:
 
     // what is in the shadow map, so that it is drawn only when that changes
     bool shadowDirty_ = true;
-    bool shadowDrawnShoe_ = false;
+    bool shadowDrawnTrain_ = false;
     QMatrix4x4 shadowDrawnLight_;
 
     // compiled the first time Photo mode opens
@@ -568,6 +590,13 @@ private:
     float particleWait_ = 0.0f;
 
     static inline bool reduceMotion_ = false;
+
+    // the frame rate: frames counted since the clock started, and what the
+    // last count came to
+    static inline bool showFrameRate_ = false;
+    QElapsedTimer frameRateClock_;
+    int frameRateFrames_ = 0;
+    double frameRate_ = -1.0;
     int shadowMapSize_ = Lighting::shadowMapSize(1);
 
     Lighting::Options lighting_;
@@ -776,7 +805,7 @@ private:
     GLuint shadeFramebuffer_ = 0;
     GLuint shade_ = 0;
 
-    // The rope and the shoe in the surface (half the frame's size): their
+    // The rope and the train in the surface (half the frame's size): their
     // light, and how high above the surface it comes from.
     GLuint mirrorFramebuffer_ = 0;
     GLuint mirrorColor_ = 0;
@@ -879,16 +908,20 @@ private:
     // lowest point of the mesh (the view's coordinates)
     float meshBottom() const;
 
-    // the sneaker: its surface (millimetres), the lace's shade on it (one
-    // float a vertex) and the floor's view of the room past it
-    std::unique_ptr<QOpenGLShaderProgram> shoeProgram_;
-    QOpenGLVertexArrayObject shoeVao_;
-    QOpenGLBuffer shoeBuffer_;
-    QOpenGLBuffer shoeIndexBuffer_;
-    QOpenGLBuffer shoeShadeBuffer_;
-    int shoeIndexCount_ = 0;
-    bool shoeShadeDirty_ = true;
-    GLuint shoeFloorTexture_ = 0;
+    // the toy train: its model (millimetres), its track (Photo::TrainTrack),
+    // how far along it the locomotive is, and where each vehicle stands
+    std::unique_ptr<QOpenGLShaderProgram> trainProgram_;
+    QOpenGLVertexArrayObject trainVao_;
+    QOpenGLBuffer trainBuffer_;
+    QOpenGLBuffer trainIndexBuffer_;
+    int trainIndexCount_ = 0;
+
+    QVector<KnotMath::Vec3> trainPath_;
+    double trainLength_ = 0.0;
+    double trainAlong_ = 0.0;
+    bool trainRunning_ = true;
+    QElapsedTimer trainClock_;
+    QMatrix4x4 trainPlace_[3];
 };
 
 #endif // KNOTGLWIDGET_H

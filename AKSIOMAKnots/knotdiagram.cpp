@@ -1071,6 +1071,1292 @@ bool removeDiagramLoop(KnotDiagram &diagram, int crossing, double halfExtent)
     return false;
 }
 
+namespace
+{
+
+/*
+ * The faces of a drawing known only as a graph: `passes` along the curve (each
+ * pass is an edge's start), `turns` which way round each crossing goes. A
+ * dart is an edge walked one way: 2 e from pass e on, 2 e + 1 back towards it.
+ * Each face is the darts with that face on their left.
+ */
+QVector<QVector<int>> graphFaces(const QVector<Pass> &passes, const QVector<double> &turns)
+{
+    const int m = passes.size();
+    const int darts = 2 * m;
+
+    QVector<int> first(turns.size(), -1);
+    QVector<int> second(turns.size(), -1);
+
+    for (int j = 0; j < m; ++j)
+        (passes.at(j).isA ? first : second)[passes.at(j).crossing] = j;
+
+    auto outOfNode = [](int pass) { return 2 * pass; };
+    auto intoNode = [m](int pass) { return 2 * ((pass + m - 1) % m) + 1; };
+
+    // the darts around every node, counter-clockwise
+    QVector<int> before(darts, -1);
+
+    for (int k = 0; k < turns.size(); ++k)
+    {
+        const int a = first.at(k);
+        const int b = second.at(k);
+
+        if (a < 0 || b < 0)
+            continue;
+
+        const int order[4] = {
+            outOfNode(a),
+            turns.at(k) > 0.0 ? outOfNode(b) : intoNode(b),
+            intoNode(a),
+            turns.at(k) > 0.0 ? intoNode(b) : outOfNode(b)};
+
+        for (int q = 0; q < 4; ++q)
+            before[order[(q + 1) % 4]] = order[q];
+    }
+
+    QVector<QVector<int>> faces;
+    QVector<bool> walked(darts, false);
+
+    for (int start = 0; start < darts; ++start)
+    {
+        if (walked.at(start))
+            continue;
+
+        QVector<int> face;
+
+        int dart = start;
+
+        do
+        {
+            walked[dart] = true;
+            face.push_back(dart);
+
+            dart = before.at(dart ^ 1);
+        } while (dart != start && !walked.at(dart));
+
+        faces.push_back(face);
+    }
+
+    return faces;
+}
+
+/*
+ * Takes out what a drawing does not need, by two moves that leave the knot as
+ * it is. A projection of a curve has plenty of both, and they are what cannot
+ * be spread out: a twist has a face that meets itself at the crossing, and a
+ * strand laid over another has a face with two sides.
+ *
+ * A crossing that no other crossing is interlaced with: the part of the curve
+ * between its two passes hangs on the rest by that crossing alone. A half turn
+ * of that part about the strand undoes it. (Turned over, every crossing in the
+ * part has over and under the other way, and goes the other way round.)
+ *
+ * Two crossings that are the corners of a face with two sides, one strand
+ * being over (or under) at both: that strand lifts off the other.
+ */
+void simplifyPasses(QVector<Pass> &passes, QVector<double> &turns, QVector<bool> &firstOver)
+{
+    auto isOver = [&firstOver](const Pass &pass)
+    {
+        return pass.isA ? firstOver.at(pass.crossing) : !firstOver.at(pass.crossing);
+    };
+
+    auto remove = [&passes](int crossing)
+    {
+        for (int j = passes.size() - 1; j >= 0; --j)
+        {
+            if (passes.at(j).crossing == crossing)
+                passes.remove(j);
+        }
+    };
+
+    bool changed = true;
+
+    while (changed && !passes.isEmpty())
+    {
+        changed = false;
+
+        const int m = passes.size();
+
+        for (int i = 0; i < m && !changed; ++i)
+        {
+            int j = i + 1;
+
+            while (j < m && passes.at(j).crossing != passes.at(i).crossing)
+                ++j;
+
+            if (j >= m)
+                continue;
+
+            QVector<int> inside(turns.size(), 0);
+
+            for (int t = i + 1; t < j; ++t)
+                ++inside[passes.at(t).crossing];
+
+            if (std::find(inside.cbegin(), inside.cend(), 1) != inside.cend())
+                continue;
+
+            for (int k = 0; k < inside.size(); ++k)
+            {
+                if (inside.at(k) == 2)
+                {
+                    turns[k] = -turns.at(k);
+                    firstOver[k] = !firstOver.at(k);
+                }
+            }
+
+            remove(passes.at(i).crossing);
+
+            changed = true;
+        }
+
+        if (changed)
+            continue;
+
+        for (const QVector<int> &face : graphFaces(passes, turns))
+        {
+            if (face.size() != 2)
+                continue;
+
+            const int edge = face.first() / 2;
+
+            const Pass &here = passes.at(edge);
+            const Pass &then = passes.at((edge + 1) % m);
+
+            if (here.crossing == then.crossing || isOver(here) != isOver(then))
+                continue;
+
+            const int one = here.crossing;
+            const int two = then.crossing;
+
+            remove(one);
+            remove(two);
+
+            changed = true;
+
+            break;
+        }
+    }
+
+    // the crossings that are left, numbered from 0
+    QVector<int> renumbered(turns.size(), -1);
+    QVector<double> keptTurns;
+    QVector<bool> keptOver;
+
+    for (Pass &pass : passes)
+    {
+        if (renumbered.at(pass.crossing) < 0)
+        {
+            renumbered[pass.crossing] = keptTurns.size();
+
+            keptTurns.push_back(turns.at(pass.crossing));
+            keptOver.push_back(firstOver.at(pass.crossing));
+        }
+
+        pass.crossing = renumbered.at(pass.crossing);
+    }
+
+    turns = keptTurns;
+    firstOver = keptOver;
+}
+
+} // namespace
+
+bool openDiagram(KnotDiagram &diagram, int outside)
+{
+    const int drawn = diagram.points.size();
+
+    if (drawn < 8)
+        return false;
+
+    /*
+     * The drawing as what it really is, a plane graph: the crossings are its
+     * nodes, each one single point that both strands pass through, and the
+     * pieces of curve between two passes are its edges, all with the same
+     * number of points. A crossing cannot come undone, or be counted wrongly,
+     * and over and under stay with their nodes.
+     */
+    QVector<Pass> passes = sortedPasses(diagram);
+
+    // Which way round each crossing goes, from the drawing's own segments:
+    // the points of the edges may lie too far apart to tell where two
+    // crossings almost touch.
+    QVector<double> turns(diagram.crossings.size());
+    QVector<bool> firstOver(diagram.crossings.size());
+
+    for (int k = 0; k < diagram.crossings.size(); ++k)
+    {
+        const DiagramCrossing &c = diagram.crossings.at(k);
+
+        const Vec3 a = diagram.points.at((c.segA + 1) % drawn) - diagram.points.at(c.segA);
+        const Vec3 b = diagram.points.at((c.segB + 1) % drawn) - diagram.points.at(c.segB);
+
+        turns[k] = a.x * b.y - a.y * b.x >= 0.0 ? 1.0 : -1.0;
+        firstOver[k] = c.aOver;
+    }
+
+    // (a drawing that keeps its shape keeps its crossings)
+    if (outside >= 0)
+        simplifyPasses(passes, turns, firstOver);
+
+    const int m = passes.size();
+
+    QVector<double> arc(drawn + 1, 0.0);
+
+    for (int i = 0; i < drawn; ++i)
+        arc[i + 1] = arc.at(i) + dist2D(diagram.points.at(i), diagram.points.at((i + 1) % drawn));
+
+    const double whole = arc.at(drawn);
+
+    if (whole < 1e-12)
+        return false;
+
+    // no crossings at all: a round loop
+    if (m == 0)
+    {
+        constexpr int Round = 120;
+
+        const double r = 6.0 / (2.0 * 3.14159265358979);
+
+        diagram.points.clear();
+        diagram.crossings.clear();
+
+        for (int i = 0; i < Round; ++i)
+        {
+            const double a = 2.0 * 3.14159265358979 * i / Round;
+
+            diagram.points.push_back(Vec3(r * std::cos(a), r * std::sin(a), 0.0));
+        }
+
+        return true;
+    }
+
+    constexpr int PerEdge = 20;
+
+    // Lengths in units of the wanted distance between two passes.
+    const double length = std::max(m, 6);
+
+    const int count = m * PerEdge;
+    const double spacing = length / count;
+
+    constexpr int Iterations = 1500;
+    constexpr int CheckEvery = 5;
+    constexpr int EvenEvery = 10;
+
+    // strands push each other away within this distance
+    constexpr double Reach = 0.62;
+
+    // an edge of the graph is at least this long
+    constexpr double WantedEdge = 0.85;
+
+    // and no bend is tighter than this
+    constexpr double WantedRadius = 0.3;
+
+    auto arcAt = [&arc, drawn](double s)
+    {
+        const int segment = std::clamp(static_cast<int>(s), 0, drawn - 1);
+
+        return arc.at(segment) + (s - segment) * (arc.at(segment + 1) - arc.at(segment));
+    };
+
+    auto pointAtArc = [&](double along)
+    {
+        along = std::fmod(along, whole);
+
+        const int segment = std::clamp(
+            static_cast<int>(std::upper_bound(arc.cbegin(), arc.cend(), along) - arc.cbegin()) - 1,
+            0,
+            drawn - 1);
+
+        const double piece = arc.at(segment + 1) - arc.at(segment);
+        const double t = piece > 0.0 ? (along - arc.at(segment)) / piece : 0.0;
+
+        const Vec3 &a = diagram.points.at(segment);
+        const Vec3 &b = diagram.points.at((segment + 1) % drawn);
+
+        return a + (b - a) * t;
+    };
+
+    QVector<Vec3> p(count, Vec3(0.0, 0.0, 0.0));
+
+    for (int j = 0; j < m && outside < 0; ++j)
+    {
+        const double from = arcAt(passes.at(j).s);
+
+        double to = arcAt(passes.at((j + 1) % m).s);
+
+        if (j == m - 1)
+            to += whole;
+
+        for (int t = 0; t < PerEdge; ++t)
+            p[j * PerEdge + t] = pointAtArc(from + (to - from) * t / PerEdge);
+    }
+
+    struct Node
+    {
+        int a = 0;
+        int b = 0;
+        double sign = 0.0;
+    };
+
+    const int crossings = turns.size();
+
+    QVector<Node> nodes(crossings);
+
+    // which crossing is at the start of each edge
+    QVector<int> nodeOf(m);
+
+    for (int j = 0; j < m; ++j)
+    {
+        nodeOf[j] = passes.at(j).crossing;
+
+        (passes.at(j).isA ? nodes[nodeOf.at(j)].a : nodes[nodeOf.at(j)].b) = j * PerEdge;
+    }
+
+    auto wrapped = [count](int i) { return (i % count + count) % count; };
+
+    auto mergeNodes = [&]()
+    {
+        for (const Node &node : nodes)
+        {
+            const Vec3 middle = (p.at(node.a) + p.at(node.b)) * 0.5;
+
+            p[node.a] = middle;
+            p[node.b] = middle;
+        }
+    };
+
+    /*
+     * Which way round the strands pass through a node, from the order of its
+     * four arms: +1 if the second strand's way out comes first counter-
+     * clockwise from the first strand's way out, -1 if its way in does, 0 if
+     * the strands no longer cross here at all. (Two strands bent at the node
+     * still cross, whatever the directions of their chords say.)
+     */
+    auto turnAt = [&](const Node &node)
+    {
+        const Vec3 &centre = p.at(node.a);
+
+        auto angle = [&](int i, double from)
+        {
+            const Vec3 out = p.at(wrapped(i)) - centre;
+
+            double a = std::atan2(out.y, out.x) - from;
+
+            while (a < 0.0)
+                a += 2.0 * 3.14159265358979;
+
+            return a;
+        };
+
+        const double from = angle(node.a + 1, 0.0);
+
+        const double opposite = angle(node.a - 1, from);
+        const double bOut = angle(node.b + 1, from);
+        const double bIn = angle(node.b - 1, from);
+
+        if ((bOut < opposite) == (bIn < opposite))
+            return 0.0;
+
+        return bOut < opposite ? 1.0 : -1.0;
+    };
+
+    auto fitLength = [&]()
+    {
+        double now = 0.0;
+
+        Vec3 middle(0.0, 0.0, 0.0);
+
+        for (int i = 0; i < count; ++i)
+        {
+            now += dist2D(p.at(i), p.at((i + 1) % count));
+            middle += p.at(i);
+        }
+
+        middle = middle * (1.0 / count);
+
+        const double scale = length / std::max(now, 1e-12);
+
+        for (Vec3 &q : p)
+            q = (q - middle) * scale;
+    };
+
+    mergeNodes();
+    fitLength();
+
+    for (int k = 0; k < crossings; ++k)
+        nodes[k].sign = turns.at(k);
+
+    // Still the same drawing: no two segments cross (they only meet at the
+    // nodes), and the strands pass through every node the same way round.
+    auto sound = [&]()
+    {
+        for (const Node &node : nodes)
+        {
+            if (turnAt(node) != node.sign)
+                return false;
+        }
+
+        auto side = [](const Vec3 &a, const Vec3 &b, const Vec3 &c)
+        {
+            return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        };
+
+        for (int i = 0; i < count; ++i)
+        {
+            const Vec3 &a = p.at(i);
+            const Vec3 &b = p.at((i + 1) % count);
+
+            for (int j = i + 2; j < count; ++j)
+            {
+                if (i == 0 && j == count - 1)
+                    continue;
+
+                const Vec3 &c = p.at(j);
+                const Vec3 &d = p.at((j + 1) % count);
+
+                if (std::max(a.x, b.x) < std::min(c.x, d.x) || std::max(c.x, d.x) < std::min(a.x, b.x) ||
+                    std::max(a.y, b.y) < std::min(c.y, d.y) || std::max(c.y, d.y) < std::min(a.y, b.y))
+                {
+                    continue;
+                }
+
+                if (side(a, b, c) * side(a, b, d) < 0.0 && side(c, d, a) * side(c, d, b) < 0.0)
+                    return false;
+            }
+        }
+
+        return true;
+    };
+
+    /*
+     * A new start, from the graph alone: a drawing seen from one side of the
+     * curve can have large empty places and tiny crowded ones, and no pushing
+     * opens those. So the faces of the graph are found (the strands and the
+     * way round they pass through every node say what lies next to what),
+     * one becomes the outside on a circle, and every other point goes to the
+     * mean of its neighbours (W. Tutte, 1963: a plane graph held like this
+     * comes out with no two edges crossing, however tangled it was). Each
+     * face gets a point of its own in the middle and each edge one too, which
+     * keeps two edges between the same two nodes apart.
+     */
+    auto spreadFromFaces = [&]() -> bool
+    {
+        // the node a dart leaves from
+        auto tail = [&](int dart)
+        {
+            const int edge = dart / 2;
+
+            return nodeOf.at(dart % 2 == 0 ? edge : (edge + 1) % m);
+        };
+
+        const QVector<QVector<int>> faces = graphFaces(passes, turns);
+
+        // Euler: a plane graph with these nodes and edges has this many faces
+        if (faces.size() != crossings + 2)
+            return false;
+
+        // the outside: one that passes no node twice, the larger the better
+        QVector<int> order;
+
+        for (int f = 0; f < faces.size(); ++f)
+        {
+            QVector<int> seen;
+            bool twice = false;
+
+            for (const int dart : faces.at(f))
+            {
+                twice = twice || seen.contains(tail(dart));
+                seen.push_back(tail(dart));
+            }
+
+            if (!twice)
+                order.push_back(f);
+        }
+
+        std::stable_sort(order.begin(), order.end(), [&faces](int x, int y) { return faces.at(x).size() > faces.at(y).size(); });
+
+        if (outside >= order.size())
+            return false;
+
+        const int outer = order.at(outside);
+
+        // nodes first, then the middle of every edge, then of every face
+        const int total = crossings + m + faces.size();
+
+        auto edgePoint = [&](int edge) { return crossings + edge; };
+        auto facePoint = [&](int f) { return crossings + m + f; };
+
+        QVector<QVector<int>> neighbours(total);
+
+        auto join = [&neighbours](int x, int y)
+        {
+            neighbours[x].push_back(y);
+            neighbours[y].push_back(x);
+        };
+
+        for (int f = 0; f < faces.size(); ++f)
+        {
+            for (const int dart : faces.at(f))
+            {
+                join(tail(dart), edgePoint(dart / 2));
+                join(facePoint(f), edgePoint(dart / 2));
+                join(facePoint(f), tail(dart));
+            }
+        }
+
+        // the outside on a circle, walked with the outer face on the left:
+        // clockwise
+        QVector<int> fixedAt(total, -1);
+        QVector<double> placedX(total, 0.0);
+        QVector<double> placedY(total, 0.0);
+
+        const QVector<int> &rim = faces.at(outer);
+
+        int onRim = 0;
+
+        auto putOnRim = [&](int point, int steps)
+        {
+            const double angle = -2.0 * 3.14159265358979 * steps / (2.0 * rim.size());
+
+            fixedAt[point] = 1;
+            placedX[point] = std::cos(angle);
+            placedY[point] = std::sin(angle);
+        };
+
+        for (const int dart : rim)
+        {
+            putOnRim(tail(dart), onRim++);
+            putOnRim(edgePoint(dart / 2), onRim++);
+        }
+
+        fixedAt[facePoint(outer)] = 2;
+
+        // every other point at the mean of its neighbours: a linear system
+        QVector<int> unknown(total, -1);
+
+        int size = 0;
+
+        for (int i = 0; i < total; ++i)
+        {
+            if (fixedAt.at(i) < 0)
+                unknown[i] = size++;
+        }
+
+        QVector<double> matrix(size * (size + 2), 0.0);
+
+        auto entry = [&matrix, size](int row, int column) -> double &
+        {
+            return matrix[row * (size + 2) + column];
+        };
+
+        for (int i = 0; i < total; ++i)
+        {
+            const int row = unknown.at(i);
+
+            if (row < 0)
+                continue;
+
+            for (const int other : neighbours.at(i))
+            {
+                if (fixedAt.at(other) == 2)
+                    continue;
+
+                entry(row, row) += 1.0;
+
+                if (unknown.at(other) >= 0)
+                {
+                    entry(row, unknown.at(other)) -= 1.0;
+                }
+                else
+                {
+                    entry(row, size) += placedX.at(other);
+                    entry(row, size + 1) += placedY.at(other);
+                }
+            }
+        }
+
+        for (int pivot = 0; pivot < size; ++pivot)
+        {
+            int best = pivot;
+
+            for (int row = pivot + 1; row < size; ++row)
+            {
+                if (std::abs(entry(row, pivot)) > std::abs(entry(best, pivot)))
+                    best = row;
+            }
+
+            if (std::abs(entry(best, pivot)) < 1e-12)
+                return false;
+
+            if (best != pivot)
+            {
+                for (int column = 0; column < size + 2; ++column)
+                    std::swap(entry(best, column), entry(pivot, column));
+            }
+
+            for (int row = 0; row < size; ++row)
+            {
+                if (row == pivot)
+                    continue;
+
+                const double factor = entry(row, pivot) / entry(pivot, pivot);
+
+                if (factor == 0.0)
+                    continue;
+
+                for (int column = pivot; column < size + 2; ++column)
+                    entry(row, column) -= factor * entry(pivot, column);
+            }
+        }
+
+        for (int i = 0; i < total; ++i)
+        {
+            const int row = unknown.at(i);
+
+            if (row >= 0)
+            {
+                placedX[i] = entry(row, size) / entry(row, row);
+                placedY[i] = entry(row, size + 1) / entry(row, row);
+            }
+        }
+
+        const QVector<Vec3> own = p;
+
+        for (int j = 0; j < m; ++j)
+        {
+            const int from = nodeOf.at(j);
+            const int to = nodeOf.at((j + 1) % m);
+            const int middle = edgePoint(j);
+
+            const Vec3 a(placedX.at(from), placedY.at(from), 0.0);
+            const Vec3 b(placedX.at(middle), placedY.at(middle), 0.0);
+            const Vec3 c(placedX.at(to), placedY.at(to), 0.0);
+
+            for (int t = 0; t < PerEdge; ++t)
+            {
+                const double u = 2.0 * t / PerEdge;
+
+                p[j * PerEdge + t] = u < 1.0 ? a + (b - a) * u : b + (c - b) * (u - 1.0);
+            }
+        }
+
+        mergeNodes();
+        fitLength();
+
+        if (!sound())
+        {
+            p = own;
+
+            return false;
+        }
+
+        return true;
+    };
+
+    if (outside >= 0)
+    {
+        if (!spreadFromFaces())
+            return false;
+    }
+    else if (!sound())
+    {
+        return false;
+    }
+
+    QVector<Vec3> good = p;
+
+    double step = 0.5;
+
+    QVector<int> first;
+    QVector<int> next(count);
+
+    // the two points nearest to the same node do not push each other: that
+    // is what the turning of the arms below is for
+    const int nodeWidth = static_cast<int>(0.45 * PerEdge);
+    const int edgeWidth = static_cast<int>(0.9 * PerEdge);
+
+    for (int iteration = 0; iteration < Iterations; ++iteration)
+    {
+        double minX = 1e300, minY = 1e300, maxX = -1e300, maxY = -1e300;
+
+        for (const Vec3 &q : p)
+        {
+            minX = std::min(minX, q.x);
+            maxX = std::max(maxX, q.x);
+            minY = std::min(minY, q.y);
+            maxY = std::max(maxY, q.y);
+        }
+
+        const int columns = static_cast<int>((maxX - minX) / Reach) + 1;
+        const int rows = static_cast<int>((maxY - minY) / Reach) + 1;
+
+        first.fill(-1, columns * rows);
+
+        auto cellOf = [&](const Vec3 &q, int &column, int &row)
+        {
+            column = std::clamp(static_cast<int>((q.x - minX) / Reach), 0, columns - 1);
+            row = std::clamp(static_cast<int>((q.y - minY) / Reach), 0, rows - 1);
+        };
+
+        for (int i = 0; i < count; ++i)
+        {
+            int column = 0;
+            int row = 0;
+
+            cellOf(p.at(i), column, row);
+
+            next[i] = first.at(row * columns + column);
+            first[row * columns + column] = i;
+        }
+
+        QVector<Vec3> push(count, Vec3(0.0, 0.0, 0.0));
+        QVector<int> pushes(count, 0);
+
+        for (int i = 0; i < count; ++i)
+        {
+            int column = 0;
+            int row = 0;
+
+            cellOf(p.at(i), column, row);
+
+            const int nearI = wrapped(i + PerEdge / 2) / PerEdge;
+            const int awayI = std::abs(i - nearI * PerEdge);
+
+            for (int r = std::max(row - 1, 0); r <= std::min(row + 1, rows - 1); ++r)
+            {
+                for (int c = std::max(column - 1, 0); c <= std::min(column + 1, columns - 1); ++c)
+                {
+                    for (int j = first.at(r * columns + c); j >= 0; j = next.at(j))
+                    {
+                        if (j <= i || j - i < edgeWidth || count - (j - i) < edgeWidth)
+                            continue;
+
+                        const int nearJ = wrapped(j + PerEdge / 2) / PerEdge;
+                        const int awayJ = std::abs(j - nearJ * PerEdge);
+
+                        if (awayI < nodeWidth && awayJ < nodeWidth &&
+                            std::min(awayI, count - awayI) < nodeWidth &&
+                            nodeOf.at(nearI) == nodeOf.at(nearJ))
+                        {
+                            continue;
+                        }
+
+                        const double dx = p.at(i).x - p.at(j).x;
+                        const double dy = p.at(i).y - p.at(j).y;
+                        const double distance = std::hypot(dx, dy);
+
+                        if (distance >= Reach || distance < 1e-9)
+                            continue;
+
+                        const double amount = 0.5 * (Reach - distance) / distance;
+
+                        push[i] += Vec3(dx * amount, dy * amount, 0.0);
+                        push[j] -= Vec3(dx * amount, dy * amount, 0.0);
+
+                        ++pushes[i];
+                        ++pushes[j];
+                    }
+                }
+            }
+        }
+
+        for (int i = 0; i < count; ++i)
+        {
+            if (pushes.at(i) > 0)
+                push[i] *= 1.0 / pushes.at(i);
+        }
+
+        // a strand moves as one, not point by point
+        for (int sweep = 0; sweep < 6; ++sweep)
+        {
+            QVector<Vec3> smooth(count);
+
+            for (int i = 0; i < count; ++i)
+                smooth[i] = (push.at(wrapped(i - 1)) + push.at(i) * 2.0 + push.at(wrapped(i + 1))) * 0.25;
+
+            push = smooth;
+        }
+
+        QVector<Vec3> shape(count, Vec3(0.0, 0.0, 0.0));
+
+        /*
+         * Edges that are too short: their ends move apart, with what is near
+         * them. (A loop from a node back to itself swells instead.)
+         */
+        QVector<Vec3> apart(crossings, Vec3(0.0, 0.0, 0.0));
+
+        for (int j = 0; j < m; ++j)
+        {
+            double edge = 0.0;
+
+            for (int t = 0; t < PerEdge; ++t)
+                edge += dist2D(p.at(wrapped(j * PerEdge + t)), p.at(wrapped(j * PerEdge + t + 1)));
+
+            if (edge >= WantedEdge)
+                continue;
+
+            const int here = nodeOf.at(j);
+            const int then = nodeOf.at((j + 1) % m);
+
+            if (here == then)
+            {
+                const Vec3 &centre = p.at(j * PerEdge);
+
+                for (int t = 1; t < PerEdge; ++t)
+                {
+                    const int i = wrapped(j * PerEdge + t);
+
+                    const Vec3 out = p.at(i) - centre;
+
+                    shape[i] += out * (0.5 * (WantedEdge - edge) / std::max(std::hypot(out.x, out.y), 1e-9) * std::sin(3.14159265 * t / PerEdge));
+                }
+
+                continue;
+            }
+
+            const Vec3 a = p.at(j * PerEdge);
+            const Vec3 b = p.at(wrapped((j + 1) * PerEdge));
+
+            const double distance = std::max(dist2D(a, b), 1e-9);
+
+            const Vec3 away = (b - a) * (0.2 * (WantedEdge - edge) / distance);
+
+            apart[here] -= away;
+            apart[then] += away;
+        }
+
+        const int armReach = PerEdge / 2;
+
+        for (int k = 0; k < crossings; ++k)
+        {
+            const Node &node = nodes.at(k);
+
+            for (const int centre : {node.a, node.b})
+            {
+                for (int t = -armReach; t <= armReach; ++t)
+                {
+                    const double fade = 1.0 - static_cast<double>(std::abs(t)) / (armReach + 1);
+
+                    shape[wrapped(centre + t)] += apart.at(k) * fade;
+                }
+            }
+        }
+
+        /*
+         * The four arms of every node turn towards right angles: each to the
+         * middle of the two arms beside it. Opposite arms then line up, so
+         * that both strands run straight through.
+         */
+        const int armAt = PerEdge / 4;
+
+        for (int k = 0; k < crossings; ++k)
+        {
+            const Node &node = nodes.at(k);
+
+            const Vec3 centre = p.at(node.a);
+
+            struct Arm
+            {
+                int start = 0;
+                int way = 1;
+                double angle = 0.0;
+            };
+
+            Arm arms[4];
+
+            arms[0].start = node.a;
+            arms[0].way = 1;
+            arms[1].start = node.a;
+            arms[1].way = -1;
+            arms[2].start = node.b;
+            arms[2].way = 1;
+            arms[3].start = node.b;
+            arms[3].way = -1;
+
+            for (Arm &arm : arms)
+            {
+                const Vec3 out = p.at(wrapped(arm.start + arm.way * armAt)) - centre;
+
+                arm.angle = std::atan2(out.y, out.x);
+            }
+
+            std::sort(std::begin(arms), std::end(arms), [](const Arm &x, const Arm &y) { return x.angle < y.angle; });
+
+            for (int q = 0; q < 4; ++q)
+            {
+                double ahead = arms[(q + 1) % 4].angle - arms[q].angle;
+                double behind = arms[q].angle - arms[(q + 3) % 4].angle;
+
+                if (ahead < 0.0)
+                    ahead += 2.0 * 3.14159265358979;
+
+                if (behind < 0.0)
+                    behind += 2.0 * 3.14159265358979;
+
+                const double turn = 0.5 * (ahead - behind);
+
+                for (int t = 1; t <= armReach; ++t)
+                {
+                    const int i = wrapped(arms[q].start + arms[q].way * t);
+
+                    const Vec3 out = p.at(i) - centre;
+
+                    const double fade = t <= armAt ? 1.0 : 1.0 - static_cast<double>(t - armAt) / (armReach - armAt + 1);
+
+                    shape[i] += Vec3(-out.y, out.x, 0.0) * (0.5 * turn * fade);
+                }
+            }
+        }
+
+        /*
+         * Tips that are too sharp: over a stretch of the curve a bend of the
+         * wanted radius sags by no more than this; a point that lies further
+         * from the middle of the chord is drawn back to it.
+         */
+        {
+            const int chord = std::max(3, static_cast<int>(0.3 / spacing));
+
+            const double half = chord * spacing;
+            const double sag = half * half / (2.0 * WantedRadius);
+
+            QVector<Vec3> round(count, Vec3(0.0, 0.0, 0.0));
+
+            for (int i = 0; i < count; ++i)
+            {
+                const Vec3 middle = (p.at(wrapped(i - chord)) + p.at(wrapped(i + chord))) * 0.5;
+
+                const Vec3 back = middle - p.at(i);
+
+                const double distance = std::hypot(back.x, back.y);
+
+                if (distance > sag)
+                    round[i] = back * (0.5 * (distance - sag) / distance);
+            }
+
+            for (int sweep = 0; sweep < 3; ++sweep)
+            {
+                QVector<Vec3> smooth(count);
+
+                for (int i = 0; i < count; ++i)
+                    smooth[i] = (round.at(wrapped(i - 1)) + round.at(i) * 2.0 + round.at(wrapped(i + 1))) * 0.25;
+
+                round = smooth;
+            }
+
+            for (int i = 0; i < count; ++i)
+                shape[i] += round.at(i);
+        }
+
+        // never further in a step than part of the distance between points
+        double largest = 0.0;
+        double largestShape = 0.0;
+
+        for (int i = 0; i < count; ++i)
+        {
+            largest = std::max(largest, std::hypot(push.at(i).x, push.at(i).y));
+            largestShape = std::max(largestShape, std::hypot(shape.at(i).x, shape.at(i).y));
+        }
+
+        const double most = 0.3 * spacing;
+
+        const double factor = largest * step > most ? most / largest : step;
+        const double shapeFactor = largestShape * step > most ? most / largestShape : step;
+
+        for (int i = 0; i < count; ++i)
+            p[i] += push.at(i) * factor + shape.at(i) * shapeFactor;
+
+        // the corners rounded off, the fine ones first
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            const QVector<Vec3> was = p;
+
+            for (int i = 0; i < count; ++i)
+            {
+                const Vec3 &a = was.at(wrapped(i - 2));
+                const Vec3 &b = was.at(wrapped(i - 1));
+                const Vec3 &c = was.at(wrapped(i + 1));
+                const Vec3 &d = was.at(wrapped(i + 2));
+
+                const Vec3 here = was.at(i);
+
+                p[i] = here + (b + c - here * 2.0) * 0.16 - (a + d + here * 6.0 - (b + c) * 4.0) * 0.03;
+            }
+        }
+
+        mergeNodes();
+
+        /*
+         * Each strand runs straight through its node: the points the same
+         * way along it on either side lie opposite each other.
+         */
+        for (const Node &node : nodes)
+        {
+            const Vec3 centre = p.at(node.a);
+
+            for (const int start : {node.a, node.b})
+            {
+                for (int t = PerEdge / 4; t >= 1; --t)
+                {
+                    const int ahead = wrapped(start + t);
+                    const int back = wrapped(start - t);
+
+                    const Vec3 off = centre - (p.at(ahead) + p.at(back)) * 0.5;
+
+                    const double weight = 0.5 * (1.0 - static_cast<double>(t - 1) / (PerEdge / 4));
+
+                    p[ahead] += off * weight;
+                    p[back] += off * weight;
+                }
+            }
+        }
+
+        // the points of every edge evenly along it (its ends stay)
+        if ((iteration + 1) % EvenEvery == 0)
+        {
+            for (int j = 0; j < m; ++j)
+            {
+                double along[PerEdge + 1];
+
+                along[0] = 0.0;
+
+                Vec3 was[PerEdge + 1];
+
+                for (int t = 0; t <= PerEdge; ++t)
+                    was[t] = p.at(wrapped(j * PerEdge + t));
+
+                for (int t = 0; t < PerEdge; ++t)
+                    along[t + 1] = along[t] + dist2D(was[t], was[t + 1]);
+
+                int piece = 0;
+
+                for (int t = 1; t < PerEdge; ++t)
+                {
+                    const double target = along[PerEdge] * t / PerEdge;
+
+                    while (piece < PerEdge - 1 && along[piece + 1] < target)
+                        ++piece;
+
+                    const double size = along[piece + 1] - along[piece];
+                    const double u = size > 1e-12 ? (target - along[piece]) / size : 0.0;
+
+                    p[wrapped(j * PerEdge + t)] = was[piece] + (was[piece + 1] - was[piece]) * u;
+                }
+            }
+        }
+
+        fitLength();
+
+        if ((iteration + 1) % CheckEvery == 0)
+        {
+            if (sound())
+            {
+                good = p;
+
+                step = std::min(step * 1.03, 0.5);
+            }
+            else
+            {
+                // too far: back to the last good shape, in smaller steps
+                p = good;
+
+                step = std::max(step * 0.75, 0.04);
+            }
+        }
+    }
+
+    p = good;
+
+    /*
+     * The small waves of the work above go. This smoothing takes out a wave
+     * by the fourth power of how short it is, so that the shape of a whole
+     * edge stays, where a plain average would pull it straight. It runs along
+     * each strand right through the nodes, which stay where they are, so
+     * that a bend is shared out along the strand on both sides of a node
+     * instead of gathering beside it.
+     */
+    {
+        QVector<bool> atNode(count, false);
+
+        for (const Node &node : nodes)
+        {
+            atNode[node.a] = true;
+            atNode[node.b] = true;
+        }
+
+        for (int round = 0; round < 12; ++round)
+        {
+            const QVector<Vec3> shaped = p;
+
+            for (int pass = 0; pass < 50; ++pass)
+            {
+                const QVector<Vec3> was = p;
+
+                for (int i = 0; i < count; ++i)
+                {
+                    if (atNode.at(i))
+                        continue;
+
+                    const Vec3 &a = was.at(wrapped(i - 2));
+                    const Vec3 &b = was.at(wrapped(i - 1));
+                    const Vec3 &c = was.at(wrapped(i + 1));
+                    const Vec3 &d = was.at(wrapped(i + 2));
+
+                    p[i] = was.at(i) - (a + d + was.at(i) * 6.0 - (b + c) * 4.0) * 0.05;
+                }
+            }
+
+            if (!sound())
+            {
+                p = shaped;
+
+                break;
+            }
+        }
+    }
+
+    // the sharpest bend of an edge (one over its radius)
+    auto sharpest = [&](int start)
+    {
+        double most = 0.0;
+
+        for (int t = 0; t <= PerEdge; ++t)
+        {
+            const Vec3 &a = p.at(wrapped(start + t - 2));
+            const Vec3 &q = p.at(wrapped(start + t));
+            const Vec3 &c = p.at(wrapped(start + t + 2));
+
+            const double ab = dist2D(a, q);
+            const double bc = dist2D(q, c);
+            const double ca = dist2D(a, c);
+
+            const double twice = std::abs((q.x - a.x) * (c.y - a.y) - (q.y - a.y) * (c.x - a.x));
+
+            if (ab * bc * ca > 1e-30)
+                most = std::max(most, 2.0 * twice / (ab * bc * ca));
+        }
+
+        return most;
+    };
+
+    /*
+     * Where that leaves a tight bend, the edge may do better as one smooth
+     * curve: it leaves a node along the strand, comes into the next along
+     * the strand and is as long as it was (a cubic Bezier curve, its two
+     * handles as long as that takes). It is taken only if it bends less
+     * and runs into nothing.
+     */
+    {
+        const QVector<Vec3> shaped = p;
+
+        auto strandAt = [&shaped, &wrapped](int i)
+        {
+            const Vec3 d = shaped.at(wrapped(i + 2)) - shaped.at(wrapped(i - 2));
+
+            return d * (1.0 / std::max(std::hypot(d.x, d.y), 1e-12));
+        };
+
+        constexpr int Fine = 80;
+
+        for (int j = 0; j < m; ++j)
+        {
+            const int start = j * PerEdge;
+
+            const Vec3 a = shaped.at(start);
+            const Vec3 d = shaped.at(wrapped(start + PerEdge));
+
+            const Vec3 leaving = strandAt(start);
+            const Vec3 arriving = strandAt(start + PerEdge);
+
+            double edge = 0.0;
+
+            for (int t = 0; t < PerEdge; ++t)
+                edge += dist2D(shaped.at(wrapped(start + t)), shaped.at(wrapped(start + t + 1)));
+
+            Vec3 curve[Fine + 1];
+            double along[Fine + 1];
+
+            auto trace = [&](double handle)
+            {
+                const Vec3 b = a + leaving * handle;
+                const Vec3 c = d - arriving * handle;
+
+                along[0] = 0.0;
+
+                for (int k = 0; k <= Fine; ++k)
+                {
+                    const double u = static_cast<double>(k) / Fine;
+                    const double v = 1.0 - u;
+
+                    curve[k] = a * (v * v * v) + b * (3.0 * v * v * u) + c * (3.0 * v * u * u) + d * (u * u * u);
+
+                    if (k > 0)
+                        along[k] = along[k - 1] + dist2D(curve[k - 1], curve[k]);
+                }
+
+                return along[Fine];
+            };
+
+            double low = 0.05 * edge;
+            double high = 1.2 * edge;
+
+            for (int attempt = 0; attempt < 18; ++attempt)
+            {
+                const double middle = 0.5 * (low + high);
+
+                (trace(middle) < edge ? low : high) = middle;
+            }
+
+            trace(0.5 * (low + high));
+
+            const double before = sharpest(start);
+
+            QVector<Vec3> was(PerEdge - 1);
+
+            int piece = 0;
+
+            for (int t = 1; t < PerEdge; ++t)
+            {
+                was[t - 1] = p.at(wrapped(start + t));
+
+                const double target = along[Fine] * t / PerEdge;
+
+                while (piece < Fine - 1 && along[piece + 1] < target)
+                    ++piece;
+
+                const double size = along[piece + 1] - along[piece];
+                const double u = size > 1e-12 ? (target - along[piece]) / size : 0.0;
+
+                p[wrapped(start + t)] = curve[piece] + (curve[piece + 1] - curve[piece]) * u;
+            }
+
+            if (sharpest(start) >= before || !sound())
+            {
+                for (int t = 1; t < PerEdge; ++t)
+                    p[wrapped(start + t)] = was.at(t - 1);
+            }
+        }
+    }
+
+    QVector<DiagramCrossing> opened(crossings);
+
+    for (int k = 0; k < crossings; ++k)
+    {
+        opened[k].segA = nodes.at(k).a;
+        opened[k].tA = 0.0;
+        opened[k].segB = nodes.at(k).b;
+        opened[k].tB = 0.0;
+        opened[k].aOver = firstOver.at(k);
+        opened[k].position = p.at(nodes.at(k).a);
+    }
+
+    diagram.points = p;
+    diagram.crossings = opened;
+
+    return true;
+}
+
 void detectDiagramCrossings(KnotDiagram &diagram)
 {
     diagram.crossings.clear();

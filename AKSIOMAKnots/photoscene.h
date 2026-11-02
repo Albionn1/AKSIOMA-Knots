@@ -31,9 +31,9 @@ enum class Scene
     // a braided cotton shoelace on the wooden floor of a sunlit ballroom
     BallroomFloor,
 
-    // the knot tied in the lace of a canvas sneaker on that floor
-    // (sneaker.h)
-    Sneaker,
+    // the knot as the track of a wooden toy train, on the stone of the
+    // garden (traintrack.h)
+    TrainTrack,
 
     Count
 };
@@ -42,7 +42,8 @@ enum class Scene
 struct RopeMaterial
 {
     // 1: three twisted strands of hemp (laid rope), 2: cotton yarns
-    // braided over and under each other (a shoelace)
+    // braided over and under each other (a shoelace), 3: the wooden track
+    // of the toy train
     int construction = 1;
 
     // real thickness (diameter)
@@ -123,11 +124,11 @@ struct SceneInfo
 
     RopeMaterial rope;
 
-    // the knot is tied in the lace of the sneaker (sneaker.h)
-    bool sneaker = false;
+    // the room's floor is dark stone, as the table always is
+    bool stoneFloor = false;
 
-    // colour of the sneaker's canvas (sRGB)
-    QColor canvas;
+    // the knot is the track of the toy train (traintrack.h)
+    bool train = false;
 };
 
 SceneInfo sceneInfo(

@@ -146,6 +146,17 @@ void setReduceMotion(
     QSettings().setValue(QStringLiteral("reduceMotion"), enabled);
 }
 
+bool showFrameRate()
+{
+    return QSettings().value(QStringLiteral("showFrameRate"), false).toBool();
+}
+
+void setShowFrameRate(
+    bool enabled)
+{
+    QSettings().setValue(QStringLiteral("showFrameRate"), enabled);
+}
+
 QString logPath()
 {
     const QString folder =

@@ -16,7 +16,6 @@
 #include "timelineslider.h"
 #include "unknotsummarydialog.h"
 
-#include <QStandardItemModel>
 
 #include <QApplication>
 #include <QAbstractSpinBox>
@@ -663,8 +662,8 @@ MainWindow::MainWindow(
         static_cast<int>(Photo::Scene::BallroomFloor));
 
     photoSceneCombo_->addItem(
-        tr("Tied on a sneaker"),
-        static_cast<int>(Photo::Scene::Sneaker));
+        tr("Toy train on a track shaped like the knot"),
+        static_cast<int>(Photo::Scene::TrainTrack));
 
     photoSceneCombo_->setToolTip(tr("Where the knot is photographed."));
     photoSceneCombo_->setAccessibleName(tr("Where the knot is photographed."));
@@ -692,9 +691,49 @@ MainWindow::MainWindow(
         photoSceneCombo_,
         &QComboBox::currentIndexChanged,
         this,
-        [this]() { applyPhotoMode(); });
+        [this]()
+        {
+            const auto chosen = static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
+
+            const QString refusal = Photo::sceneInfo(chosen).train ? trainRefusal() : QString();
+
+            // the list goes back, and the window says why: a choice that
+            // only seems not to work helps nobody
+            if (!refusal.isEmpty())
+            {
+                {
+                    const QSignalBlocker blocker(photoSceneCombo_);
+
+                    photoSceneCombo_->setCurrentIndex(shownSceneIndex_);
+                }
+
+                showNotice(refusal, Notice::Info);
+
+                return;
+            }
+
+            applyPhotoMode();
+        });
+
+    trainButton_ = new QPushButton(tr("Stop the train"), viewBar);
+
+    trainButton_->setCheckable(true);
+    trainButton_->setToolTip(tr("Stop the train for a sharp picture, or send it on its way again."));
+    trainButton_->setVisible(false);
+
+    connect(
+        trainButton_,
+        &QPushButton::toggled,
+        this,
+        [this](bool stopped)
+        {
+            trainButton_->setText(stopped ? tr("Start the train") : tr("Stop the train"));
+
+            glWidget_->setTrainRunning(!stopped);
+        });
 
     viewBarLayout->addWidget(navigationHint, 1);
+    viewBarLayout->addWidget(trainButton_);
     viewBarLayout->addWidget(photoSceneCombo_);
     viewBarLayout->addWidget(photoButton_);
     viewBarLayout->addWidget(resetCameraButton_);
@@ -2621,7 +2660,14 @@ QWidget *MainWindow::createSettingsPanel()
         tr("For a computer whose 3D view stays black: slower, without Photo "
            "mode. It starts with the next start of AKSIOMA."));
 
+    frameRateCheck_ = new QCheckBox(tr("Show frame rate"), panel);
+
+    frameRateCheck_->setToolTip(
+        tr("Shows the frames per second and the time of a frame in a corner of "
+           "the 3D view. A view at rest draws nothing and says Idle."));
+
     layout->addWidget(reduceMotionCheck_);
+    layout->addWidget(frameRateCheck_);
     layout->addWidget(softwareGraphicsCheck_);
 
     layout->addSpacing(12);
@@ -2717,6 +2763,19 @@ QWidget *MainWindow::createSettingsPanel()
             AppSettings::setReduceMotion(enabled);
 
             KnotGLWidget::setReduceMotion(enabled);
+        });
+
+    connect(
+        frameRateCheck_,
+        &QCheckBox::toggled,
+        this,
+        [this](bool enabled)
+        {
+            AppSettings::setShowFrameRate(enabled);
+
+            KnotGLWidget::setShowFrameRate(enabled);
+
+            glWidget_->update();
         });
 
     connect(
@@ -3343,6 +3402,14 @@ void MainWindow::updateSettingsControls()
     }
 
     KnotGLWidget::setReduceMotion(AppSettings::reduceMotion());
+
+    {
+        const QSignalBlocker blocker(frameRateCheck_);
+
+        frameRateCheck_->setChecked(AppSettings::showFrameRate());
+    }
+
+    KnotGLWidget::setShowFrameRate(AppSettings::showFrameRate());
 
     {
         const QSignalBlocker blocker(softwareGraphicsCheck_);
@@ -4111,14 +4178,8 @@ void MainWindow::openCommandPalette()
                          }});
     }
 
-    const auto *scenes = qobject_cast<QStandardItemModel *>(photoSceneCombo_->model());
-
     for (int i = 0; i < photoSceneCombo_->count(); ++i)
     {
-        // (the sneaker, for a knot too large for it)
-        if (scenes != nullptr && !scenes->item(i)->isEnabled())
-            continue;
-
         items.push_back({photoSceneCombo_->itemText(i), tr("Photo"), [this, i]()
                          {
                              if (!photoButton_->isChecked())
@@ -4782,12 +4843,16 @@ void MainWindow::updateLayingProgress()
     if (layingClock_.elapsed() < 400)
         return;
 
-    if (noticeBar_->isHidden() || !noticeProgress_->isVisible())
+    // (a message on the bar stays until it has been read: the work goes on
+    // without saying so)
+    if (noticeBar_->isHidden())
     {
         const std::shared_ptr<Photo::RopeProgress> progress = layingProgress_;
 
         showNotice(
-            tr("Laying the rope on the table"),
+            Photo::sceneInfo(static_cast<Photo::Scene>(restingJobScene_)).train
+                ? tr("Building the track")
+                : tr("Laying the rope on the table"),
             Notice::Busy,
             tr("Cancel"),
             [progress]()
@@ -5806,7 +5871,7 @@ void MainWindow::updateInvariantPanel(
 
     updateKnotTitle();
 
-    updateSneakerChoice();
+    updateTrainChoice();
 }
 
 QVector<QPair<QString, QString>> MainWindow::currentFacts() const
@@ -5937,51 +6002,83 @@ void MainWindow::openManual()
         Notice::Error);
 }
 
-bool MainWindow::knotFitsSneaker() const
+QString MainWindow::trainRefusal() const
 {
-    if (!hasData_ || currentData_.multiStrand || !currentData_.closed ||
-        currentData_.points.size() < 4)
+    if (!hasData_)
+        return QString();
+
+    if (currentData_.multiStrand)
+        return tr("The toy train needs one closed loop, and this knot is made of several strands.");
+
+    if (!currentData_.closed || currentData_.points.size() < 4)
+        return tr("The toy train needs one closed loop, and this curve has loose ends.");
+
+    constexpr int MostCrossings = 13;
+
+    // (the crossings in view are many more than the knot's own)
+    constexpr int MostInView = 40;
+
+    const bool tooLarge =
+        currentInvariants_.knownCrossingNumber >= 0
+            ? currentInvariants_.knownCrossingNumber > MostCrossings
+            : currentInvariants_.crossingNumber > MostInView;
+
+    if (tooLarge)
     {
-        return false;
+        return tr("This knot has too many crossings for the toy train: its track would "
+                  "hide the train. The toy train takes knots of up to %1 crossings.")
+            .arg(MostCrossings);
     }
 
-    // the knot's own crossing number when it is known, else this diagram's
-    const int crossings =
-        currentInvariants_.knownCrossingNumber >= 0
-            ? currentInvariants_.knownCrossingNumber
-            : currentInvariants_.crossingNumber;
-
-    return crossings >= 0 && crossings <= 7;
+    return QString();
 }
 
-void MainWindow::updateSneakerChoice()
+bool MainWindow::knotFitsTrain() const
 {
-    if (photoSceneCombo_ == nullptr)
+    return hasData_ && trainRefusal().isEmpty();
+}
+
+void MainWindow::updateTrainChoice()
+{
+    if (photoSceneCombo_ == nullptr || photoSceneCombo_->currentIndex() != shownSceneIndex_)
         return;
 
-    auto *model = qobject_cast<QStandardItemModel *>(photoSceneCombo_->model());
+    const auto chosen = static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
 
-    const int index = photoSceneCombo_->findData(static_cast<int>(Photo::Scene::Sneaker));
-
-    if (model == nullptr || index < 0)
+    if (!Photo::sceneInfo(chosen).train)
         return;
 
-    // (before the first knot every scene can be chosen)
-    const bool fits = !hasData_ || knotFitsSneaker();
+    const QString refusal = trainRefusal();
 
-    QStandardItem *item = model->item(index);
+    if (refusal.isEmpty())
+        return;
 
-    item->setEnabled(fits);
-    item->setToolTip(
-        fits ? QString()
-             : tr("Only knots with up to 7 crossings can be tied on the sneaker: "
-                  "larger knots do not fit on a shoe."));
+    photoSceneCombo_->setCurrentIndex(
+        photoSceneCombo_->findData(static_cast<int>(Photo::Scene::BallroomFloor)));
 
-    if (!fits && photoSceneCombo_->currentIndex() == index)
-    {
-        photoSceneCombo_->setCurrentIndex(
-            photoSceneCombo_->findData(static_cast<int>(Photo::Scene::BallroomFloor)));
-    }
+    showNotice(refusal, Notice::Info);
+}
+
+void MainWindow::showTrainCaption(int bridges)
+{
+    trainCaption_ = true;
+
+    glWidget_->setCaption(
+        tr("A knot is one closed loop"),
+        tr("The train goes round and round and never reaches an end. Every "
+           "bridge is a crossing, and the train passes it twice: once over and "
+           "once under. Bridges on this track: %1.")
+            .arg(bridges));
+}
+
+void MainWindow::hideTrainCaption()
+{
+    if (!trainCaption_)
+        return;
+
+    trainCaption_ = false;
+
+    glWidget_->setCaption(QString(), QString());
 }
 
 void MainWindow::chooseColor()
@@ -6044,24 +6141,34 @@ bool MainWindow::showRestingRope(double radius)
         pulling_ || relaxRunning_ ||
         seifertActive_ || unknotActive_ || joinActive_)
     {
+        hideTrainCaption();
+
         return false;
     }
 
     const auto scene =
         static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
 
-    // with Grab on, the lace on the sneaker is lifted off to be pulled;
-    // a rope on the table is picked up where it lies
-    if (grabEnabled() && Photo::sceneInfo(scene).sneaker)
+    const bool train = Photo::sceneInfo(scene).train;
+
+    // with Grab on, the track gives way to a rope that can be pulled; a rope
+    // on the table is picked up where it lies
+    if (grabEnabled() && train)
+    {
+        hideTrainCaption();
+
         return false;
+    }
 
     const Photo::RopeMaterial material = Photo::sceneInfo(scene).rope;
 
-    // tied in the sneaker's lace (only knots that fit), or on the table
-    const bool sneaker = Photo::sceneInfo(scene).sneaker;
+    // the track of the toy train (only knots that fit), or on the table
+    if (train && !knotFitsTrain())
+    {
+        hideTrainCaption();
 
-    if (sneaker && !knotFitsSneaker())
         return false;
+    }
 
     /*
      * The rope just joined has fallen onto the table by itself: it stays
@@ -6069,13 +6176,13 @@ bool MainWindow::showRestingRope(double radius)
      * (Only the joined knot itself takes this rope.)
      */
     const bool landed =
-        joinLanded_.valid && !sneaker &&
+        joinLanded_.valid && !train &&
         isJoinedKnot();
 
     if (landed)
     {
         restingRope_ = joinLanded_;
-        restingTied_ = Photo::TiedLace();
+        restingTrack_.reset();
         restingFrom_ = currentData_.points;
         restingRadius_ = radius;
         restingScene_ = static_cast<int>(scene);
@@ -6117,6 +6224,30 @@ bool MainWindow::showRestingRope(double radius)
         return false;
     }
 
+    // the track, with its bridges numbered, and the train on it
+    if (train)
+    {
+        if (!restingTrack_)
+            return false;
+
+        glWidget_->setCrossings(restingTrack_->bridges);
+        glWidget_->setTrainPath(restingTrack_->path, restingTrack_->length);
+        glWidget_->setRestingRope(restingTrack_->mesh, restingRope_.pose);
+        glWidget_->setMeshColor(meshColor_);
+
+        applySurface();
+
+        glWidget_->setShowCrossingNumbers(
+            showCrossingNumbersCheck_ != nullptr &&
+            showCrossingNumbersCheck_->isChecked());
+
+        showTrainCaption(restingTrack_->bridges.size());
+
+        updateGrabCurve();
+
+        return true;
+    }
+
     const KnotMath::Mesh mesh =
         Photo::buildRopeMesh(
             restingRope_.points,
@@ -6131,9 +6262,7 @@ bool MainWindow::showRestingRope(double radius)
 
     /*
      * The crossing numbers stay on their crossings: each is at the same
-     * place along the rope (a fraction of its length) as before. On the
-     * sneaker the knot is a part of the lace: it starts at cutFraction of
-     * the knot, and the cut left out gapFraction of it.
+     * place along the rope (a fraction of its length) as before.
      */
     const QVector<KnotMath::Vec3> &rest = restingRope_.points;
     const int n = rest.size();
@@ -6143,21 +6272,9 @@ bool MainWindow::showRestingRope(double radius)
     for (int i = 0; i < n; ++i)
         arc[i + 1] = arc.at(i) + (rest.at((i + 1) % n) - rest.at(i)).length();
 
-    const Photo::TiedLace &tied = restingTied_;
-    const bool inLace = sneaker && tied.knotTo > tied.knotFrom;
-
-    auto pointAt = [&rest, &arc, n, &tied, inLace](double fraction)
+    auto pointAt = [&rest, &arc, n](double fraction)
     {
-        double target = (fraction - std::floor(fraction)) * arc.at(n);
-
-        if (inLace)
-        {
-            double along = fraction - tied.cutFraction;
-
-            along = std::clamp((along - std::floor(along)) / std::max(1.0 - tied.gapFraction, 1.0e-6), 0.0, 1.0);
-
-            target = arc.at(tied.knotFrom) + along * (arc.at(tied.knotTo) - arc.at(tied.knotFrom));
-        }
+        const double target = (fraction - std::floor(fraction)) * arc.at(n);
 
         const int i = std::clamp(
             static_cast<int>(std::upper_bound(arc.cbegin(), arc.cend(), target) - arc.cbegin()) - 1,
@@ -6209,7 +6326,7 @@ void MainWindow::layRestingRope(double radius)
         static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
 
     const Photo::RopeMaterial material = Photo::sceneInfo(scene).rope;
-    const bool sneaker = Photo::sceneInfo(scene).sneaker;
+    const bool train = Photo::sceneInfo(scene).train;
 
     const QVector<KnotMath::Vec3> points = currentData_.points;
     const bool closed = currentData_.closed;
@@ -6221,7 +6338,14 @@ void MainWindow::layRestingRope(double radius)
     restingJobRadius_ = radius;
     restingJobScene_ = static_cast<int>(scene);
 
-    auto result = std::make_shared<Photo::TiedLace>();
+    // a rope, or a track with the rope that goes where it goes
+    struct Laid
+    {
+        Photo::RestingRope rope;
+        std::shared_ptr<const Photo::TrainTrack> track;
+    };
+
+    auto result = std::make_shared<Laid>();
 
     // what is still being laid down is for nothing now
     if (layingProgress_)
@@ -6235,21 +6359,29 @@ void MainWindow::layRestingRope(double radius)
     layingTimer_->start();
 
     QThread *worker = QThread::create(
-        [points, closed, radius, material, sneaker, result, progress]()
+        [points, closed, radius, material, train, result, progress]()
         {
-            Photo::TiedLace tied;
+            Laid tied;
 
-            // tied in the sneaker's lace, or dropped on the table
-            if (sneaker)
-                tied = Photo::tieOnSneaker(points, radius, material, progress.get());
+            // the track of the toy train, or dropped on the table
+            if (train)
+            {
+                auto track = std::make_shared<Photo::TrainTrack>(Photo::buildTrainTrack(points, progress.get()));
+
+                tied.rope = track->rope;
+                tied.rope.cancelled = track->cancelled;
+                tied.track = track;
+            }
             else
+            {
                 tied.rope = Photo::layOnTable(points, closed, radius, material, progress.get());
+            }
 
             /*
              * The rope never passes through itself, so it is the same knot
-             * (the lace through the eyelets as well); checked anyway with
-             * the Alexander polynomial of both centre lines. A rope that
-             * changed is not shown.
+             * (and the track has the crossings of the knot's own drawing);
+             * checked anyway with the Alexander polynomial of both centre
+             * lines. A rope that changed is not shown.
              */
             if (tied.rope.valid && closed)
             {
@@ -6272,7 +6404,7 @@ void MainWindow::layRestingRope(double radius)
         worker,
         &QThread::finished,
         this,
-        [this, job, result, points, radius, scene]()
+        [this, job, result, points, radius, scene, train]()
         {
             // a newer rope was asked for meanwhile
             if (job != restingJob_)
@@ -6293,14 +6425,16 @@ void MainWindow::layRestingRope(double radius)
                 photoButton_->setChecked(false);
 
                 showNotice(
-                    tr("Cancelled. Turn on Photo to lay the rope down again."),
+                    train
+                        ? tr("Cancelled. Turn on Photo to build the track again.")
+                        : tr("Cancelled. Turn on Photo to lay the rope down again."),
                     Notice::Info);
 
                 return;
             }
 
             restingRope_ = result->rope;
-            restingTied_ = *result;
+            restingTrack_ = result->track;
             restingFrom_ = points;
             restingRadius_ = radius;
             restingScene_ = static_cast<int>(scene);
@@ -6308,8 +6442,11 @@ void MainWindow::layRestingRope(double radius)
             if (!result->rope.valid)
             {
                 showNotice(
-                    tr("This knot could not be laid down as a rope without "
-                       "changing it, so it stays a smooth tube."),
+                    train
+                        ? tr("No track could be laid for this knot, so it stays a "
+                             "smooth tube.")
+                        : tr("This knot could not be laid down as a rope without "
+                             "changing it, so it stays a smooth tube."),
                     Notice::Info);
             }
 
@@ -6326,7 +6463,7 @@ void MainWindow::layRestingRope(double radius)
             /*
              * The camera was framed while the rope was still being laid
              * down, for what was there then. Now it can see the rope, and
-             * in the sneaker's scene the shoe around it, to their scale.
+             * on its track, the train too, to their scale.
              */
             const QString framing = QStringLiteral("%1 %2").arg(static_cast<int>(scene)).arg(framedKnot_);
 
@@ -6380,9 +6517,25 @@ void MainWindow::applyPhotoMode()
 
     const bool on = photoButton_->isChecked();
 
+    shownSceneIndex_ = photoSceneCombo_->currentIndex();
+
     photoSceneCombo_->setVisible(on);
 
     seifertMaterialRow_->setVisible(on);
+
+    // the toy train has a stop button; another scene has no train
+    {
+        const auto chosen = static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
+
+        const bool train = on && Photo::sceneInfo(chosen).train;
+
+        trainButton_->setVisible(train);
+
+        if (!train)
+            glWidget_->setTrainPath({}, 0.0);
+    }
+
+    trainCaption_ = false;
 
     // (what plays on the table does not go on without one)
     stopJoin(false);
@@ -6453,6 +6606,7 @@ void MainWindow::applyPhotoMode()
         }
 
         photoSceneCombo_->setVisible(false);
+        trainButton_->setVisible(false);
 
         showNotice(
             tr("The photographed place could not be loaded. Installing "
@@ -9971,8 +10125,8 @@ bool MainWindow::startPhotoRope()
     const auto scene =
         static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
 
-    // the lace on the sneaker is held by its eyelets
-    if (Photo::sceneInfo(scene).sneaker)
+    // the track of the toy train is no rope to pick up
+    if (Photo::sceneInfo(scene).train)
         return false;
 
     // the rope as it lies on the table now
@@ -10655,8 +10809,8 @@ bool MainWindow::startPhotoUnknot()
     const auto scene =
         static_cast<Photo::Scene>(photoSceneCombo_->currentData().toInt());
 
-    // the lace on the sneaker is held by its eyelets: the usual tube there
-    if (Photo::sceneInfo(scene).sneaker)
+    // the track of the toy train stays as it is: the usual tube there
+    if (Photo::sceneInfo(scene).train)
         return false;
 
     if (!restingRope_.valid ||
@@ -11478,8 +11632,8 @@ bool MainWindow::startPhotoJoin()
         return false;
     }
 
-    // (a lace stays in its shoe)
-    if (Photo::sceneInfo(scene).sneaker)
+    // (a track stays as it was laid)
+    if (Photo::sceneInfo(scene).train)
         return false;
 
     // the rope where it lies now: picked up and put down, or as it was laid

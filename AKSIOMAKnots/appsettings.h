@@ -40,6 +40,11 @@ bool reduceMotion();
 void setReduceMotion(
     bool enabled);
 
+// the frames per second in a corner of the 3D view
+bool showFrameRate();
+void setShowFrameRate(
+    bool enabled);
+
 // OpenGL in software (opengl32sw.dll): slow, but it runs where the graphics
 // card or the remote desktop has no OpenGL 3.3. Read before the app starts.
 // A small log beside the autosave, for reports of problems.

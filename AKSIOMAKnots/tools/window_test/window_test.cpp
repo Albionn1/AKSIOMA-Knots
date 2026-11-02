@@ -622,6 +622,331 @@ void seifertFilm(MainWindow &w)
     clearKnotState(w);
 }
 
+// a real click on a row of the open list of scenes
+void clickScene(MainWindow &w, int scene)
+{
+    QComboBox *combo = w.photoSceneCombo_;
+
+    combo->view()->window()->setAttribute(Qt::WA_DontShowOnScreen);
+
+    run(300);
+
+    combo->showPopup();
+
+    run(400);
+
+    QAbstractItemView *list = combo->view();
+
+    const QModelIndex row = combo->model()->index(scene, combo->modelColumn());
+
+    const QPoint at = list->visualRect(row).center();
+
+    const QPointF local(at);
+    const QPointF global(list->viewport()->mapToGlobal(at));
+
+    QMouseEvent move(QEvent::MouseMove, local, global, Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+    QMouseEvent press(QEvent::MouseButtonPress, local, global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease, local, global, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+
+    QCoreApplication::sendEvent(list->viewport(), &move);
+
+    run(50);
+
+    QCoreApplication::sendEvent(list->viewport(), &press);
+    QCoreApplication::sendEvent(list->viewport(), &release);
+
+    run(800);
+}
+
+void trainChoice(MainWindow &w)
+{
+    std::printf("\nThe toy train can always be clicked; if it cannot run, the window says why\n");
+
+    const int scene = w.photoSceneCombo_->findData(static_cast<int>(Photo::Scene::TrainTrack));
+
+    QComboBox *combo = w.photoSceneCombo_;
+
+    w.photoButton_->setChecked(true);
+
+    run(200);
+
+    // a knot it runs on
+    clickScene(w, scene);
+
+    check(combo->currentIndex() == scene, "a real click on the toy train chooses it");
+
+    waitFor([&w]() { return !w.restingLaying_; }, 20000);
+
+    run(300);
+
+    check(combo->currentIndex() == scene && w.restingTrack_ && w.restingTrack_->valid, "and it stays chosen");
+
+    combo->setCurrentIndex(0);
+
+    run(300);
+
+    // knots it does not run on: the list goes back, with a word why
+    auto refused = [&](const char *what)
+    {
+        w.hideNotice();
+
+        const int before = combo->currentIndex();
+
+        clickScene(w, scene);
+
+        std::printf("%s: [%s]\n", what, qPrintable(w.noticeText_->text()));
+
+        check(combo->currentIndex() == before, "the scene stays as it was");
+        check(w.noticeBar_->isVisible() && w.noticeText_->text() == w.trainRefusal(), "and the window says why");
+    };
+
+    // (the knot table ends at 13 crossings; a torus knot goes further)
+    choose(w, KnotMath::Preset::CustomTorus);
+
+    w.torusPSpin_->setValue(2);
+    w.torusQSpin_->setValue(15);
+
+    w.generateMesh();
+
+    run(400);
+
+    refused("fifteen crossings");
+
+    choose(w, KnotMath::Preset::DNAHelix);
+
+    w.generateMesh();
+
+    run(400);
+
+    refused("several strands");
+
+    // a joined knot has no number of its own: it is given a try
+    clearKnotState(w);
+
+    w.joinMirrorCheck_->setChecked(true);
+    w.joinPlayStop();
+
+    check(waitFor([&w]() { return !w.joinActive_; }, 15000), "two trefoils are joined");
+
+    std::printf("joined: known %d, in view %d\n", w.currentInvariants_.knownCrossingNumber, w.currentInvariants_.crossingNumber);
+
+    check(w.trainRefusal().isEmpty(), "and the toy train takes the joined knot");
+
+    w.joinMirrorCheck_->setChecked(false);
+
+    clearKnotState(w);
+
+    run(100);
+}
+
+void frameRate(MainWindow &w)
+{
+    std::printf("\nThe frame rate, shown when asked for\n");
+
+    check(!w.frameRateCheck_->isChecked() && !AppSettings::showFrameRate(), "it is off at first");
+
+    w.frameRateCheck_->setChecked(true);
+
+    check(AppSettings::showFrameRate(), "the setting is kept");
+
+    // something that moves: the train
+    w.photoButton_->setChecked(true);
+
+    run(100);
+
+    w.photoSceneCombo_->setCurrentIndex(
+        w.photoSceneCombo_->findData(static_cast<int>(Photo::Scene::TrainTrack)));
+
+    waitFor([&w]() { return w.restingTrack_ && w.restingTrack_->valid && !w.restingLaying_; }, 30000);
+
+    run(1500);
+
+    std::printf("moving: %.1f frames a second\n", w.glWidget_->frameRate());
+
+    check(w.glWidget_->frameRate() > 4.0, "a moving train is measured");
+
+    // a view at rest: nothing is drawn, and it says so
+    w.trainButton_->setChecked(true);
+
+    run(6000);
+
+    std::printf("at rest: %.1f\n", w.glWidget_->frameRate());
+
+    check(w.glWidget_->frameRate() == 0.0, "a still view counts as idle");
+
+    // it has to be there in the picture, not only in the numbers
+    auto corner = [&w]()
+    {
+        const QImage shot = w.glWidget_->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+
+        return shot.copy(shot.width() - 140, 0, 140, 50);
+    };
+
+    const QImage with = corner();
+
+    w.frameRateCheck_->setChecked(false);
+
+    check(!AppSettings::showFrameRate(), "and it can be turned off");
+
+    run(300);
+
+    const QImage without = corner();
+
+    int different = 0;
+
+    for (int y = 0; y < with.height(); ++y)
+    {
+        for (int x = 0; x < with.width(); ++x)
+        {
+            different += std::abs(qGray(with.pixel(x, y)) - qGray(without.pixel(x, y))) > 12 ? 1 : 0;
+        }
+    }
+
+    std::printf("the corner differs in %d pixels\n", different);
+
+    check(different > 300, "the box is in the picture, and goes when it is turned off");
+
+    w.trainButton_->setChecked(false);
+
+    w.frameRateCheck_->setChecked(true);
+
+    run(1500);
+
+    // FRAME_RATE_SHOT=file: a picture of the view with the box
+    if (qEnvironmentVariableIsSet("FRAME_RATE_SHOT"))
+        w.glWidget_->grabFramebuffer().save(qEnvironmentVariable("FRAME_RATE_SHOT"));
+
+    w.frameRateCheck_->setChecked(false);
+
+    w.photoButton_->setChecked(false);
+
+    clearKnotState(w);
+
+    run(100);
+}
+
+void toyTrain(MainWindow &w)
+{
+    std::printf("\nThe toy train runs on the knot, and everything else still works around it\n");
+
+    const int scene = w.photoSceneCombo_->findData(static_cast<int>(Photo::Scene::TrainTrack));
+
+    w.showTableKnot(QStringLiteral("3_1"));
+
+    run(100);
+
+    w.photoButton_->setChecked(true);
+
+    run(100);
+
+    check(!w.trainButton_->isVisibleTo(w.trainButton_->parentWidget()), "no stop button on the rope");
+
+    w.photoSceneCombo_->setCurrentIndex(scene);
+
+    check(waitFor([&w]() { return w.restingTrack_ && w.restingTrack_->valid && !w.restingLaying_; }, 30000),
+          "the track of the trefoil is built");
+
+    check(w.trainButton_->isVisibleTo(w.trainButton_->parentWidget()), "with a button to stop the train");
+    check(w.restingTrack_->bridges.size() == 3, "it has three bridges");
+    check(!w.glWidget_->captionTitle_.isEmpty(), "and the picture says what it shows");
+
+    const double start = w.glWidget_->trainAlong();
+
+    run(600);
+
+    // WINDOW_SHOT=file: a picture of the window as it is now
+    if (qEnvironmentVariableIsSet("WINDOW_SHOT"))
+    {
+        w.showCrossingNumbersCheck_->setChecked(true);
+
+        run(300);
+
+        w.glWidget_->grabFramebuffer().save(qEnvironmentVariable("WINDOW_SHOT"));
+
+        w.showCrossingNumbersCheck_->setChecked(false);
+    }
+
+    check(w.glWidget_->trainAlong() != start, "the train moves");
+
+    w.trainButton_->setChecked(true);
+
+    run(100);
+
+    const double stopped = w.glWidget_->trainAlong();
+
+    run(300);
+
+    check(w.glWidget_->trainAlong() == stopped, "and stops when told to");
+
+    w.trainButton_->setChecked(false);
+
+    // a new knot: a new track, for the bridges of that knot
+    w.showTableKnot(QStringLiteral("4_1"));
+
+    check(waitFor([&w]() { return w.restingTrack_ && w.restingTrack_->bridges.size() == 4 && !w.restingLaying_; }, 30000),
+          "another knot gets its own track");
+
+    // Grab leaves the track for a tube, and comes back to it
+    w.grabButton_->setChecked(true);
+
+    run(200);
+
+    check(w.glWidget_->captionTitle_.isEmpty(), "Grab takes the words off the picture");
+
+    w.grabButton_->setChecked(false);
+
+    run(300);
+
+    // the largest knot it takes
+    w.showTableKnot(QStringLiteral("10_123"));
+
+    check(waitFor([&w]() { return w.restingTrack_ && w.restingTrack_->valid && !w.restingLaying_; }, 40000),
+          "a knot of ten crossings gets a track");
+
+    // the largest in the table
+    w.showTableKnot(QStringLiteral("13n_5000"));
+
+    // (the track of this knot, not the one before)
+    waitFor(
+        [&w]()
+        {
+            return !w.restingLaying_ && !w.restingFrom_.isEmpty() && !w.currentData_.points.isEmpty() &&
+                   w.restingFrom_.first().x == w.currentData_.points.first().x;
+        },
+        40000);
+
+    check(w.restingTrack_ && w.restingTrack_->valid, "a knot of thirteen crossings gets a track");
+
+    check(w.glWidget_->showTrain(), "and the train runs on it");
+
+    // one too large: the scene is left for another, with a word why
+    choose(w, KnotMath::Preset::CustomTorus);
+
+    w.torusPSpin_->setValue(2);
+    w.torusQSpin_->setValue(15);
+
+    w.generateMesh();
+
+    run(300);
+
+    check(w.photoSceneCombo_->currentIndex() != scene, "a knot of fifteen crossings leaves the scene");
+    check(w.noticeBar_->isVisible() && w.noticeText_->text() == w.trainRefusal(), "and the window says why");
+
+    check(!w.trainButton_->isVisibleTo(w.trainButton_->parentWidget()), "the stop button leaves with the scene");
+
+    check(w.glWidget_->captionTitle_.isEmpty(), "and so do the words");
+
+    w.photoSceneCombo_->setCurrentIndex(0);
+
+    run(200);
+
+    w.photoButton_->setChecked(false);
+
+    run(100);
+
+    clearKnotState(w);
+}
+
 void newLanguage(MainWindow &w)
 {
     std::printf("\nA new language keeps the joined knot, the rope scene and the undo steps\n");
@@ -1319,6 +1644,20 @@ int main(int argc, char **argv)
             return 0;
         }
 
+        // window_test.exe train: only the toy train
+        if (argc >= 2 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("train"))
+        {
+            frameRate(w);
+            trainChoice(w);
+            toyTrain(w);
+
+            std::printf("\n%d failure(s)\n", failures);
+
+            w.replaced_ = true;
+
+            return failures == 0 ? 0 : 1;
+        }
+
         ropeFirst(w);
         arrowKeys(w);
         errorsAndCustomCurves(w);
@@ -1333,6 +1672,9 @@ int main(int argc, char **argv)
         notAKnot(w);
         openCurves(w);
         joinedHonestly(w);
+        frameRate(w);
+        trainChoice(w);
+        toyTrain(w);
         pictures(w);
         copies(w);
         saving(w);

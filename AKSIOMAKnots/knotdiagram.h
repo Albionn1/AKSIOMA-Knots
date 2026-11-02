@@ -128,6 +128,21 @@ bool spreadDiagram(
     double height = 0.3,
     double halfExtent = 2.0);
 
+// Opens the whole drawing up, as a loop of string that repels itself: strands
+// stand apart, crossings stand apart along the curve and meet nearly at right
+// angles, corners round off. For a drawing that has to be built from something
+// wide (the track of the toy train). Its length comes out about one unit per
+// pass. Only the shape changes: the signed Gauss code is checked as it goes,
+// and over and under stay as they were, so it is the same knot.
+// `outside` chooses the face of the drawing that ends up on the outside: 0 the
+// longest that can be, 1 the next, and so on (each gives another layout of the
+// same knot); negative: the drawing starts from the shape it has.
+// False if the drawing could not be followed, or there is no such face (it is
+// then left as it was).
+bool openDiagram(
+    KnotDiagram &diagram,
+    int outside = 0);
+
 // Takes out the smaller of the two loops at the crossing: the curve goes
 // straight on through it, and the crossings of that loop are gone. Unless
 // nothing else crosses the loop this can change the knot. False if the rest

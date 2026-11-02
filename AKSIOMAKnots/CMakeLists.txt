@@ -54,8 +54,8 @@ qt_add_executable(AKSIOMAKnots
     photoscene.cpp
     ropephysics.h
     ropephysics.cpp
-    sneaker.h
-    sneaker.cpp
+    traintrack.h
+    traintrack.cpp
     timelineslider.h
     timelineslider.cpp
     knottable.h
@@ -99,9 +99,8 @@ qt_add_resources(AKSIOMAKnots "knottable"
 )
 
 # Photo mode: two sunlit rooms (unclipped 4k HDRIs) and two wood surfaces
-# from Poly Haven, CC0 (data/photo/CREDITS.txt), and the sneaker made in
-# Blender (tools/sneaker/make_sneaker.py). About 75 MB, linked in as binary
-# data too.
+# from Poly Haven, CC0 (data/photo/CREDITS.txt). About 75 MB, linked in as
+# binary data too.
 qt_add_resources(AKSIOMAKnots "photo"
     PREFIX "/"
     BIG_RESOURCES
@@ -114,9 +113,6 @@ qt_add_resources(AKSIOMAKnots "photo"
         data/photo/wood_floor_worn_diff.jpg
         data/photo/wood_floor_worn_nor_gl.jpg
         data/photo/wood_floor_worn_rough.jpg
-        data/photo/sneaker.bin
-        data/photo/sneaker.json
-        data/photo/sneaker_floor.png
 )
 
 # One place for the version: project() above, for the program and the installer.
@@ -142,7 +138,7 @@ else()
     # it is in the hand, so these are optimised in Debug builds too (about
     # ten times faster). The same for spreading a drawing apart and for
     # relaxing a Seifert surface into its film.
-    set_source_files_properties(knotrelax.cpp ropephysics.cpp knotmath.cpp knotglwidget.cpp knotdiagram.cpp knotfilm.cpp PROPERTIES
+    set_source_files_properties(knotrelax.cpp ropephysics.cpp knotmath.cpp knotglwidget.cpp knotdiagram.cpp knotfilm.cpp traintrack.cpp PROPERTIES
         COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
 endif()
 
