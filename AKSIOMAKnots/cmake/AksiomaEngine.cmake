@@ -13,7 +13,7 @@ if(TARGET AksiomaCore)
 endif()
 
 set(AKSIOMA_ENGINE_DIR "" CACHE PATH "A working copy of AKSIOMA Engine (empty: the pinned release)")
-set(AKSIOMA_ENGINE_TAG "v0.1.0" CACHE STRING "The release of AKSIOMA Engine this app is built with")
+set(AKSIOMA_ENGINE_TAG "v0.1.1" CACHE STRING "The release of AKSIOMA Engine this app is built with")
 
 # (the engine's examples and tests are its own business)
 set(AKSIOMA_ENGINE_EXAMPLES OFF CACHE BOOL "" FORCE)

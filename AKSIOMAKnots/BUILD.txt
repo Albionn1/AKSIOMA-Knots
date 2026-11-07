@@ -10,7 +10,7 @@ Or: open CMakeLists.txt in Qt Creator and pick a Qt 6 kit.
 Needs an OpenGL 3.3 core capable GPU/driver.
 
 The 3D renderer is AKSIOMA Engine, a project of its own. CMake fetches the
-release this app is made for (AKSIOMA_ENGINE_TAG, now v0.1.0) from GitHub once,
+release this app is made for (AKSIOMA_ENGINE_TAG, now v0.1.1) from GitHub once,
 so every build gets the same engine. To work on the engine and the app
 together, point at a working copy with -DAKSIOMA_ENGINE_DIR=<folder> or the
 AKSIOMA_ENGINE_DIR environment variable (cmake/AksiomaEngine.cmake).

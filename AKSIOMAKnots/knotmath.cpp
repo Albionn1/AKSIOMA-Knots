@@ -2,6 +2,8 @@
 #include "knottable.h"
 
 #include <aksioma/curves.h>
+#include <aksioma/expression.h>
+#include <aksioma/shapes.h>
 
 #include <QCoreApplication>
 #include <QRegularExpression>
@@ -77,602 +79,44 @@ Vec3 axisUnit(int axis)
 
 /*
  * =============================================================
- * EXPRESSION PARSER
+ * FORMULAS
  * =============================================================
  *
- * Grammar (lowest to highest precedence):
- *
- *   expression := term (('+' | '-') term)*
- *   term       := unary (('*' | '/' | implicit) unary)*
- *   unary      := ('-' | '+') unary | power
- *   power      := primary ('^' unary)?          (right associative)
- *   primary    := number | constant | function '(' expression ')'
- *                 | '(' expression ')'
- *
- * Therefore -2^2 = -4 and 2^-1 = 0.5. Implicit multiplication
- * ("2t", "3pi", "2(t+1)", "sin(t)cos(t)") is supported.
- * Variable: t.  Constants: pi, e.
+ * Read by the engine's Expression (aksioma/expression.h): written as people
+ * type them and as they are printed (2t, sin(t)cos(t), pi as the Greek
+ * letter, small raised figures for powers, printed minus and times signs),
+ * read once and then worked out at every point of the curve.
  */
 constexpr int MaxFormulaLength = 4000;
 constexpr double MaxCustomCoordinate = 1.0e6;
 
-struct ExprParser
+// What is wrong with one line of a formula, in words (the app's own, for
+// translation).
+QString describeFormulaError(const QString &axis, const QString &expression, const Aksioma::Expression &formula)
 {
-    ExprParser(const QString &expression, double variableT)
-        : source(expression), t(variableT)
-    {
-    }
+    using Problem = Aksioma::Expression::Problem;
 
-    // Deeper than any real formula, and shallow enough for the stack: every
-    // nested bracket, sign or power passes through parseUnary.
-    static constexpr int MaxDepth = 200;
-
-    QString source;
-    int position = 0;
-    int depth = 0;
-    bool error = false;
-    double t = 0.0;
-
-    // a word that means nothing here, for the message
-    QString unknownWord;
-
-    // the last thing read was a plain number: "1 2" is a typing error, not
-    // the product of 1 and 2
-    bool numberLast = false;
-
-    void skipSpaces()
-    {
-        while (position < source.size() && source.at(position).isSpace())
-            ++position;
-    }
-
-    bool consume(QChar character)
-    {
-        skipSpaces();
-
-        if (position < source.size() && source.at(position) == character)
-        {
-            ++position;
-            return true;
-        }
-
-        return false;
-    }
-
-    QString parseIdentifier()
-    {
-        skipSpaces();
-
-        const int start = position;
-
-        // letters first; digits only after the first character
-        while (position < source.size())
-        {
-            const QChar c = source.at(position);
-
-            if (!c.isLetter() && c != '_' &&
-                !(position > start && c.isDigit()))
-            {
-                break;
-            }
-
-            ++position;
-        }
-
-        return source.mid(start, position - start);
-    }
-
-    double parseNumber()
-    {
-        skipSpaces();
-
-        const int start = position;
-        bool hasDigits = false;
-        bool hasExponent = false;
-
-        while (position < source.size())
-        {
-            const QChar c = source.at(position);
-
-            if (c.isDigit() || c == '.')
-            {
-                hasDigits = true;
-                ++position;
-                continue;
-            }
-
-            if ((c == 'e' || c == 'E') && !hasExponent && hasDigits)
-            {
-                // Only an exponent if followed by digits ("1e-3"),
-                // otherwise it is the constant e ("2e", "2exp(t)").
-                int look = position + 1;
-
-                if (look < source.size() &&
-                    (source.at(look) == '+' || source.at(look) == '-'))
-                {
-                    ++look;
-                }
-
-                if (look < source.size() && source.at(look).isDigit())
-                {
-                    hasExponent = true;
-                    position = look;
-                    continue;
-                }
-            }
-
-            break;
-        }
-
-        if (!hasDigits)
-        {
-            error = true;
-            return 0.0;
-        }
-
-        bool ok = false;
-
-        const double value =
-            source.mid(start, position - start).toDouble(&ok);
-
-        if (!ok || !finiteValue(value))
-        {
-            error = true;
-            return 0.0;
-        }
-
-        numberLast = true;
-
-        return value;
-    }
-
-    // 1 / x, where there is one
-    double reciprocal(double x)
-    {
-        if (std::abs(x) < Epsilon)
-        {
-            error = true;
-            return 0.0;
-        }
-
-        return 1.0 / x;
-    }
-
-    double applyFunction(const QString &name, double a, double b)
-    {
-        if (name == QStringLiteral("min"))
-            return std::min(a, b);
-
-        if (name == QStringLiteral("max"))
-            return std::max(a, b);
-
-        if (name == QStringLiteral("atan2"))
-            return std::atan2(a, b);
-
-        if (name == QStringLiteral("pow"))
-        {
-            const double result = std::pow(a, b);
-
-            if (!finiteValue(result))
-                error = true;
-
-            return result;
-        }
-
-        if (name == QStringLiteral("mod"))
-        {
-            if (std::abs(b) < Epsilon)
-            {
-                error = true;
-                return 0.0;
-            }
-
-            return a - b * std::floor(a / b);
-        }
-
-        unknownWord = name;
-        error = true;
-
-        return 0.0;
-    }
-
-    double applyFunction(const QString &name, double argument)
-    {
-        if (name == QStringLiteral("sin"))
-            return std::sin(argument);
-
-        if (name == QStringLiteral("cos"))
-            return std::cos(argument);
-
-        if (name == QStringLiteral("tan"))
-            return std::tan(argument);
-
-        if (name == QStringLiteral("sec"))
-            return reciprocal(std::cos(argument));
-
-        if (name == QStringLiteral("csc"))
-            return reciprocal(std::sin(argument));
-
-        if (name == QStringLiteral("cot"))
-            return reciprocal(std::tan(argument));
-
-        if (name == QStringLiteral("sign"))
-            return (argument > 0.0 ? 1.0 : 0.0) - (argument < 0.0 ? 1.0 : 0.0);
-
-        if (name == QStringLiteral("asin"))
-            return std::asin(argument);
-
-        if (name == QStringLiteral("acos"))
-            return std::acos(argument);
-
-        if (name == QStringLiteral("atan"))
-            return std::atan(argument);
-
-        if (name == QStringLiteral("sinh"))
-            return std::sinh(argument);
-
-        if (name == QStringLiteral("cosh"))
-            return std::cosh(argument);
-
-        if (name == QStringLiteral("tanh"))
-            return std::tanh(argument);
-
-        if (name == QStringLiteral("abs"))
-            return std::abs(argument);
-
-        if (name == QStringLiteral("exp"))
-            return std::exp(argument);
-
-        if (name == QStringLiteral("floor"))
-            return std::floor(argument);
-
-        if (name == QStringLiteral("ceil"))
-            return std::ceil(argument);
-
-        if (name == QStringLiteral("sqrt"))
-        {
-            if (argument < 0.0)
-            {
-                error = true;
-                return 0.0;
-            }
-
-            return std::sqrt(argument);
-        }
-
-        if (name == QStringLiteral("log") || name == QStringLiteral("ln"))
-        {
-            if (argument <= 0.0)
-            {
-                error = true;
-                return 0.0;
-            }
-
-            return std::log(argument);
-        }
-
-        if (name == QStringLiteral("log10"))
-        {
-            if (argument <= 0.0)
-            {
-                error = true;
-                return 0.0;
-            }
-
-            return std::log10(argument);
-        }
-
-        unknownWord = name;
-        error = true;
-
-        return 0.0;
-    }
-
-    double parsePrimary()
-    {
-        skipSpaces();
-
-        numberLast = false;
-
-        if (position >= source.size())
-        {
-            error = true;
-            return 0.0;
-        }
-
-        if (consume('('))
-        {
-            const double value = parseExpression();
-
-            if (!consume(')'))
-                error = true;
-
-            numberLast = false;
-
-            return value;
-        }
-
-        const QChar c = source.at(position);
-
-        if (c.isDigit() || c == '.')
-            return parseNumber();
-
-        if (c.isLetter() || c == '_')
-        {
-            const QString lower = parseIdentifier().toLower();
-
-            if (lower == QStringLiteral("t"))
-                return t;
-
-            if (lower == QStringLiteral("pi"))
-                return Pi;
-
-            if (lower == QStringLiteral("e"))
-                return std::exp(1.0);
-
-            if (consume('('))
-            {
-                const double argument = parseExpression();
-
-                const bool second = consume(',');
-
-                const double other = second ? parseExpression() : 0.0;
-
-                if (!consume(')'))
-                {
-                    error = true;
-                    return 0.0;
-                }
-
-                numberLast = false;
-
-                return second ? applyFunction(lower, argument, other)
-                              : applyFunction(lower, argument);
-            }
-
-            // unknown identifier (this includes p and q, which are not
-            // variables of the curve language)
-            unknownWord = lower;
-            error = true;
-            return 0.0;
-        }
-
-        error = true;
-        return 0.0;
-    }
-
-    double parseUnary()
-    {
-        if (depth >= MaxDepth)
-        {
-            error = true;
-            return 0.0;
-        }
-
-        ++depth;
-
-        double value = 0.0;
-
-        if (consume('-'))
-            value = -parseUnary();
-        else if (consume('+'))
-            value = parseUnary();
-        else
-            value = parsePower();
-
-        --depth;
-
-        return value;
-    }
-
-    double parsePower()
-    {
-        double base = parsePrimary();
-
-        if (!error && consume('^'))
-        {
-            const double exponent = parseUnary();
-            const double result = std::pow(base, exponent);
-
-            if (!finiteValue(result))
-                error = true;
-
-            base = result;
-        }
-
-        return base;
-    }
-
-    bool implicitMultiplicationFollows()
-    {
-        skipSpaces();
-
-        if (position >= source.size())
-            return false;
-
-        const QChar c = source.at(position);
-
-        return c.isLetter() || c.isDigit() || c == '.' || c == '(' ||
-               c == '_';
-    }
-
-    double parseTerm()
-    {
-        double value = parseUnary();
-
-        while (!error)
-        {
-            if (consume('*'))
-            {
-                value *= parseUnary();
-            }
-            else if (consume('/'))
-            {
-                const double divisor = parseUnary();
-
-                if (std::abs(divisor) < Epsilon)
-                {
-                    error = true;
-                    return 0.0;
-                }
-
-                value /= divisor;
-            }
-            else if (implicitMultiplicationFollows())
-            {
-                const QChar next = source.at(position);
-
-                if (numberLast && (next.isDigit() || next == '.'))
-                {
-                    error = true;
-                    return value;
-                }
-
-                value *= parsePower();
-            }
-            else
-            {
-                break;
-            }
-        }
-
-        return value;
-    }
-
-    double parseExpression()
-    {
-        double value = parseTerm();
-
-        while (!error)
-        {
-            if (consume('+'))
-                value += parseTerm();
-            else if (consume('-'))
-                value -= parseTerm();
-            else
-                break;
-        }
-
-        return value;
-    }
-
-    double evaluate()
-    {
-        const double result = parseExpression();
-
-        skipSpaces();
-
-        if (position != source.size())
-            error = true;
-
-        if (!finiteValue(result))
-            error = true;
-
-        return result;
-    }
-};
-
-double evaluateExpression(const QString &expression, double t, bool &ok)
-{
-    ExprParser parser(expression, t);
-
-    const double value = parser.evaluate();
-
-    ok = !parser.error && finiteValue(value);
-
-    return value;
-}
-
-// What a formula copied from a page, or from this app's own polynomials,
-// looks like: pi and minus signs of print, and powers set as small figures.
-QString normalizeFormula(const QString &formula)
-{
-    static const QString superscripts = QStringLiteral("⁰¹²³⁴⁵⁶⁷⁸⁹");
-
-    QString result;
-
-    const QString text = formula.trimmed();
-
-    for (qsizetype i = 0; i < text.size(); ++i)
-    {
-        const QChar c = text.at(i);
-
-        if (c == QChar(0x03C0))
-        {
-            result += QStringLiteral(" pi ");
-        }
-        else if (c == QChar(0x2212) || c == QChar(0x2013))
-        {
-            result += QLatin1Char('-');
-        }
-        else if (c == QChar(0x00D7) || c == QChar(0x00B7) || c == QChar(0x22C5))
-        {
-            result += QLatin1Char('*');
-        }
-        else if (c == QChar(0x00F7))
-        {
-            result += QLatin1Char('/');
-        }
-        else if (c == QChar(0x207B) || superscripts.contains(c))
-        {
-            result += QStringLiteral("^(");
-
-            for (; i < text.size() && (text.at(i) == QChar(0x207B) || superscripts.contains(text.at(i))); ++i)
-            {
-                if (text.at(i) == QChar(0x207B))
-                    result += QLatin1Char('-');
-                else
-                    result += QString::number(superscripts.indexOf(text.at(i)));
-            }
-
-            --i;
-
-            result += QLatin1Char(')');
-        }
-        else
-        {
-            result += c;
-        }
-    }
-
-    result = result.trimmed();
-
-    if (result.startsWith('='))
-        result.remove(0, 1);
-
-    return result.trimmed();
-}
-
-// What is wrong with one line of a formula, in words.
-QString describeFormulaError(const QString &axis, const QString &expression)
-{
-    ExprParser parser(expression, 0.37);
-
-    parser.evaluate();
-
-    if (!parser.unknownWord.isEmpty())
+    if (formula.problem() == Problem::UnknownName)
     {
         return knotTr("The formula for %1 uses \"%2\", which is not known here.")
-            .arg(axis, parser.unknownWord);
+            .arg(axis, formula.problemWord());
     }
 
-    static const QRegularExpression decimalComma(QStringLiteral("\\d,\\d"));
-
-    if (decimalComma.match(expression).hasMatch())
+    if (formula.problem() == Problem::DecimalComma)
     {
         return knotTr("The formula for %1 has a comma in a number: write 0.5, not 0,5.")
             .arg(axis);
     }
 
-    // read to its end, and no value came out
-    if (parser.position >= expression.size())
+    // read, and no value came out
+    if (formula.isValid())
     {
         return knotTr("The formula for %1 has no value: it divides by zero, or "
                       "takes a root or a logarithm where there is none.")
             .arg(axis);
     }
 
-    const int at = std::max(0, parser.position - 2);
+    const int at = std::max(0, formula.problemPosition() - 2);
 
     return knotTr("The formula for %1 could not be read near \"%2\".")
         .arg(axis, expression.mid(at, 8));
@@ -783,30 +227,6 @@ std::vector<long long> polynomialQuotient(
  * GEOMETRY HELPERS
  * =============================================================
  */
-
-Vec3 derivativeAt(const QVector<Vec3> &curve, int index, bool closed)
-{
-    const int count = curve.size();
-
-    if (count < 2)
-        return Vec3();
-
-    if (closed)
-    {
-        const int previous = (index - 1 + count) % count;
-        const int next = (index + 1) % count;
-
-        return (curve.at(next) - curve.at(previous)) * 0.5;
-    }
-
-    if (index == 0)
-        return curve.at(1) - curve.at(0);
-
-    if (index == count - 1)
-        return curve.at(count - 1) - curve.at(count - 2);
-
-    return (curve.at(index + 1) - curve.at(index - 1)) * 0.5;
-}
 
 QVector<Vec3> resampleByArcLength(
     const QVector<Vec3> &input,
@@ -2088,8 +1508,10 @@ bool parseFormula(
         const QString variable =
             assignment.left(equalsPosition).trimmed().toLower();
 
-        const QString expression =
-            normalizeFormula(assignment.mid(equalsPosition + 1));
+        QString expression = assignment.mid(equalsPosition + 1).trimmed();
+
+        if (expression.startsWith('='))
+            expression = expression.mid(1).trimmed();
 
         if (variable == QStringLiteral("x"))
             xExpression = expression;
@@ -2107,7 +1529,12 @@ bool parseFormula(
 
     // (a formula is worked out at every point of the curve: one this long
     // would stop the window for many seconds)
-    auto testExpression = [&errorMessage](const QString &axis, const QString &expression)
+    const QStringList variables = {QStringLiteral("t")};
+
+    Aksioma::Expression formulas[3];
+
+    auto testExpression = [&errorMessage, &variables](const QString &axis, const QString &expression,
+                                                      Aksioma::Expression &formula)
     {
         if (expression.size() > MaxFormulaLength)
         {
@@ -2115,41 +1542,38 @@ bool parseFormula(
             return false;
         }
 
-        bool ok = false;
+        formula = Aksioma::Expression(expression, variables);
 
-        evaluateExpression(expression, 0.37, ok);
+        const bool ok = formula.isValid() && finiteValue(formula(0.37));
 
         if (!ok)
-            errorMessage = describeFormulaError(axis, expression);
+            errorMessage = describeFormulaError(axis, expression, formula);
 
         return ok;
     };
 
-    if (!testExpression(QStringLiteral("x"), xExpression) ||
-        !testExpression(QStringLiteral("y"), yExpression) ||
-        !testExpression(QStringLiteral("z"), zExpression))
+    if (!testExpression(QStringLiteral("x"), xExpression, formulas[0]) ||
+        !testExpression(QStringLiteral("y"), yExpression, formulas[1]) ||
+        !testExpression(QStringLiteral("z"), zExpression, formulas[2]))
     {
         return false;
     }
 
     // At run time a failed evaluation yields NaN, which buildPreset reports
     // as an error instead of silently plotting 0.
-    auto makeFunction = [](const QString &expression) -> ScalarFunction
+    auto makeFunction = [](const Aksioma::Expression &formula) -> ScalarFunction
     {
-        return [expression](double t)
+        return [formula](double t)
         {
-            bool ok = false;
+            const double result = formula(t);
 
-            const double result = evaluateExpression(expression, t, ok);
-
-            return ok ? result
-                      : std::numeric_limits<double>::quiet_NaN();
+            return finiteValue(result) ? result : std::numeric_limits<double>::quiet_NaN();
         };
     };
 
-    fx = makeFunction(xExpression);
-    fy = makeFunction(yExpression);
-    fz = makeFunction(zExpression);
+    fx = makeFunction(formulas[0]);
+    fy = makeFunction(formulas[1]);
+    fz = makeFunction(formulas[2]);
 
     return true;
 }
@@ -2240,330 +1664,10 @@ Mesh buildTubeMeshWithCrossings(
     radius = std::max(0.005, radius);
     ringSegments = std::max(6, ringSegments);
 
+    // (the engine's: aksioma/shapes.h; no colours yet)
+    mesh = Aksioma::Shapes::tube(curve, radius, closed, QColor(), ringSegments, frameHint);
+
     const int n = curve.size();
-
-    QVector<Vec3> tangents(n);
-    QVector<Vec3> normals(n);
-    QVector<Vec3> binormals(n);
-
-    const Vec3 initialTangent = safeNormalize(
-        derivativeAt(curve, 0, closed),
-        Vec3(1.0, 0.0, 0.0));
-
-    const Vec3 reference =
-        std::abs(Vec3::dot(initialTangent, Vec3(0.0, 0.0, 1.0))) < 0.85
-            ? Vec3(0.0, 0.0, 1.0)
-            : Vec3(0.0, 1.0, 0.0);
-
-    const Vec3 initialNormal = safeNormalize(
-        reference - initialTangent * Vec3::dot(reference, initialTangent),
-        Vec3(1.0, 0.0, 0.0));
-
-    const Vec3 initialBinormal = safeNormalize(
-        Vec3::cross(initialTangent, initialNormal),
-        Vec3(0.0, 1.0, 0.0));
-
-    for (int i = 0; i < n; ++i)
-    {
-        tangents[i] = safeNormalize(
-            derivativeAt(curve, i, closed),
-            initialTangent);
-    }
-
-    // Animation frame: every ring keeps its normal from the previous frame.
-    const bool followPrevious =
-        frameHint != nullptr && frameHint->ringNormals.size() == n;
-
-    normals[0] = initialNormal;
-    binormals[0] = initialBinormal;
-
-    if (followPrevious)
-    {
-        for (int i = 0; i < n; ++i)
-        {
-            const Vec3 tangent = tangents.at(i);
-            const Vec3 previous = frameHint->ringNormals.at(i);
-
-            Vec3 projected = previous - tangent * Vec3::dot(previous, tangent);
-
-            // The tangent turned (almost) onto the old normal: continue from
-            // the neighbouring ring instead.
-            if (projected.length() < 0.1 && i > 0)
-            {
-                const Vec3 neighbour = normals.at(i - 1);
-                projected = neighbour - tangent * Vec3::dot(neighbour, tangent);
-            }
-
-            normals[i] = safeNormalize(projected, initialNormal);
-
-            binormals[i] = safeNormalize(
-                Vec3::cross(tangent, normals.at(i)),
-                initialBinormal);
-        }
-    }
-
-    // parallel transport of the normal along the curve
-    for (int i = 1; i < n && !followPrevious; ++i)
-    {
-        const Vec3 previousNormal = normals.at(i - 1);
-        const Vec3 tangent = tangents.at(i);
-
-        const Vec3 projected =
-            previousNormal - tangent * Vec3::dot(previousNormal, tangent);
-
-        const Vec3 normal = safeNormalize(
-            projected,
-            Vec3::cross(binormals.at(i - 1), tangent));
-
-        normals[i] = normal;
-
-        binormals[i] = safeNormalize(
-            Vec3::cross(tangent, normal),
-            binormals.at(i - 1));
-    }
-
-    /*
-     * Closed tubes: after one full loop the transported frame generally
-     * does not coincide with the starting frame (holonomy). Without a
-     * correction the last ring is joined to the first one with a visible
-     * twist. The remaining rotation angle is distributed evenly over all
-     * rings.
-     */
-    if (closed && !followPrevious)
-    {
-        const Vec3 t0 = tangents.at(0);
-        const Vec3 last = normals.at(n - 1);
-
-        const Vec3 transported = safeNormalize(
-            last - t0 * Vec3::dot(last, t0),
-            normals.at(0));
-
-        const double angle = std::atan2(
-            Vec3::dot(Vec3::cross(transported, normals.at(0)), t0),
-            Vec3::dot(transported, normals.at(0)));
-
-        for (int i = 1; i < n; ++i)
-        {
-            const double phi =
-                angle * static_cast<double>(i) / static_cast<double>(n);
-
-            const double c = std::cos(phi);
-            const double s = std::sin(phi);
-
-            const Vec3 normal = normals.at(i);
-            const Vec3 binormal = binormals.at(i);
-
-            normals[i] = normal * c + binormal * s;
-            binormals[i] = binormal * c - normal * s;
-        }
-    }
-
-    if (frameHint != nullptr)
-        frameHint->ringNormals = normals;
-
-    mesh.ringCount = n;
-    mesh.ringSegments = ringSegments;
-
-    const int ringVertexCount = n * ringSegments;
-    const int capVertexCount = closed ? 0 : 2 * (ringSegments + 1);
-
-    mesh.indices.reserve(n * ringSegments * 6 + (closed ? 0 : ringSegments * 6));
-
-    // Arc length at every ring. The twist phase of surface patterns makes a
-    // whole number of turns on a closed tube, so the pattern closes up.
-    QVector<double> arc(n, 0.0);
-
-    for (int i = 1; i < n; ++i)
-        arc[i] = arc.at(i - 1) + (curve.at(i) - curve.at(i - 1)).length();
-
-    const double length =
-        arc.at(n - 1) + (closed ? (curve.at(0) - curve.at(n - 1)).length() : 0.0);
-
-    const double layLength = 7.0 * radius;
-
-    const double turns =
-        closed ? std::max(1.0, std::round(length / layLength))
-               : length / layLength;
-
-    const double phaseScale =
-        length > Epsilon ? 2.0 * Pi * turns / length : 0.0;
-
-    for (int i = 0; i < n; ++i)
-    {
-        mesh.centerline.push_back(static_cast<float>(curve.at(i).x));
-        mesh.centerline.push_back(static_cast<float>(curve.at(i).y));
-        mesh.centerline.push_back(static_cast<float>(curve.at(i).z));
-        mesh.centerline.push_back(static_cast<float>(radius));
-
-        mesh.centerlineStrand.push_back(0);
-        mesh.centerlineArc.push_back(static_cast<float>(arc.at(i)));
-    }
-
-    mesh.strandLength.push_back(static_cast<float>(length));
-    mesh.strandClosed.push_back(closed);
-
-    // angles around the ring and twist phase per ring, computed once
-    QVector<double> cosTheta(ringSegments);
-    QVector<double> sinTheta(ringSegments);
-
-    for (int j = 0; j < ringSegments; ++j)
-    {
-        const double theta =
-            2.0 * Pi * static_cast<double>(j) /
-            static_cast<double>(ringSegments);
-
-        cosTheta[j] = std::cos(theta);
-        sinTheta[j] = std::sin(theta);
-    }
-
-    QVector<float> cosPhase(n);
-    QVector<float> sinPhase(n);
-
-    for (int i = 0; i < n; ++i)
-    {
-        cosPhase[i] = static_cast<float>(std::cos(arc.at(i) * phaseScale));
-        sinPhase[i] = static_cast<float>(std::sin(arc.at(i) * phaseScale));
-    }
-
-    // All vertex arrays are allocated once and written through pointers
-    // (push_back is slow in debug builds, and this runs every animation
-    // frame).
-    const int totalVertexCount = ringVertexCount + capVertexCount;
-
-    mesh.positions.resize(totalVertexCount * 3);
-    mesh.normals.resize(totalVertexCount * 3);
-    mesh.texcoords.resize(totalVertexCount * 4);
-    mesh.vertexSample.resize(totalVertexCount);
-
-    float *positionData = mesh.positions.data();
-    float *normalData = mesh.normals.data();
-    float *texcoordData = mesh.texcoords.data();
-    int *sampleData = mesh.vertexSample.data();
-
-    int written = 0;
-
-    // segment -1: the centre of an end cap
-    auto pushVertex = [&](const Vec3 &position, const Vec3 &normal, int segment, int ring)
-    {
-        float *p = positionData + 3 * written;
-        float *q = normalData + 3 * written;
-        float *t = texcoordData + 4 * written;
-
-        p[0] = static_cast<float>(position.x);
-        p[1] = static_cast<float>(position.y);
-        p[2] = static_cast<float>(position.z);
-
-        q[0] = static_cast<float>(normal.x);
-        q[1] = static_cast<float>(normal.y);
-        q[2] = static_cast<float>(normal.z);
-
-        t[0] = segment >= 0 ? static_cast<float>(cosTheta.at(segment)) : 1.0f;
-        t[1] = segment >= 0 ? static_cast<float>(sinTheta.at(segment)) : 0.0f;
-        t[2] = cosPhase.at(ring);
-        t[3] = sinPhase.at(ring);
-
-        sampleData[written] = ring;
-
-        ++written;
-    };
-
-    for (int i = 0; i < n; ++i)
-    {
-        for (int j = 0; j < ringSegments; ++j)
-        {
-            const Vec3 radial =
-                normals.at(i) * cosTheta.at(j) +
-                binormals.at(i) * sinTheta.at(j);
-
-            pushVertex(curve.at(i) + radial * radius, radial, j, i);
-        }
-    }
-
-    const int ringLinks = closed ? n : n - 1;
-
-    mesh.indices.resize(
-        ringLinks * ringSegments * 6 + (closed ? 0 : 2 * ringSegments * 3));
-
-    unsigned int *indexData = mesh.indices.data();
-
-    for (int i = 0; i < ringLinks; ++i)
-    {
-        const int nextRing = closed ? (i + 1) % n : i + 1;
-
-        for (int j = 0; j < ringSegments; ++j)
-        {
-            const int nextSegment = (j + 1) % ringSegments;
-
-            const unsigned int a =
-                static_cast<unsigned int>(i * ringSegments + j);
-
-            const unsigned int b =
-                static_cast<unsigned int>(nextRing * ringSegments + j);
-
-            const unsigned int c =
-                static_cast<unsigned int>(nextRing * ringSegments + nextSegment);
-
-            const unsigned int d =
-                static_cast<unsigned int>(i * ringSegments + nextSegment);
-
-            // counter-clockwise seen from outside (geometric normal = radial)
-            *indexData++ = a;
-            *indexData++ = c;
-            *indexData++ = b;
-
-            *indexData++ = a;
-            *indexData++ = d;
-            *indexData++ = c;
-        }
-    }
-
-    // end caps for open tubes
-    if (!closed)
-    {
-        for (int cap = 0; cap < 2; ++cap)
-        {
-            const int ring = cap == 0 ? 0 : n - 1;
-            const Vec3 axis = cap == 0 ? tangents.at(ring) * -1.0
-                                       : tangents.at(ring);
-
-            const unsigned int center =
-                static_cast<unsigned int>(written);
-
-            pushVertex(curve.at(ring), axis, -1, ring);
-
-            for (int j = 0; j < ringSegments; ++j)
-            {
-                const Vec3 radial =
-                    normals.at(ring) * cosTheta.at(j) +
-                    binormals.at(ring) * sinTheta.at(j);
-
-                pushVertex(curve.at(ring) + radial * radius, axis, j, ring);
-            }
-
-            for (int j = 0; j < ringSegments; ++j)
-            {
-                const unsigned int v0 =
-                    center + 1 + static_cast<unsigned int>(j);
-
-                const unsigned int v1 =
-                    center + 1 +
-                    static_cast<unsigned int>((j + 1) % ringSegments);
-
-                *indexData++ = center;
-
-                if (cap == 0)
-                {
-                    *indexData++ = v1;
-                    *indexData++ = v0;
-                }
-                else
-                {
-                    *indexData++ = v0;
-                    *indexData++ = v1;
-                }
-            }
-        }
-    }
 
     if (colorMode == ColorMode::SingleColor)
         return mesh;
@@ -2680,217 +1784,10 @@ Mesh buildTubeMesh(
         frameHint);
 }
 
-/*
- * The tube is treated as a chain of spheres of the tube radius, about one
- * radius apart (each standing for `spacing` of tube). A sphere of radius r
- * at distance d, seen at angle theta from the normal, darkens a surface
- * point by about cos(theta) (r/d)²: its solid angle, cosine weighted.
- *
- * To be fast enough for every animation frame this is summed once per ring
- * as a vector (direction to the sphere times its weight, with d measured
- * from the ring's surface); a vertex then takes the part along its normal.
- * On the side facing a close strand, where the darkening matters, this is
- * the same as the sum per vertex. For two parallel tubes that touch, the
- * facing sides add up to about 1; with a gap of one diameter to about 0.3.
- */
 void computeAmbientOcclusion(Mesh &mesh, double strength)
 {
-    const int samples = mesh.centerline.size() / 4;
-    const int vertexCount = mesh.positions.size() / 3;
-
-    if (samples < 2 ||
-        mesh.vertexSample.size() != vertexCount ||
-        mesh.centerlineStrand.size() != samples ||
-        mesh.centerlineArc.size() != samples)
-    {
-        mesh.occlusion.clear();
-        return;
-    }
-
-    auto centre = [&mesh](int s)
-    {
-        return Vec3(mesh.centerline.at(4 * s),
-                    mesh.centerline.at(4 * s + 1),
-                    mesh.centerline.at(4 * s + 2));
-    };
-
-    auto radiusOf = [&mesh](int s)
-    {
-        return static_cast<double>(mesh.centerline.at(4 * s + 3));
-    };
-
-    // spheres further than this (in radii) hardly matter
-    constexpr double reachInRadii = 7.0;
-
-    // parts of the same strand closer than this along it are the tube itself
-    constexpr double ownInRadii = 3.0;
-
-    double maxRadius = 0.0;
-
-    for (int s = 0; s < samples; ++s)
-        maxRadius = std::max(maxRadius, radiusOf(s));
-
-    if (maxRadius <= 0.0)
-    {
-        mesh.occlusion.clear();
-        return;
-    }
-
-    // Occluding spheres: about one per tube radius along every strand; each
-    // stands for the length of tube up to the next one.
-    QVector<int> casters;
-    QVector<double> casterSpacing;
-
-    for (int s = 0; s < samples; ++s)
-    {
-        const bool strandStart =
-            s == 0 ||
-            mesh.centerlineStrand.at(s) != mesh.centerlineStrand.at(s - 1);
-
-        if (strandStart ||
-            static_cast<double>(mesh.centerlineArc.at(s)) -
-                    static_cast<double>(mesh.centerlineArc.at(casters.last())) >=
-                radiusOf(s))
-        {
-            casters.push_back(s);
-        }
-    }
-
-    casterSpacing.resize(casters.size());
-
-    for (int k = 0; k < casters.size(); ++k)
-    {
-        const int s = casters.at(k);
-        const bool hasNext =
-            k + 1 < casters.size() &&
-            mesh.centerlineStrand.at(casters.at(k + 1)) == mesh.centerlineStrand.at(s);
-
-        casterSpacing[k] =
-            hasNext ? static_cast<double>(mesh.centerlineArc.at(casters.at(k + 1)) -
-                                          mesh.centerlineArc.at(s))
-                    : radiusOf(s);
-    }
-
-    // spatial grid of the occluding spheres
-    const double reach = reachInRadii * maxRadius;
-
-    // (a curve like tan(t) goes very far out: cells that cannot be told apart
-    // there only cost a look at their spheres)
-    auto cellOf = [reach](double value)
-    {
-        return static_cast<long long>(std::floor(std::clamp(value / reach, -1.0e15, 1.0e15)));
-    };
-
-    // unsigned: bits shifted out are simply gone
-    auto key = [](long long x, long long y, long long z)
-    {
-        constexpr unsigned long long offset = 1ULL << 20;
-
-        return ((static_cast<unsigned long long>(x) + offset) << 42) ^
-               ((static_cast<unsigned long long>(y) + offset) << 21) ^
-               (static_cast<unsigned long long>(z) + offset);
-    };
-
-    std::unordered_map<unsigned long long, std::vector<int>> grid;
-
-    for (int k = 0; k < casters.size(); ++k)
-    {
-        const Vec3 c = centre(casters.at(k));
-
-        grid[key(cellOf(c.x), cellOf(c.y), cellOf(c.z))].push_back(k);
-    }
-
-    // occlusion vector of every ring
-    QVector<Vec3> ringVector(samples);
-
-    for (int s = 0; s < samples; ++s)
-    {
-        const Vec3 c = centre(s);
-        const double rs = radiusOf(s);
-        const int strand = mesh.centerlineStrand.at(s);
-
-        const long long cx = cellOf(c.x);
-        const long long cy = cellOf(c.y);
-        const long long cz = cellOf(c.z);
-
-        Vec3 sum;
-
-        for (long long dx = -1; dx <= 1; ++dx)
-        for (long long dy = -1; dy <= 1; ++dy)
-        for (long long dz = -1; dz <= 1; ++dz)
-        {
-            const auto it = grid.find(key(cx + dx, cy + dy, cz + dz));
-
-            if (it == grid.end())
-                continue;
-
-            for (const int k : it->second)
-            {
-                const int t = casters.at(k);
-
-                if (mesh.centerlineStrand.at(t) == strand)
-                {
-                    double along = std::abs(
-                        static_cast<double>(mesh.centerlineArc.at(t)) -
-                        static_cast<double>(mesh.centerlineArc.at(s)));
-
-                    if (strand < mesh.strandLength.size() &&
-                        strand < mesh.strandClosed.size() &&
-                        mesh.strandClosed.at(strand))
-                    {
-                        along = std::min(
-                            along,
-                            static_cast<double>(mesh.strandLength.at(strand)) - along);
-                    }
-
-                    if (along < ownInRadii * rs)
-                        continue;
-                }
-
-                const Vec3 toSphere = centre(t) - c;
-                const double distance = toSphere.length();
-
-                if (distance >= reach || distance < 1.0e-9)
-                    continue;
-
-                const double rt = radiusOf(t);
-
-                // distance from the ring's surface on the facing side
-                const double surface = std::max(distance - rs, 0.5 * rs);
-
-                // fades out towards `reach` instead of stopping abruptly
-                const double x = std::clamp(
-                    (distance - 0.7 * reach) / (0.3 * reach), 0.0, 1.0);
-
-                const double fade = 1.0 - x * x * (3.0 - 2.0 * x);
-
-                const double weight =
-                    (rt * rt) / (surface * surface) *
-                    std::min(1.0, casterSpacing.at(k) / (2.0 * rt)) *
-                    fade;
-
-                sum += toSphere * (weight / distance);
-            }
-        }
-
-        ringVector[s] = sum;
-    }
-
-    mesh.occlusion.resize(vertexCount);
-
-    for (int v = 0; v < vertexCount; ++v)
-    {
-        const Vec3 normal(mesh.normals.at(3 * v),
-                          mesh.normals.at(3 * v + 1),
-                          mesh.normals.at(3 * v + 2));
-
-        const double occlusion = std::max(
-            0.0,
-            Vec3::dot(normal, ringVector.at(mesh.vertexSample.at(v))));
-
-        mesh.occlusion[v] = static_cast<float>(
-            std::clamp(1.0 - strength * occlusion, 0.2, 1.0));
-    }
+    // (the engine's: aksioma/shapes.h)
+    Aksioma::Shapes::tubeOcclusion(mesh, strength);
 }
 
 /*

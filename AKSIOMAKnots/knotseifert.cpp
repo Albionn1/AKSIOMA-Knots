@@ -1,5 +1,7 @@
 #include "knotseifert.h"
 
+#include <aksioma/planar.h>
+
 #include "knotpractice.h"
 
 #include <QCoreApplication>
@@ -98,43 +100,10 @@ struct ArcLength
     }
 };
 
-double signedArea(const QVector<Vec3> &polygon)
-{
-    double area = 0.0;
-
-    const int n = polygon.size();
-
-    for (int i = 0; i < n; ++i)
-    {
-        const Vec3 &a = polygon[i];
-        const Vec3 &b = polygon[(i + 1) % n];
-
-        area += a.x * b.y - b.x * a.y;
-    }
-
-    return 0.5 * area;
-}
-
-bool insidePolygon(const QVector<Vec3> &polygon, double x, double y)
-{
-    bool inside = false;
-
-    const int n = polygon.size();
-
-    for (int i = 0, j = n - 1; i < n; j = i++)
-    {
-        const Vec3 &a = polygon[i];
-        const Vec3 &b = polygon[j];
-
-        if ((a.y > y) != (b.y > y) &&
-            x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x)
-        {
-            inside = !inside;
-        }
-    }
-
-    return inside;
-}
+// (the engine's: aksioma/planar.h)
+using Aksioma::Planar::insidePolygon;
+using Aksioma::Planar::signedArea;
+using Aksioma::Planar::triangulate;
 
 double smoothTwist(double u)
 {
@@ -143,100 +112,12 @@ double smoothTwist(double u)
     return s * s;
 }
 
-/*
- * Ear clipping of a simple polygon (2D, either orientation). Returns
- * triangles as index triples; empty if the polygon is not simple enough.
- */
-QVector<int> triangulate(const QVector<Vec3> &polygon)
-{
-    const int n = polygon.size();
-
-    QVector<int> triangles;
-
-    if (n < 3)
-        return triangles;
-
-    const double orientation = signedArea(polygon) >= 0.0 ? 1.0 : -1.0;
-
-    QVector<int> remaining(n);
-
-    for (int i = 0; i < n; ++i)
-        remaining[i] = i;
-
-    auto cross = [&](int a, int b, int c)
-    {
-        const Vec3 &p = polygon[a];
-        const Vec3 &q = polygon[b];
-        const Vec3 &r = polygon[c];
-
-        return ((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)) * orientation;
-    };
-
-    auto insideTriangle = [&](int a, int b, int c, int p)
-    {
-        return cross(a, b, p) > 0.0 && cross(b, c, p) > 0.0 && cross(c, a, p) > 0.0;
-    };
-
-    int guard = 0;
-    int i = 0;
-
-    while (remaining.size() > 3 && guard < 4 * n * n)
-    {
-        ++guard;
-
-        const int m = remaining.size();
-
-        const int a = remaining[(i + m - 1) % m];
-        const int b = remaining[i % m];
-        const int c = remaining[(i + 1) % m];
-
-        bool ear = cross(a, b, c) > 1e-14;
-
-        if (ear)
-        {
-            for (int k = 0; k < m && ear; ++k)
-            {
-                const int p = remaining[k];
-
-                if (p == a || p == b || p == c)
-                    continue;
-
-                if (insideTriangle(a, b, c, p))
-                    ear = false;
-            }
-        }
-
-        if (ear)
-        {
-            triangles << a << b << c;
-            remaining.removeAt(i % m);
-            i = std::max(0, i - 1);
-            guard = 0;
-        }
-        else
-        {
-            i = (i + 1) % m;
-
-            // a whole round without an ear: drop a degenerate vertex
-            if (guard > m && cross(a, b, c) <= 1e-14 && std::abs(cross(a, b, c)) <= 1e-12)
-            {
-                remaining.removeAt(i % m == 0 ? m - 1 : (i - 1) % m);
-                guard = 0;
-            }
-        }
-    }
-
-    if (remaining.size() == 3)
-        triangles << remaining[0] << remaining[1] << remaining[2];
-
-    return triangles;
-}
 
 } // namespace
 
 QVector<int> triangulatePolygon(const QVector<Vec3> &polygon)
 {
-    return triangulate(polygon);
+    return Aksioma::Planar::triangulate(polygon);
 }
 
 namespace

@@ -2,6 +2,7 @@
 #define KNOTMATH_H
 
 #include <aksioma/mesh.h>
+#include <aksioma/shapes.h>
 #include <aksioma/vec3.h>
 
 #include <QColor>
@@ -232,11 +233,7 @@ QColor componentColor(int componentIndex);
 // The first frame uses the usual parallel-transport frame; after that every
 // ring keeps its own normal from the previous frame (projected onto its new
 // cross-section), so a ring only turns as much as the curve itself does.
-struct TubeFrameHint
-{
-    // ring normals of the previous frame (empty: no previous frame)
-    QVector<Vec3> ringNormals;
-};
+using TubeFrameHint = Aksioma::Shapes::TubeFrames;
 
 // Builds a tube around the curve. In ColorMode::CrossingColors and
 // ColorMode::StrandColors the crossings are detected internally.
