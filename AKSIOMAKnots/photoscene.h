@@ -1,6 +1,11 @@
 #ifndef PHOTOSCENE_H
 #define PHOTOSCENE_H
 
+#include <aksioma/environment.h>
+#include <aksioma/photostage.h>
+#include <aksioma/pose.h>
+#include <aksioma/rod.h>
+
 #include <QColor>
 #include <QImage>
 #include <QMatrix4x4>
@@ -41,45 +46,17 @@ enum class Scene
     Count
 };
 
-// What the rope is made of: its look and how it lies down.
-struct RopeMaterial
+// What the rope is made of: how it lies down (the engine's rod: stiffness,
+// damping, set, curl, friction) and its look.
+struct RopeMaterial : Aksioma::Physics::RodMaterial
 {
     // 1: three twisted strands of hemp (laid rope), 2: cotton yarns
     // braided over and under each other (a shoelace), 3: the wooden track
     // of the toy train
     int construction = 1;
 
-    // real thickness (diameter)
-    double diameterMm = 12.0;
-
-    // Stiffness against bending, as the bending length of the cantilever
-    // test (ASTM D1388): the length c with B = w c^3, B the bending
-    // stiffness and w the weight per length. A rope that bends easily
-    // under its own weight has a short one.
-    double bendingLengthMm = 50.0;
-
-    // stiffness against twisting, as a share of that against bending
-    double twistStiffness = 0.7;
-
-    // A rope is no spring: its fibres rub on each other wherever it bends,
-    // and the same share of a swing goes in every cycle, long or short. As
-    // a share of the damping at which it would no longer swing back at all.
-    double swingDamping = 1.0;
-
-    // Natural fibre takes a set: bent tighter than this radius it creeps
-    // towards the new shape (at this rate, per second) and keeps part of it.
-    double setRadiusMm = 70.0;
-    double setRate = 0.8;
-
-    // the curl left in a relaxed rope by the reel it was wound on
-    double curlRadiusMm = 110.0;
-
     // how much of the shape it was tied in a rope keeps when let go
     double tiedSet = 0.55;
-
-    // friction on the surface it lies on, and on itself
-    double frictionSurface = 0.5;
-    double frictionSelf = 0.7;
 
     // colour (sRGB) and roughness of the fibres
     QColor color;
@@ -150,59 +127,20 @@ struct SceneInfo
 SceneInfo sceneInfo(
     Scene scene);
 
-/*
- * A room ready for lighting. Directions are in the room's own frame:
- * y up, the middle of the picture straight ahead along -z.
- */
-struct Environment
-{
-    bool valid = false;
-    QString error;
+// the room's light (aksioma/environment.h)
+using Aksioma::Environment;
+using Aksioma::loadEnvironment;
+using Aksioma::forgetPreloaded;
+using Aksioma::preloadedPicture;
+using Aksioma::flatPose;
 
-    // the whole picture, linear RGB, top row first
-    int width = 0;
-    int height = 0;
-    QVector<float> pixels;
+// What the renderer needs of a scene (AKSIOMA Engine's PhotoStage): the room,
+// the surface and the look of the rope; its physics stays here.
+Aksioma::PhotoStage stageOf(const SceneInfo &info);
 
-    // Irradiance of the room without its sun, from the upper half of the
-    // room only (what lies below the horizon is the surface the knot lies
-    // on, lit by the room): 9 spherical harmonic coefficients (RGB),
-    // already multiplied by the cosine lobe, so that E(n) = sum c[i] Y_i(n).
-    QVector3D irradiance[9];
-
-    // the sun: direction towards it, its irradiance on a surface facing
-    // it, and its angular radius (radians)
-    QVector3D sunDirection = QVector3D(0.0f, 1.0f, 0.0f);
-    QVector3D sunIrradiance;
-    float sunRadius = 0.005f;
-
-    // E(n) from the coefficients
-    QVector3D irradianceAt(
-        const QVector3D &normal) const;
-};
-
-// Reads a Radiance .hdr picture (RGBE, run-length encoded or flat) and
-// finds its sun. About half a second for 4096 x 2048.
-/*
- * Reading a scene's pictures takes a noticeable moment, and on an old laptop
- * several seconds. preloadScene() does it on any thread and keeps them; the
- * window then takes them without waiting (preloadedEnvironment,
- * preloadedPicture read the file if nothing was kept), and forgetPreloaded()
- * gives the memory back once they are on the graphics card.
- */
+// Reads the room and the pictures of a scene ahead of time, on any thread
+// (Aksioma::preloadEnvironment).
 void preloadScene(const SceneInfo &info);
-void forgetPreloaded();
-
-QImage preloadedPicture(const QString &path);
-
-Environment loadEnvironment(
-    const QString &path);
-
-// The turn that lays a knot down flat: its thinnest direction up, its
-// longest along x, about the middle of the points. A rotation, never a
-// reflection, so the knot keeps its handedness.
-QMatrix4x4 flatPose(
-    const QVector<QVector3D> &points);
 
 } // namespace Photo
 

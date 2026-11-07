@@ -166,7 +166,7 @@ Moves moveAbout(Photo::RopeSimulation &rope, int moves, std::mt19937 &random, co
         Vec3 hand = rope.points().at(index);
         hand.y = level;
 
-        rope.hold(index, hand, under);
+        rope.grab(index, hand, under);
 
         for (int leg = 0; leg < 2; ++leg)
         {
@@ -180,7 +180,7 @@ Moves moveAbout(Photo::RopeSimulation &rope, int moves, std::mt19937 &random, co
             {
                 const double t = (frame + 1) / 40.0;
 
-                rope.moveHand(hand + (goal - hand) * t);
+                rope.moveGrab(hand + (goal - hand) * t);
 
                 for (int k = 0; k < 20; ++k)
                     rope.step();
@@ -194,7 +194,7 @@ Moves moveAbout(Photo::RopeSimulation &rope, int moves, std::mt19937 &random, co
             hand = goal;
         }
 
-        rope.letGo();
+        rope.release();
 
         for (int k = 0; k < 6000 && !rope.atRest(); ++k)
         {

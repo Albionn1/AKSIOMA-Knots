@@ -223,7 +223,7 @@ int main(int argc, char **argv)
 
         const Vec3 start = points.first();
 
-        hand.hold(0, Vec3(start.x, 6.5, start.z), false);
+        hand.grab(0, Vec3(start.x, 6.5, start.z), false);
 
         const QMatrix4x4 back = rope.pose.inverted();
         const int steps = std::max(1, static_cast<int>(std::lround(1.0 / 60.0 / hand.secondsPerStep())));
@@ -237,7 +237,7 @@ int main(int argc, char **argv)
         {
             const double t = frame / 119.0;
 
-            hand.moveHand(Vec3(start.x + 30.0 * std::sin(3.14159 * t), 6.5, start.z + 10.0 * t));
+            hand.moveGrab(Vec3(start.x + 30.0 * std::sin(3.14159 * t), 6.5, start.z + 10.0 * t));
 
             clock.restart();
 

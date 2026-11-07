@@ -1,6 +1,8 @@
 #include "knotmath.h"
 #include "knottable.h"
 
+#include <aksioma/curves.h>
+
 #include <QCoreApplication>
 #include <QRegularExpression>
 #include <QStringList>
@@ -811,145 +813,8 @@ QVector<Vec3> resampleByArcLength(
     int targetCount,
     bool closed)
 {
-    if (input.size() < 3 || targetCount < 3)
-        return input;
-
-    QVector<Vec3> work = input;
-
-    if (closed && (work.first() - work.last()).length() < 1.0e-7)
-        work.removeLast();
-
-    const int n = work.size();
-
-    if (n < 3)
-        return work;
-
-    QVector<double> cumulative(n + 1, 0.0);
-
-    for (int i = 0; i < n; ++i)
-    {
-        const int j = closed ? (i + 1) % n : i + 1;
-
-        if (j >= n)
-        {
-            cumulative[i + 1] = cumulative[i];
-            continue;
-        }
-
-        cumulative[i + 1] = cumulative[i] + (work.at(j) - work.at(i)).length();
-    }
-
-    const double totalLength = cumulative.last();
-
-    if (totalLength < Epsilon)
-        return work;
-
-    const int outputCount = closed ? targetCount : std::max(2, targetCount);
-
-    QVector<Vec3> output;
-    output.reserve(outputCount);
-
-    for (int sample = 0; sample < outputCount; ++sample)
-    {
-        const double normalized =
-            closed
-                ? static_cast<double>(sample) / static_cast<double>(outputCount)
-                : static_cast<double>(sample) /
-                      static_cast<double>(outputCount - 1);
-
-        const double targetDistance = normalized * totalLength;
-
-        auto upper = std::lower_bound(
-            cumulative.constBegin(),
-            cumulative.constEnd(),
-            targetDistance);
-
-        int segment = static_cast<int>(
-            std::distance(cumulative.constBegin(), upper));
-
-        segment = std::max(1, std::min(segment, n));
-
-        const int i0 = segment - 1;
-
-        const int i1 =
-            closed ? segment % n : std::min(segment, n - 1);
-
-        const double segmentStart = cumulative.at(i0);
-        const double segmentLength = cumulative.at(segment) - segmentStart;
-
-        const double localAlpha =
-            segmentLength > Epsilon
-                ? (targetDistance - segmentStart) / segmentLength
-                : 0.0;
-
-        output.push_back(
-            work.at(i0) * (1.0 - localAlpha) + work.at(i1) * localAlpha);
-    }
-
-    return output;
-}
-
-/*
- * Signed solid angle subtended by two straight segments
- * (p1,p2) and (p3,p4) — Klenin & Langowski, Biopolymers 54 (2000).
- *
- *   writhe  = 1/(2*pi) * sum over unordered pairs i<j of Omega_ij
- *   linking = 1/(4*pi) * sum over pairs (i in A, j in B) of Omega_ij
- */
-double segmentPairSolidAngle(
-    const Vec3 &p1,
-    const Vec3 &p2,
-    const Vec3 &p3,
-    const Vec3 &p4)
-{
-    const Vec3 r13 = p3 - p1;
-    const Vec3 r14 = p4 - p1;
-    const Vec3 r23 = p3 - p2;
-    const Vec3 r24 = p4 - p2;
-    const Vec3 r12 = p2 - p1;
-    const Vec3 r34 = p4 - p3;
-
-    const Vec3 c1 = Vec3::cross(r13, r14);
-    const Vec3 c2 = Vec3::cross(r14, r24);
-    const Vec3 c3 = Vec3::cross(r24, r23);
-    const Vec3 c4 = Vec3::cross(r23, r13);
-
-    const double l1 = c1.length();
-    const double l2 = c2.length();
-    const double l3 = c3.length();
-    const double l4 = c4.length();
-
-    constexpr double tiny = 1.0e-14;
-
-    if (l1 < tiny || l2 < tiny || l3 < tiny || l4 < tiny)
-        return 0.0;
-
-    const Vec3 n1 = c1 / l1;
-    const Vec3 n2 = c2 / l2;
-    const Vec3 n3 = c3 / l3;
-    const Vec3 n4 = c4 / l4;
-
-    auto safeAsin = [](double value)
-    {
-        return std::asin(std::max(-1.0, std::min(1.0, value)));
-    };
-
-    const double omega =
-        safeAsin(Vec3::dot(n1, n2)) +
-        safeAsin(Vec3::dot(n2, n3)) +
-        safeAsin(Vec3::dot(n3, n4)) +
-        safeAsin(Vec3::dot(n4, n1));
-
-    const double orientation =
-        Vec3::dot(Vec3::cross(r34, r12), r13);
-
-    if (orientation > 0.0)
-        return omega;
-
-    if (orientation < 0.0)
-        return -omega;
-
-    return 0.0;
+    // (the engine's: aksioma/curves.h)
+    return Aksioma::Curves::resample(input, targetCount, closed);
 }
 
 bool segmentsIntersect2D(
@@ -1321,237 +1186,6 @@ QString signedInteger(int value)
  * =============================================================
  */
 
-Vec3 Vec3::operator+(const Vec3 &other) const
-{
-    return Vec3(x + other.x, y + other.y, z + other.z);
-}
-
-Vec3 Vec3::operator-(const Vec3 &other) const
-{
-    return Vec3(x - other.x, y - other.y, z - other.z);
-}
-
-Vec3 Vec3::operator*(double scalar) const
-{
-    return Vec3(x * scalar, y * scalar, z * scalar);
-}
-
-Vec3 Vec3::operator/(double scalar) const
-{
-    if (std::abs(scalar) < Epsilon)
-        return Vec3();
-
-    return Vec3(x / scalar, y / scalar, z / scalar);
-}
-
-Vec3 &Vec3::operator+=(const Vec3 &other)
-{
-    x += other.x;
-    y += other.y;
-    z += other.z;
-
-    return *this;
-}
-
-Vec3 &Vec3::operator-=(const Vec3 &other)
-{
-    x -= other.x;
-    y -= other.y;
-    z -= other.z;
-
-    return *this;
-}
-
-Vec3 &Vec3::operator*=(double scalar)
-{
-    x *= scalar;
-    y *= scalar;
-    z *= scalar;
-
-    return *this;
-}
-
-Vec3 &Vec3::operator/=(double scalar)
-{
-    if (std::abs(scalar) >= Epsilon)
-    {
-        x /= scalar;
-        y /= scalar;
-        z /= scalar;
-    }
-
-    return *this;
-}
-
-double Vec3::length() const
-{
-    return std::sqrt(x * x + y * y + z * z);
-}
-
-double Vec3::lengthSquared() const
-{
-    return x * x + y * y + z * z;
-}
-
-Vec3 Vec3::normalized() const
-{
-    return safeNormalize(*this, Vec3());
-}
-
-double Vec3::dot(const Vec3 &a, const Vec3 &b)
-{
-    return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-Vec3 Vec3::cross(const Vec3 &a, const Vec3 &b)
-{
-    return Vec3(
-        a.y * b.z - a.z * b.y,
-        a.z * b.x - a.x * b.z,
-        a.x * b.y - a.y * b.x);
-}
-
-/*
- * =============================================================
- * Mesh
- * =============================================================
- */
-
-bool Mesh::isValid() const
-{
-    return !positions.isEmpty() &&
-           !normals.isEmpty() &&
-           !indices.isEmpty() &&
-           positions.size() % 3 == 0 &&
-           normals.size() == positions.size() &&
-           indices.size() % 3 == 0;
-}
-
-void Mesh::clear()
-{
-    positions.clear();
-    normals.clear();
-    colors.clear();
-    indices.clear();
-    texcoords.clear();
-    occlusion.clear();
-    sheet.clear();
-    centerline.clear();
-    centerlineStrand.clear();
-    centerlineArc.clear();
-    strandLength.clear();
-    strandClosed.clear();
-    vertexSample.clear();
-
-    ringCount = 0;
-    ringSegments = 0;
-}
-
-void Mesh::fillColor(const QColor &color)
-{
-    const int vertexCount = positions.size() / 3;
-
-    colors.clear();
-    colors.reserve(vertexCount * 3);
-
-    for (int i = 0; i < vertexCount; ++i)
-    {
-        colors.push_back(static_cast<float>(color.redF()));
-        colors.push_back(static_cast<float>(color.greenF()));
-        colors.push_back(static_cast<float>(color.blueF()));
-    }
-}
-
-void Mesh::append(const Mesh &other)
-{
-    if (other.positions.isEmpty())
-        return;
-
-    const int existingVertices = positions.size() / 3;
-    const int otherVertices = other.positions.size() / 3;
-
-    const bool anyColors =
-        !colors.isEmpty() || !other.colors.isEmpty();
-
-    if (anyColors)
-    {
-        if (colors.size() != existingVertices * 3)
-            colors.fill(1.0f, existingVertices * 3);
-    }
-
-    // per-vertex extras: keep them aligned with the vertices
-    auto appendPerVertex = [&](QVector<float> &mine,
-                               const QVector<float> &theirs,
-                               int width,
-                               float fill)
-    {
-        if (mine.isEmpty() && theirs.isEmpty())
-            return;
-
-        if (mine.size() != existingVertices * width)
-            mine.fill(fill, existingVertices * width);
-
-        if (theirs.size() == otherVertices * width)
-            mine += theirs;
-        else
-            mine += QVector<float>(otherVertices * width, fill);
-    };
-
-    appendPerVertex(texcoords, other.texcoords, 4, 0.0f);
-    appendPerVertex(occlusion, other.occlusion, 1, 1.0f);
-    appendPerVertex(sheet, other.sheet, 1, 0.0f);
-
-    // centre lines: sample and strand numbers continue after ours
-    const int existingSamples = centerline.size() / 4;
-    const int existingStrands = strandLength.size();
-
-    if (vertexSample.size() == existingVertices &&
-        other.vertexSample.size() == otherVertices)
-    {
-        centerline += other.centerline;
-        centerlineArc += other.centerlineArc;
-        strandLength += other.strandLength;
-        strandClosed += other.strandClosed;
-
-        for (const int strand : other.centerlineStrand)
-            centerlineStrand.push_back(strand + existingStrands);
-
-        for (const int sample : other.vertexSample)
-            vertexSample.push_back(sample + existingSamples);
-    }
-    else
-    {
-        centerline.clear();
-        centerlineArc.clear();
-        centerlineStrand.clear();
-        strandLength.clear();
-        strandClosed.clear();
-        vertexSample.clear();
-    }
-
-    positions += other.positions;
-    normals += other.normals;
-
-    if (anyColors)
-    {
-        if (other.colors.size() == otherVertices * 3)
-            colors += other.colors;
-        else
-        {
-            QVector<float> white(otherVertices * 3, 1.0f);
-            colors += white;
-        }
-    }
-
-    indices.reserve(indices.size() + other.indices.size());
-
-    for (const unsigned int index : other.indices)
-        indices.push_back(index + static_cast<unsigned int>(existingVertices));
-
-    ringCount += other.ringCount;
-    ringSegments = std::max(ringSegments, other.ringSegments);
-}
-
 /*
  * =============================================================
  * CURVES
@@ -1597,61 +1231,8 @@ QVector<Vec3> refineCurve(
     int factor,
     bool closed)
 {
-    const int n = curve.size();
-
-    if (factor <= 1 || n < 3)
-        return curve;
-
-    const int segments = closed ? n : n - 1;
-
-    auto point = [&](int i)
-    {
-        if (closed)
-            return curve.at(((i % n) + n) % n);
-
-        return curve.at(std::clamp(i, 0, n - 1));
-    };
-
-    QVector<Vec3> refined;
-    refined.reserve(segments * factor + 1);
-
-    for (int i = 0; i < segments; ++i)
-    {
-        const Vec3 p0 = point(i - 1);
-        const Vec3 p1 = point(i);
-        const Vec3 p2 = point(i + 1);
-        const Vec3 p3 = point(i + 2);
-
-        // centripetal parametrisation: no loops or cusps on uneven spacing
-        auto knot = [](const Vec3 &a, const Vec3 &b)
-        {
-            return std::max(std::sqrt((b - a).length()), 1.0e-6);
-        };
-
-        const double t1 = knot(p0, p1);
-        const double t2 = t1 + knot(p1, p2);
-        const double t3 = t2 + knot(p2, p3);
-
-        for (int k = 0; k < factor; ++k)
-        {
-            const double t =
-                t1 + (t2 - t1) * static_cast<double>(k) / static_cast<double>(factor);
-
-            const Vec3 a1 = p0 * ((t1 - t) / t1) + p1 * (t / t1);
-            const Vec3 a2 = p1 * ((t2 - t) / (t2 - t1)) + p2 * ((t - t1) / (t2 - t1));
-            const Vec3 a3 = p2 * ((t3 - t) / (t3 - t2)) + p3 * ((t - t2) / (t3 - t2));
-
-            const Vec3 b1 = a1 * ((t2 - t) / t2) + a2 * (t / t2);
-            const Vec3 b2 = a2 * ((t3 - t) / (t3 - t1)) + a3 * ((t - t1) / (t3 - t1));
-
-            refined.push_back(b1 * ((t2 - t) / (t2 - t1)) + b2 * ((t - t1) / (t2 - t1)));
-        }
-    }
-
-    if (!closed)
-        refined.push_back(curve.last());
-
-    return refined;
+    // (the engine's: aksioma/curves.h)
+    return Aksioma::Curves::refine(curve, factor, closed);
 }
 
 QVector<float> refineValues(
@@ -2006,16 +1587,6 @@ double sizeOfCurve(const QVector<Vec3> &points)
         extent = std::max(extent, p.length());
 
     return extent;
-}
-
-void scaleCurve(QVector<Vec3> &points, double scale)
-{
-    for (Vec3 &p : points)
-    {
-        p.x *= scale;
-        p.y *= scale;
-        p.z *= scale;
-    }
 }
 
 std::map<int, long long> termsOfPolynomial(const QVector<long long> &coefficients, int lowest)
@@ -3331,16 +2902,6 @@ void computeAmbientOcclusion(Mesh &mesh, double strength)
 namespace
 {
 
-// Writhe and linking numbers do not depend on size: the tolerances of the
-// solid angle are meant for curves of about unit size.
-void normaliseSize(QVector<Vec3> &points)
-{
-    const double extent = sizeOfCurve(points);
-
-    if (extent > 0.0)
-        scaleCurve(points, 1.0 / extent);
-}
-
 double segmentDistance3D(const Vec3 &p1, const Vec3 &q1, const Vec3 &p2, const Vec3 &q2);
 
 // Two segments that do not share a point touch: this is no embedded curve,
@@ -3384,49 +2945,8 @@ bool curvePassesThroughItself(const QVector<Vec3> &curve)
 
 double computeWrithe(const QVector<Vec3> &curve, int maxSamples)
 {
-    if (curve.size() < 4)
-        return 0.0;
-
-    QVector<Vec3> sampled = curve;
-
-    if (maxSamples > 0 && curve.size() > maxSamples)
-        sampled = resampleByArcLength(curve, std::max(24, maxSamples), true);
-
-    if (sampled.size() > 3 &&
-        (sampled.first() - sampled.last()).length() < 1.0e-9)
-    {
-        sampled.removeLast();
-    }
-
-    const int n = sampled.size();
-
-    if (n < 4)
-        return 0.0;
-
-    normaliseSize(sampled);
-
-    double sum = 0.0;
-
-    for (int i = 0; i < n; ++i)
-    {
-        const int iNext = (i + 1) % n;
-
-        for (int j = i + 2; j < n; ++j)
-        {
-            if (i == 0 && j == n - 1)
-                continue;
-
-            sum += segmentPairSolidAngle(
-                sampled.at(i),
-                sampled.at(iNext),
-                sampled.at(j),
-                sampled.at((j + 1) % n));
-        }
-    }
-
-    const double writhe = sum / (2.0 * Pi);
-
-    return finiteValue(writhe) ? writhe : 0.0;
+    // (the engine's: aksioma/curves.h)
+    return Aksioma::Curves::writhe(curve, maxSamples);
 }
 
 double computeLinkingNumber(
@@ -3434,49 +2954,8 @@ double computeLinkingNumber(
     const QVector<Vec3> &curveB,
     int maxSamples)
 {
-    if (curveA.size() < 3 || curveB.size() < 3)
-        return 0.0;
-
-    QVector<Vec3> a = curveA;
-    QVector<Vec3> b = curveB;
-
-    if (maxSamples > 0 && a.size() > maxSamples)
-        a = resampleByArcLength(a, maxSamples, true);
-
-    if (maxSamples > 0 && b.size() > maxSamples)
-        b = resampleByArcLength(b, maxSamples, true);
-
-    // one common factor: the two curves keep their places
-    const double extent = std::max(sizeOfCurve(a), sizeOfCurve(b));
-
-    if (extent > 0.0)
-    {
-        scaleCurve(a, 1.0 / extent);
-        scaleCurve(b, 1.0 / extent);
-    }
-
-    const int na = a.size();
-    const int nb = b.size();
-
-    double sum = 0.0;
-
-    for (int i = 0; i < na; ++i)
-    {
-        const int iNext = (i + 1) % na;
-
-        for (int j = 0; j < nb; ++j)
-        {
-            sum += segmentPairSolidAngle(
-                a.at(i),
-                a.at(iNext),
-                b.at(j),
-                b.at((j + 1) % nb));
-        }
-    }
-
-    const double linking = sum / (4.0 * Pi);
-
-    return finiteValue(linking) ? linking : 0.0;
+    // (the engine's: aksioma/curves.h)
+    return Aksioma::Curves::linkingNumber(curveA, curveB, maxSamples);
 }
 
 int estimateCrossingNumber(
@@ -4189,58 +3668,8 @@ double segmentDistance3D(
     const Vec3 &p1, const Vec3 &q1,
     const Vec3 &p2, const Vec3 &q2)
 {
-    const Vec3 d1 = q1 - p1;
-    const Vec3 d2 = q2 - p2;
-    const Vec3 r = p1 - p2;
-
-    const double a = Vec3::dot(d1, d1);
-    const double e = Vec3::dot(d2, d2);
-    const double f = Vec3::dot(d2, r);
-
-    constexpr double eps = 1.0e-12;
-
-    double s = 0.0;
-    double t = 0.0;
-
-    if (a <= eps && e <= eps)
-        return r.length();
-
-    if (a <= eps)
-    {
-        t = std::clamp(f / e, 0.0, 1.0);
-    }
-    else
-    {
-        const double c = Vec3::dot(d1, r);
-
-        if (e <= eps)
-        {
-            s = std::clamp(-c / a, 0.0, 1.0);
-        }
-        else
-        {
-            const double b = Vec3::dot(d1, d2);
-            const double denominator = a * e - b * b;
-
-            if (denominator > eps)
-                s = std::clamp((b * f - c * e) / denominator, 0.0, 1.0);
-
-            t = (b * s + f) / e;
-
-            if (t < 0.0)
-            {
-                t = 0.0;
-                s = std::clamp(-c / a, 0.0, 1.0);
-            }
-            else if (t > 1.0)
-            {
-                t = 1.0;
-                s = std::clamp((b - c) / a, 0.0, 1.0);
-            }
-        }
-    }
-
-    return ((p1 + d1 * s) - (p2 + d2 * t)).length();
+    // (the engine's: aksioma/curves.h)
+    return Aksioma::Curves::segmentDistance(p1, q1, p2, q2);
 }
 
 // Smallest distance of two strands in the projection (x,y). Pairs of

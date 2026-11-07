@@ -3021,7 +3021,7 @@ QWidget *MainWindow::createLightingPanel()
     addCaption(tr("SHADOWS"));
 
     addCheck(tr("Shadows on the knot"),
-             &Lighting::Options::knotShadows,
+             &Lighting::Options::meshShadows,
              tr("Strands cast shadows on each other and on the Seifert surface."));
 
     addCheck(tr("Shadow on the floor"),
@@ -3310,7 +3310,7 @@ void MainWindow::updateLightingControls()
     // the shadows need the key light
     for (const QPair<QCheckBox *, bool Lighting::Options::*> &entry : lightingChecks_)
     {
-        if (entry.second == &Lighting::Options::knotShadows ||
+        if (entry.second == &Lighting::Options::meshShadows ||
             entry.second == &Lighting::Options::floorShadow)
         {
             entry.first->setEnabled(options.keyLight);

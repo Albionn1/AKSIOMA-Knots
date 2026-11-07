@@ -552,11 +552,11 @@ void seifertFilm(MainWindow &w)
     check(w.photoSceneCombo_->currentData().toInt() == static_cast<int>(Photo::Scene::LoungeTable),
           "Foto opens on the rope on the garden table");
 
-    check(w.glWidget_->clothSheet_ && !w.glWidget_->soapFilm_, "in Photo mode the surface is cloth");
+    check(w.glWidget_->renderer().clothSheet_ && !w.glWidget_->renderer().soapFilm_, "in Photo mode the surface is cloth");
 
     w.seifertMaterialCombo_->setCurrentIndex(1);
 
-    check(w.glWidget_->soapFilm_ && !w.glWidget_->clothSheet_, "or a soap film, if that is chosen");
+    check(w.glWidget_->renderer().soapFilm_ && !w.glWidget_->renderer().clothSheet_, "or a soap film, if that is chosen");
 
     w.setSeifertStep(4);
 
@@ -568,7 +568,7 @@ void seifertFilm(MainWindow &w)
 
     run(100);
 
-    check(!w.glWidget_->soapFilm_, "and leaves with Photo mode");
+    check(!w.glWidget_->renderer().soapFilm_, "and leaves with Photo mode");
 
     w.seifertMaterialCombo_->setCurrentIndex(0);
 
@@ -601,7 +601,7 @@ void seifertFilm(MainWindow &w)
 
     w.toggleSeifert();
 
-    check(!w.glWidget_->restingPose_, "built in Photo mode, the surface does not keep the rope's pose");
+    check(!w.glWidget_->renderer().restingPose_, "built in Photo mode, the surface does not keep the rope's pose");
 
     w.photoButton_->setChecked(false);
 
@@ -621,7 +621,7 @@ void seifertFilm(MainWindow &w)
 
     w.toggleSeifert();
 
-    check(!w.seifertActive_ && !w.glWidget_->soapFilm_, "back to the knot");
+    check(!w.seifertActive_ && !w.glWidget_->renderer().soapFilm_, "back to the knot");
 
     clearKnotState(w);
 }
@@ -873,7 +873,7 @@ void toyTrain(MainWindow &w)
 
     run(1500);
 
-    check(w.glWidget_->cinema() && w.glWidget_->captionTitle_.size() > 0, "Cinema takes the camera");
+    check(w.glWidget_->cinema() && w.glWidget_->overlay_.captionTitle_.size() > 0, "Cinema takes the camera");
 
     // three shots in four hold the whole knot, between the film's bars
     {
@@ -893,12 +893,12 @@ void toyTrain(MainWindow &w)
 
                 run(120);
 
-                const float mm = view->worldPerMm();
+                const float mm = view->renderer().worldPerMm();
 
-                for (const KnotMath::Vec3 &p : view->trainPath_)
+                for (const KnotMath::Vec3 &p : view->train_.trainPath_)
                 {
                     const QVector4D clip =
-                        view->lastViewProjection_ *
+                        view->renderer().lastViewProjection_ *
                         QVector4D(QVector3D(float(p.x), float(p.y), float(p.z)) * mm, 1.0f);
 
                     furthest = std::max(furthest, double(std::abs(clip.x() / clip.w())));
@@ -916,15 +916,15 @@ void toyTrain(MainWindow &w)
 
         run(120);
 
-        const QVector3D spot = view->cinemaSpot_;
+        const QVector3D spot = view->train_.cinemaSpot_;
 
         bool onBridge = false;
 
-        for (const auto &pass : view->trainJourney_)
+        for (const auto &pass : view->train_.trainJourney_)
         {
-            const QMatrix4x4 place = Photo::placeVehicle(view->trainPath_, view->trainLength_, pass.along, 26.0);
+            const QMatrix4x4 place = Photo::placeVehicle(view->train_.trainPath_, view->train_.trainLength_, pass.along, 26.0);
 
-            if (pass.over && (place.map(QVector3D()) * view->worldPerMm() - spot).length() < 0.01f)
+            if (pass.over && (place.map(QVector3D()) * view->renderer().worldPerMm() - spot).length() < 0.01f)
                 onBridge = true;
         }
 
@@ -939,8 +939,8 @@ void toyTrain(MainWindow &w)
 
     check(w.restingTrack_->bridges.size() == 3, "it has three bridges");
     check(w.restingTrack_->journey.size() == 6 && w.restingTrack_->alternating, "the journey passes each twice, taking turns");
-    check(w.glWidget_->trainJourney_.size() == 6, "and the view is showing it");
-    check(!w.glWidget_->captionTitle_.isEmpty(), "and the picture says what it shows");
+    check(w.glWidget_->train_.trainJourney_.size() == 6, "and the view is showing it");
+    check(!w.glWidget_->overlay_.captionTitle_.isEmpty(), "and the picture says what it shows");
 
     const double start = w.glWidget_->trainAlong();
 
@@ -983,7 +983,7 @@ void toyTrain(MainWindow &w)
 
     run(200);
 
-    check(w.glWidget_->captionTitle_.isEmpty(), "Grab takes the words off the picture");
+    check(w.glWidget_->overlay_.captionTitle_.isEmpty(), "Grab takes the words off the picture");
 
     w.grabButton_->setChecked(false);
 
@@ -1009,7 +1009,7 @@ void toyTrain(MainWindow &w)
 
     check(w.restingTrack_ && w.restingTrack_->valid, "a knot of thirteen crossings gets a track");
 
-    check(w.glWidget_->showTrain(), "and the train runs on it");
+    check(w.glWidget_->train_.showTrain(), "and the train runs on it");
 
     // one too large: the scene is left for another, with a word why
     choose(w, KnotMath::Preset::CustomTorus);
@@ -1026,7 +1026,7 @@ void toyTrain(MainWindow &w)
 
     check(!w.trainButton_->isVisibleTo(w.trainButton_->parentWidget()), "the stop button leaves with the scene");
 
-    check(w.glWidget_->captionTitle_.isEmpty(), "and so do the words");
+    check(w.glWidget_->overlay_.captionTitle_.isEmpty(), "and so do the words");
 
     w.photoSceneCombo_->setCurrentIndex(0);
 

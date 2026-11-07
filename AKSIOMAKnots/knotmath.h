@@ -1,6 +1,9 @@
 #ifndef KNOTMATH_H
 #define KNOTMATH_H
 
+#include <aksioma/mesh.h>
+#include <aksioma/vec3.h>
+
 #include <QColor>
 #include <QPointF>
 #include <QString>
@@ -12,39 +15,8 @@
 namespace KnotMath
 {
 
-struct Vec3
-{
-    double x = 0.0;
-    double y = 0.0;
-    double z = 0.0;
-
-    Vec3() = default;
-
-    Vec3(double xValue, double yValue, double zValue)
-        : x(xValue), y(yValue), z(zValue)
-    {
-    }
-
-    Vec3 operator+(const Vec3 &other) const;
-    Vec3 operator-(const Vec3 &other) const;
-    Vec3 operator*(double scalar) const;
-
-    // Dividing by (almost) zero returns the zero vector instead of inf/nan.
-    Vec3 operator/(double scalar) const;
-
-    Vec3 &operator+=(const Vec3 &other);
-    Vec3 &operator-=(const Vec3 &other);
-    Vec3 &operator*=(double scalar);
-    Vec3 &operator/=(double scalar);
-
-    double length() const;
-    double lengthSquared() const;
-
-    Vec3 normalized() const;
-
-    static double dot(const Vec3 &a, const Vec3 &b);
-    static Vec3 cross(const Vec3 &a, const Vec3 &b);
-};
+// the double precision vector is the engine's (aksioma/vec3.h)
+using Vec3 = Aksioma::Vec3;
 
 struct CrossingInfo
 {
@@ -86,53 +58,8 @@ enum class ColorMode
     StrandColors
 };
 
-struct Mesh
-{
-    QVector<float> positions;
-    QVector<float> normals;
-    QVector<float> colors;
-    QVector<unsigned int> indices;
-
-    // Per vertex, for surface patterns (rope fibres): cos/sin of the angle
-    // around the tube and cos/sin of the twist phase along it (whole turns
-    // per closed tube). Angles are stored as cos/sin so that they
-    // interpolate without a seam.
-    QVector<float> texcoords;
-
-    // Per vertex: 1 = open, smaller = shaded by nearby strands
-    // (computeAmbientOcclusion). Empty: no occlusion.
-    QVector<float> occlusion;
-
-    // Per vertex: 1 = part of a thin two-sided sheet (the Seifert surface),
-    // shaded as painted card whatever the tube material. Empty: none.
-    QVector<float> sheet;
-
-    // Centre line of every tube: x, y, z, radius per sample; the strand it
-    // belongs to and the arc length along that strand.
-    QVector<float> centerline;
-    QVector<int> centerlineStrand;
-    QVector<float> centerlineArc;
-
-    // Per strand: total length (closed strands wrap around).
-    QVector<float> strandLength;
-    QVector<bool> strandClosed;
-
-    // Per vertex: index of its centre-line sample.
-    QVector<int> vertexSample;
-
-    int ringCount = 0;
-    int ringSegments = 0;
-
-    bool isValid() const;
-    void clear();
-
-    // Gives every vertex the same colour (creates the colour array).
-    void fillColor(const QColor &color);
-
-    // Appends another mesh. If either mesh has colours, the other one is
-    // given white vertex colours so that the arrays stay consistent.
-    void append(const Mesh &other);
-};
+// the geometry type lives in the engine (aksioma/mesh.h)
+using Mesh = Aksioma::Mesh;
 
 enum class Preset
 {

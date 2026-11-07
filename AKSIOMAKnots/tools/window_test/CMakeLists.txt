@@ -5,9 +5,10 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Svg Multimedia LinguistTools)
 set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+include(${SRC}/tools/engine.cmake)
 add_executable(window_test window_test.cpp
     ${SRC}/mainwindow.h ${SRC}/mainwindow.cpp
-    ${SRC}/knotglwidget.h ${SRC}/knotglwidget.cpp
+    ${SRC}/knotglwidget.h ${SRC}/knotglwidget.cpp ${SRC}/trainlayer.cpp ${SRC}/knotoverlay.cpp
     ${SRC}/knotmath.h ${SRC}/knotmath.cpp
     ${SRC}/knothistory.h ${SRC}/knothistory.cpp
     ${SRC}/commandpalette.h ${SRC}/commandpalette.cpp
@@ -32,13 +33,13 @@ add_executable(window_test window_test.cpp
     ${SRC}/aboutdialog.h ${SRC}/aboutdialog.cpp
     ${SRC}/unknotsummarydialog.h ${SRC}/unknotsummarydialog.cpp
     ${SRC}/appsettings.h ${SRC}/appsettings.cpp
-    ${SRC}/lighting.h ${SRC}/lighting.cpp
-    ${SRC}/gpumemory.h ${SRC}/gpumemory.cpp
     ${SRC}/icons.h ${SRC}/icons.cpp
     ${SRC}/theme.h ${SRC}/theme.cpp
     ${SRC}/resources.qrc)
 target_include_directories(window_test PRIVATE ${SRC})
 target_compile_options(window_test PRIVATE -O2 -Wall -Wextra)
+qt_add_resources(window_test "knots_shaders" PREFIX "/knots" BASE ${SRC} FILES
+    ${SRC}/shaders/train.vert ${SRC}/shaders/train.frag ${SRC}/shaders/steam.vert ${SRC}/shaders/steam.frag ${SRC}/shaders/track_material.glsl)
 qt_add_resources(window_test "knottable" PREFIX "/" BIG_RESOURCES BASE ${SRC} FILES ${SRC}/data/knottable.dat)
 qt_add_resources(window_test "photo" PREFIX "/" BIG_RESOURCES BASE ${SRC} FILES
     ${SRC}/data/photo/chinese_garden_4k.hdr ${SRC}/data/photo/meadow_2_4k.hdr ${SRC}/data/photo/evening_museum_courtyard_4k.hdr
@@ -46,4 +47,4 @@ qt_add_resources(window_test "photo" PREFIX "/" BIG_RESOURCES BASE ${SRC} FILES
     ${SRC}/data/photo/wood_table_large_rough.jpg ${SRC}/data/photo/wood_floor_worn_diff.jpg
     ${SRC}/data/photo/wood_floor_worn_nor_gl.jpg ${SRC}/data/photo/wood_floor_worn_rough.jpg)
 qt_add_translations(window_test TS_FILES ${SRC}/KnotTheory_sq_AL.ts RESOURCE_PREFIX /i18n)
-target_link_libraries(window_test PRIVATE Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Svg Qt6::Multimedia shell32 dxgi)
+target_link_libraries(window_test PRIVATE Aksioma::Engine Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Svg Qt6::Multimedia shell32)

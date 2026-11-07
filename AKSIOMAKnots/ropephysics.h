@@ -4,14 +4,11 @@
 #include "knotmath.h"
 #include "photoscene.h"
 
+#include <aksioma/live.h>
+#include <aksioma/rod.h>
+
 #include <QMatrix4x4>
 #include <QVector>
-
-#include <atomic>
-#include <condition_variable>
-#include <functional>
-#include <mutex>
-#include <thread>
 
 /*
  * Photo mode: a real rope does not float. It lies on the table, pulled down
@@ -23,20 +20,7 @@ namespace Photo
 {
 
 // How far laying a rope down has come (0..100), and a way to stop it.
-struct RopeProgress
-{
-    std::atomic<int> percent{0};
-    std::atomic<bool> cancel{false};
-};
-
-// a turn (the frame of a piece of rope)
-struct Quaternion
-{
-    double w = 1.0;
-    double x = 0.0;
-    double y = 0.0;
-    double z = 0.0;
-};
+using RopeProgress = Aksioma::Physics::Progress;
 
 struct RestingRope
 {
@@ -84,23 +68,10 @@ RestingRope layOnTable(
     const RopeMaterial &material,
     RopeProgress *progress = nullptr);
 
-/*
- * What the rope lies on, in units of its radius (y up): the height of the
- * surface over (x, z) and its slope there (dy/dx, dy/dz). Empty: a flat
- * table at y = 0.
- */
-using Ground = std::function<double(double x, double z, double &slopeX, double &slopeZ)>;
+// What the rope lies on, in units of its radius (y up); empty: a flat table.
+using Ground = Aksioma::Physics::Ground;
 
-struct Settling
-{
-    // simulated time (seconds), steps, the fastest point at the end
-    // (millimetres per second), and whether it came to rest
-    double seconds = 0.0;
-    int steps = 0;
-    double finalSpeed = 0.0;
-    bool settled = false;
-    bool cancelled = false;
-};
+using Settling = Aksioma::Physics::Settling;
 
 /*
  * The simulation of layOnTable on its own: the rope `x` (points about half
@@ -118,189 +89,25 @@ Settling settleRope(
     RopeProgress *progress = nullptr);
 
 /*
- * The same rope, one time step at a time, and a hand that can take hold
- * of it (Photo mode: the rope on the table picked up with the mouse).
- *
- * The hand pinches one point of the rope and carries it towards where the
- * hand is, no faster than the rope may move in a step (so it never
- * tunnels through another strand); the rest follows by its own physics.
- * Held high above the table, the part in the hand passes over the other
- * strands. Pressed down onto the table (`under`), the part in the hand
- * slides beneath them: the strands it meets near the hand are lifted over
- * it, as a rope end pushed under a loose loop lifts the loop. Either way
- * nothing passes through anything: the rope's knot changes only where it
- * has ends to go round.
+ * The same rope, one time step at a time, and a hand that can take hold of
+ * it (Photo mode: the rope on the table picked up with the mouse): the
+ * engine's rod (aksioma/rod.h), its grab the hand. Held high above the table,
+ * the part in the hand passes over the other strands; pressed down onto the
+ * table (grabbed beneath), it slides under them.
  */
-class RopeSimulation
-{
-public:
-    RopeSimulation() = default;
-
-    RopeSimulation(
-        const QVector<KnotMath::Vec3> &x,
-        const QVector<bool> &pinned,
-        bool closed,
-        const RopeMaterial &material,
-        const Ground &ground = Ground());
-
-    bool isValid() const { return valid_; }
-
-    // the rope, in units of its radius (y up)
-    const QVector<KnotMath::Vec3> &points() const { return x_; }
-
-    // at every point, a direction across the rope fixed in its fibres: it
-    // turns as the rope rolls and twists, and the strands turn with it
-    QVector<KnotMath::Vec3> frames() const;
-
-    // the fibres as they are in another copy of this rope (one direction
-    // per point, as frames() gives them)
-    void useFrames(const QVector<KnotMath::Vec3> &frames);
-
-    // A rope that has been tied, or has lain a long while, keeps part of
-    // that shape: `share` of its present bends become its own.
-    void takeSet(double share);
-    bool closed() const { return closed_; }
-
-    // Cut a closed rope: it keeps `count` points from `first` on (round the
-    // end, if need be) and goes on as it was, with two ends: the same bends,
-    // the same fibres, the same motion. Not while it is held.
-    void cut(int first, int count);
-
-    // The rope stays inside this rectangle of the table (x and z, in radii),
-    // or inside what it covers already, if that is more.
-    void stayWithin(double left, double right, double back, double front);
-
-    void step();
-
-    // no point faster than the rest speed for a while
-    bool atRest() const;
-
-    // the fastest point after the last step (radii per time unit)
-    double fastest() const { return fastest_; }
-
-    // the fastest a point has really been getting anywhere, over the last
-    // short while (radii per time unit)
-    double drift() const { return drift_; }
-
-    // seconds of real time per step, for the material's size
-    double secondsPerStep() const;
-
-    // the hand (target in the rope's units)
-    void hold(int index, const KnotMath::Vec3 &target, bool under);
-    void moveHand(const KnotMath::Vec3 &target);
-    void letGo();
-    int heldPoint() const { return held_; }
-    bool holdsUnder() const { return under_; }
-
-private:
-    void factorRod();
-    void solveChain(double *b) const;
-    void solveRod();
-    void findPairs();
-    void solveContacts();
-    void rubFibres();
-
-    bool valid_ = false;
-    bool closed_ = true;
-
-    QVector<KnotMath::Vec3> x_;
-    QVector<KnotMath::Vec3> v_;
-    QVector<KnotMath::Vec3> p_;
-    QVector<double> w_;
-    QVector<double> rest_;
-
-    Ground ground_;
-
-    int segments_ = 0;
-    double h_ = 0.5;
-    double radiusMm_ = 1.0;
-
-    // the rod: the frame of every piece, its turn before the step, its spin;
-    // the rest shape of every joint (in the frame of the piece before it),
-    // the turn so far given to it in this step
-    QVector<Quaternion> q_;
-    QVector<Quaternion> qOld_;
-    QVector<KnotMath::Vec3> spin_;
-    QVector<KnotMath::Vec3> shape_;
-    QVector<KnotMath::Vec3> lambda_;
-    double fibreRub_ = 0.0;
-    double wq_ = 1.0;
-    double bendSoftness_ = 0.0;
-    double twistSoftness_ = 0.0;
-    double yieldAngle_ = 1.0;
-    double setRate_ = 0.0;
-
-    // the factors of the system (6 x 6 blocks), and steps since they were
-    // made (negative: to be made)
-    QVector<double> rodD_;
-    QVector<double> rodE_;
-    QVector<double> rodL_;
-    QVector<double> rodF_;
-    QVector<double> rodZ_;
-    QVector<double> rodS_;
-    QVector<double> rodRhs_;
-    int rodAge_ = -1;
-
-    // pieces near each other (two numbers each), and how far the rope has
-    // come since they were found; how hard each point is pressed on the
-    // ground in this step
-    QVector<int> pairs_;
-    double travelled_ = 0.0;
-    QVector<double> groundDepth_;
-
-    double muSurface_ = 0.5;
-    double muSelf_ = 0.5;
-    int neighbours_ = 8;
-
-    // the grid of the contacts
-    QVector<int> cellOf_;
-    QVector<int> order_;
-    QVector<int> cellStart_;
-    QVector<bool> pinnedDown_;
-
-    int quiet_ = 0;
-    double fastest_ = 0.0;
-
-    // where the rope was at the start of this window of steps
-    QVector<KnotMath::Vec3> windowStart_;
-    int windowSteps_ = 0;
-    double drift_ = 1.0;
-
-    int held_ = -1;
-    double heldWeight_ = 1.0;
-    bool under_ = false;
-    int handArc_ = 6;
-    KnotMath::Vec3 hand_;
-
-    // what one pass of the rod asks of every point and piece
-    QVector<KnotMath::Vec3> rodMove_;
-    QVector<KnotMath::Vec3> rodTurn_;
-
-    // how far the rope may go across the table
-    bool fenced_ = false;
-    KnotMath::Vec3 fenceLow_;
-    KnotMath::Vec3 fenceHigh_;
-
-    // where the hand really is: it follows the mouse smoothly
-    KnotMath::Vec3 handEased_;
-    double handEase_ = 1.0;
-};
+using RopeSimulation = Aksioma::Physics::Rod;
 
 /*
  * The rope in the hand, alive: a RopeSimulation stepping in real time on a
- * thread of its own, so the rope moves at its own pace whatever the
- * frames cost (they draw the newest copy of it). Every call may come from
- * any thread. It rests (the thread sleeps) once the rope lies still, or
- * when told to, until it is taken hold of again.
+ * thread of its own (the engine's Aksioma::Live), so the rope moves at its
+ * own pace whatever the frames cost (they draw the newest copy of it). Every
+ * call may come from any thread. It rests once the rope lies still, or when
+ * told to, until it is taken hold of again.
  */
 class RopeInHand
 {
 public:
     explicit RopeInHand(const RopeSimulation &rope);
-    ~RopeInHand();
-
-    RopeInHand(const RopeInHand &) = delete;
-    RopeInHand &operator=(const RopeInHand &) = delete;
 
     // a copy of the rope as it is now (units of its radius), and a number
     // that changes with every step
@@ -325,17 +132,7 @@ public:
     void rest();
 
 private:
-    void loop();
-
-    RopeSimulation rope_;
-
-    mutable std::mutex mutex_;
-    std::condition_variable wake_;
-    std::thread thread_;
-
-    bool quit_ = false;
-    bool stopped_ = false;
-    quint64 version_ = 0;
+    Aksioma::Live<RopeSimulation> live_;
 };
 
 /*

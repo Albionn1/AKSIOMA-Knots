@@ -17,12 +17,19 @@ find_package(Qt6 REQUIRED COMPONENTS Gui GuiPrivate Widgets OpenGL OpenGLWidgets
 
 qt_standard_project_setup()
 
+# AKSIOMA Engine: the 3D renderer, a project of its own (cmake/AksiomaEngine.cmake)
+include(cmake/AksiomaEngine.cmake)
+
 qt_add_executable(AKSIOMAKnots
     main.cpp
     mainwindow.h
     mainwindow.cpp
     knotglwidget.h
     knotglwidget.cpp
+    trainlayer.h
+    trainlayer.cpp
+    knotoverlay.h
+    knotoverlay.cpp
     knotmath.h
     knotmath.cpp
     knothistory.h
@@ -73,9 +80,7 @@ qt_add_executable(AKSIOMAKnots
     appsettings.h
     appsettings.cpp
     lighting.h
-    lighting.cpp
     gpumemory.h
-    gpumemory.cpp
     icons.h
     icons.cpp
     theme.h
@@ -87,11 +92,12 @@ qt_add_executable(AKSIOMAKnots
 if(WIN32)
     # a window program: no console window next to it
     set_target_properties(AKSIOMAKnots PROPERTIES WIN32_EXECUTABLE TRUE)
-    target_sources(AKSIOMAKnots PRIVATE app.rc)
+    # (on its own: MinGW's resource compiler cannot take the include path of
+    # AKSIOMA Engine when it has a space in it, as "Documents/AKSIOMA Engine")
+    add_library(AKSIOMAKnots_icon OBJECT app.rc)
+    target_sources(AKSIOMAKnots PRIVATE $<TARGET_OBJECTS:AKSIOMAKnots_icon>)
     # SHChangeNotify: Explorer shows the icon of .aknot files (appsettings.cpp)
     target_link_libraries(AKSIOMAKnots PRIVATE shell32)
-    # video memory of the program (gpumemory.cpp)
-    target_link_libraries(AKSIOMAKnots PRIVATE dxgi)
 endif()
 
 # Knot table (KnotInfo, built by tools/make_knot_table.cpp). About 9 MB, so it
@@ -120,10 +126,26 @@ qt_add_resources(AKSIOMAKnots "photo"
         data/photo/wood_floor_worn_rough.jpg
 )
 
+# This app's own shaders (the toy train, its steam and its wooden track), beside
+# the engine's:
+# :/knots/shaders/... (AKSIOMA_KNOTS_SHADER_DIR=<this folder>/shaders reads
+# them from disk instead, with live reload).
+qt_add_resources(AKSIOMAKnots "knots_shaders"
+    PREFIX "/knots"
+    FILES
+        shaders/train.vert
+        shaders/train.frag
+        shaders/steam.vert
+        shaders/steam.frag
+        shaders/track_material.glsl
+)
+
 # One place for the version: project() above, for the program and the installer.
 target_compile_definitions(AKSIOMAKnots PRIVATE AKSIOMA_VERSION="${PROJECT_VERSION}")
 
 target_link_libraries(AKSIOMAKnots PRIVATE
+    # the 3D renderer (AKSIOMA Engine)
+    Aksioma::Engine
     Qt6::Widgets
     # QWindowsApplication (full screen pop-up fix in main.cpp)
     Qt6::GuiPrivate

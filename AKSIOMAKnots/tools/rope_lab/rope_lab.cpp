@@ -229,8 +229,8 @@ void slope(const RopeMaterial &material)
     }
 
     std::printf("slope       %4.1f mm rope: slips at %.1f deg (atan %.2f = %.1f)\n",
-                material.diameterMm, 0.5 * (low + high), material.frictionSurface,
-                std::atan(material.frictionSurface) * 180.0 / Pi);
+                material.diameterMm, 0.5 * (low + high), material.frictionGround,
+                std::atan(material.frictionGround) * 180.0 / Pi);
 }
 
 // a rope bent into a ring on the table and let go: how round it stays
@@ -282,7 +282,7 @@ void ring(RopeMaterial material)
 {
     material.setRate = 0.0;
     material.curlRadiusMm = 1.0e9;
-    material.frictionSurface = 0.0;
+    material.frictionGround = 0.0;
 
     const double radius = 30.0;
     const int n = static_cast<int>(2.0 * Pi * radius / 0.5);
@@ -415,7 +415,7 @@ void shake(const QString &name, const RopeMaterial &material)
 
     const Vec3 from = x.at(0);
 
-    rope.hold(0, Vec3(from.x, 6.5, from.z), false);
+    rope.grab(0, Vec3(from.x, 6.5, from.z), false);
 
     // up
     for (int k = 0; k < 30 * perFrame; ++k)
@@ -432,7 +432,7 @@ void shake(const QString &name, const RopeMaterial &material)
     {
         hand.x += across;
 
-        rope.moveHand(hand);
+        rope.moveGrab(hand);
 
         for (int k = 0; k < perFrame; ++k)
         {

@@ -238,7 +238,7 @@ Lighting::Options lighting()
     options.rimLight = flag("rim", defaults.rimLight);
     options.reflections = flag("reflections", defaults.reflections);
     options.followCamera = flag("followCamera", defaults.followCamera);
-    options.knotShadows = flag("knotShadows", defaults.knotShadows);
+    options.meshShadows = flag("knotShadows", defaults.meshShadows);
     options.floorShadow = flag("floorShadow", defaults.floorShadow);
     options.contactShadow = flag("contactShadow", defaults.contactShadow);
     options.occlusion = flag("occlusion", defaults.occlusion);
@@ -332,7 +332,7 @@ void setLighting(
     settings.setValue(QStringLiteral("rim"), options.rimLight);
     settings.setValue(QStringLiteral("reflections"), options.reflections);
     settings.setValue(QStringLiteral("followCamera"), options.followCamera);
-    settings.setValue(QStringLiteral("knotShadows"), options.knotShadows);
+    settings.setValue(QStringLiteral("knotShadows"), options.meshShadows);
     settings.setValue(QStringLiteral("floorShadow"), options.floorShadow);
     settings.setValue(QStringLiteral("contactShadow"), options.contactShadow);
     settings.setValue(QStringLiteral("occlusion"), options.occlusion);

@@ -222,7 +222,7 @@ void moveFast(
 
         hand.y = level;
 
-        rope.hold(index, hand, under);
+        rope.grab(index, hand, under);
 
         // up first, as long as a hand takes
         for (int k = 0; k < 30 * perFrame; ++k)
@@ -242,7 +242,7 @@ void moveFast(
 
             for (int frame = 0; frame < frames; ++frame)
             {
-                rope.moveHand(from + (goal - from) * (static_cast<double>(frame + 1) / frames));
+                rope.moveGrab(from + (goal - from) * (static_cast<double>(frame + 1) / frames));
 
                 for (int k = 0; k < perFrame; ++k)
                 {
@@ -257,7 +257,7 @@ void moveFast(
             hand = goal;
         }
 
-        rope.letGo();
+        rope.release();
 
         settle(worst, rope, rest);
 
@@ -319,7 +319,7 @@ double dragAtEdges(
 
         Vec3 mouse(start.x, level, start.z);
 
-        rope.hold(index, mouse, under);
+        rope.grab(index, mouse, under);
 
         for (int k = 0; k < 20 * perFrame; ++k)
             rope.step();
@@ -339,7 +339,7 @@ double dragAtEdges(
             {
                 mouse = from + (goal - from) * (static_cast<double>(frame + 1) / frames);
 
-                rope.moveHand(mouse);
+                rope.moveGrab(mouse);
 
                 for (int k = 0; k < perFrame; ++k)
                     rope.step();
@@ -349,7 +349,7 @@ double dragAtEdges(
             }
         }
 
-        rope.letGo();
+        rope.release();
 
         for (int k = 0; k < 4000 && !rope.atRest(); ++k)
             rope.step();
