@@ -18,6 +18,10 @@
   #define ManualDir "..\..\Manual"
 #endif
 
+; The user manuals are left out for now. To ship them again, remove the
+; semicolon below.
+;#define IncludeManuals
+
 #define AppName "AKSIOMA Knots"
 #define AppExe "AKSIOMAKnots.exe"
 #define AppPublisher "AKSIOMA"
@@ -84,10 +88,12 @@ en.AppComment=Knot theory in 3D: knots, invariants, unknotting and Seifert surfa
 sq.AppComment=Teoria e nyjeve në 3D: nyje, invariante, zgjidhja e nyjeve dhe sipërfaqet e Seifertit
 en.FileTypeName=AKSIOMA knot file
 sq.FileTypeName=Skedar nyjeje AKSIOMA
+#ifdef IncludeManuals
 en.OpenManual=Open the user manual
 sq.OpenManual=Hap manualin e përdorimit
 en.ManualFile=AKSIOMA_Knots_Manual_EN.pdf
 sq.ManualFile=AKSIOMA_Knots_Manual_SQ.pdf
+#endif
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -98,10 +104,12 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "..\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 
+#ifdef IncludeManuals
 ; the user manuals (English, Albanian, and both in one)
 Source: "{#ManualDir}\AKSIOMA_Knots_Manual_EN.pdf"; DestDir: "{app}\Manual"; Flags: ignoreversion
 Source: "{#ManualDir}\AKSIOMA_Knots_Manual_SQ.pdf"; DestDir: "{app}\Manual"; Flags: ignoreversion
 Source: "{#ManualDir}\AKSIOMA_Knots_Manual_EN_SQ.pdf"; DestDir: "{app}\Manual"; Flags: ignoreversion
+#endif
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "{cm:AppComment}"
@@ -127,4 +135,6 @@ Root: HKCU; Subkey: "Software\AKSIOMA\AKSIOMA Knots"; ValueType: string; ValueNa
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+#ifdef IncludeManuals
 Filename: "{app}\Manual\{cm:ManualFile}"; Description: "{cm:OpenManual}"; Flags: shellexec nowait postinstall skipifsilent unchecked
+#endif

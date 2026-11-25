@@ -43,5 +43,6 @@ Windows installer (Inno Setup 6.7 or newer: winget install JRSoftware.InnoSetup)
   installer\output\AKSIOMA-Knots-<version>-Setup.exe (the version from
   CMakeLists.txt). Change the Qt paths with -QtDir / -QtTools if needed.
   The installer is in English and Albanian (installer\Albanian.isl), and
-  installs the program, the user manuals (..\Manual) and the .aknot file type.
+  installs the program and the .aknot file type. The user manuals (..\Manual)
+  are left out for now (IncludeManuals in installer\AKSIOMAKnots.iss).
   Its pictures are made from icons\aksioma_logo.png by installer\make_images.py.

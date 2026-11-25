@@ -395,7 +395,9 @@ MainWindow::MainWindow(
 
         helpMenu->addSeparator();
 
-        addFileAction(helpMenu, tr("User manual"), QKeySequence(), &MainWindow::openManual);
+        // shown only when the manuals were installed beside the program
+        addFileAction(helpMenu, tr("User manual"), QKeySequence(), &MainWindow::openManual)
+            ->setVisible(QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/Manual")).exists());
         addFileAction(helpMenu, tr("Keyboard shortcuts"), QKeySequence(Qt::Key_F1), &MainWindow::showShortcuts);
         addFileAction(helpMenu, tr("Show the tour"), QKeySequence(), &MainWindow::startTour);
 
